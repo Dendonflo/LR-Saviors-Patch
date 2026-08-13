@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# GAME-DERIVED CONTENT - never commit. All of this is Square Enix's, not ours.
+# Excluded on copyright grounds first and size second; several of these would
+# also blow past GitHub's file/repo limits on their own.
+# ---------------------------------------------------------------------------
+
+# Copies of the retail executable, patched or otherwise (98 MB)
+patched_exe/
+
+# Extracted game archives - .wdb / .xwp / packed scene data (22 MB)
+game_data_extracted/
+
+# Extracted and decompiled game scripts: the engine's Java-classfile resources
+# (12 MB). Our TOOLS for reading these live in tools/clb and ARE committed;
+# their output is not.
+script_research/
+
+# A single extracted .clb script resource
+Ghysal patch/
+
+# Ghidra decompiler output of LRFF13.exe (3.6 GB). Regenerable from the
+# scripts in tools/ghidra_scripts against your own copy of the game.
+ghidra_output/
+tools/ghidra_output/
+
+# The Ghidra project database - contains the imported game binary (588 MB)
+tools/ghidra_project/
+
+# ---------------------------------------------------------------------------
+# BUILD ARTEFACTS - regenerable by mods/version_hook/build.cmd
+# ---------------------------------------------------------------------------
+*.dll
+*.obj
+*.lib
+*.exp
+*.map
+*.pdb
+*.ilk
+*.res
+__pycache__/
+*.pyc
+
+# ---------------------------------------------------------------------------
+# LOCAL / TRANSIENT
+# ---------------------------------------------------------------------------
+*.log
+*.log1
+*.bak
+*.bak-*
+version_hook_config.ini
+.vs/
+
+# ---------------------------------------------------------------------------
+# REVERSE-ENGINEERING WRITE-UPS - kept local (user's call 2026-08-13,
+# "public, code only"). These carry decompiled Square Enix function bodies,
+# addresses and structure layouts in bulk. The mod source and tooling ship;
+# the game-internals documentation does not.
+# ---------------------------------------------------------------------------
+PROGRESS.md
+FEATURES.md
+SCRIPTS_60FPS.md
+GYSAHL_GREENS_FULL.md
+LR_GysahlGreen_RootCause.pdf

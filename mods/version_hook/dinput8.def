@@ -1,0 +1,12 @@
+LIBRARY dinput8
+EXPORTS
+    DirectInput8Create      @1
+    ; PRIVATE on the four COM self-registration entry points: it keeps them
+    ; out of the generated import library (which is what LNK4104 asks for)
+    ; while still exporting them from the DLL, which is all that matters here
+    ; - regsvr32 and COM resolve these by name at runtime.
+    DllCanUnloadNow         @2  PRIVATE
+    DllGetClassObject       @3  PRIVATE
+    DllRegisterServer       @4  PRIVATE
+    DllUnregisterServer     @5  PRIVATE
+    GetdfDIJoystick         @6
