@@ -91,7 +91,9 @@ static ToggleableFix g_toggles[] = {
     // Ships: substitutes a centre-tap passthrough for ps_A082B248, the game's
     // FXAA. Independent of the shader-diag tooling that found it.
     { &g_fxaaOff,              "Disable built-in FXAA", "FxaaOff" },
-    { &g_msaaDepth1x,          "Keep depth prepass 1x under MSAA (shadow EXPERIMENT - expect broken occlusion)", "MsaaDepth1x" },
+    // MsaaDepth1x deliberately absent - see its declaration. The experiment
+    // broke occlusion AND tested a theory the SGSSAA observation has since
+    // disproved, so it must not be reachable from a config file.
 #if ENABLE_GYSAHL_DIAG
     { &g_logFaSchedule,        "Log FA object schedule changes (Gysahl plot bug)", "LogFaSchedule" },
     { &g_faCmpFix,             "Repair empty plot-name string after planting (Gysahl FIX)", "FaCmpFix" },

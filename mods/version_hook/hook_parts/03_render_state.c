@@ -168,14 +168,37 @@ static volatile LONG g_halfResLogged = 0;
 // when its improvement is subtle. Same falsification logic TalkTimerPct used
 // with its deliberately-worse 200% option.
 static volatile LONG g_shadowBufResPct = 0;
-// MSAA shadow experiment (2026-08-13): leave the MS_DEPTH prepass on the
-// engine's own 1x surfaces so the screen-space shadow pass reads exact
-// per-pixel depth instead of a sample-averaged one (the averaged depth is
-// what makes shadows vanish on MSAA edge pixels). PREDICTED to break
-// occlusion: the colour pass was observed running z-write off against the
-// prepass-filled depth, so a bypassed prepass leaves the MS depth empty.
-// Kept as a falsification test; if it renders correctly the prediction was
-// wrong and MSAA shadows drop to vanilla-grade accuracy for free.
+// RETIRED 2026-08-13, confirmed broken AND aimed at the wrong mechanism.
+//
+// The experiment: leave the MS_DEPTH prepass on the engine's own 1x surfaces,
+// so the screen-space shadow pass would read exact per-pixel depth rather
+// than a sample-averaged one. Two results, both useful:
+//
+//  1. Occlusion broke exactly as predicted - sky/sea over the world. So the
+//     colour pass really does depend on the prepass having filled the MS
+//     depth (z-write off, LESSEQUAL against prepass Z). That dependency is
+//     now CONFIRMED rather than inferred, which is worth keeping.
+//
+//  2. The premise was wrong anyway. The theory was "the resolve averages
+//     depth, so edge pixels get a depth belonging to neither surface". But
+//     NVIDIA's SGSSAA - per-sample shading, per-sample depth, the exact
+//     thing that theory says would fix it - STILL shows the artifact, merely
+//     antialiased (user-observed). If per-sample depth does not remove it,
+//     depth averaging is not the cause.
+//
+// The mechanism that survives both observations is resolution, not sampling:
+// the engine reconstructs shadows into a SCREEN-SPACE buffer that is not
+// multisampled and defaults to HALF resolution. One shadow verdict covers a
+// 2x2 pixel neighbourhood, so at a foreground/background boundary the whole
+// neighbourhood inherits whichever surface dominates the texel - the
+// background's shadow goes missing behind a partially-covered edge. That
+// predicts every observation: MSAA cannot help (the buffer is not MS),
+// SGSSAA only shrinks and averages the artifact (everything is bigger, the
+// artifact included), and ShadowBufResPct should reduce it directly.
+//
+// Left as a dead flag rather than deleted: re-adding its line to g_toggles[]
+// is all it takes to run the experiment again. Not in the table today, so it
+// cannot be switched on from the ini and cannot break anyone's game.
 static volatile LONG g_msaaDepth1x = 0;
 // Counter for descriptor-level scaling (see OnTexImpCtor_C). The two failed
 // compensation layers this replaces are documented at the former intervention
