@@ -168,6 +168,15 @@ static volatile LONG g_halfResLogged = 0;
 // when its improvement is subtle. Same falsification logic TalkTimerPct used
 // with its deliberately-worse 200% option.
 static volatile LONG g_shadowBufResPct = 0;
+// MSAA shadow experiment (2026-08-13): leave the MS_DEPTH prepass on the
+// engine's own 1x surfaces so the screen-space shadow pass reads exact
+// per-pixel depth instead of a sample-averaged one (the averaged depth is
+// what makes shadows vanish on MSAA edge pixels). PREDICTED to break
+// occlusion: the colour pass was observed running z-write off against the
+// prepass-filled depth, so a bypassed prepass leaves the MS depth empty.
+// Kept as a falsification test; if it renders correctly the prediction was
+// wrong and MSAA shadows drop to vanilla-grade accuracy for free.
+static volatile LONG g_msaaDepth1x = 0;
 // Counter for descriptor-level scaling (see OnTexImpCtor_C). The two failed
 // compensation layers this replaces are documented at the former intervention
 // site in HookedCreateTexture.

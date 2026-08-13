@@ -863,7 +863,13 @@ static HRESULT STDMETHODCALLTYPE HookedSetRenderTarget(
         // own depth. Requires the colour pair to exist already (the depth is
         // shared); if this latch fires first, substitution starts one colour
         // episode later.
-        if (samples >= 1 && pRT && g_depthRtMain && (void *)pRT == g_depthRtMain &&
+        // MsaaDepth1x: pretend the latch never matched, so the prepass runs
+        // untouched on the engine's own 1x R32F + 1x DS. g_msR32fHasContent
+        // then stays 0 and the resolve no-ops, so the shadow pass reads the
+        // engine's exact per-pixel depth. See the toggle's comment for why
+        // this is expected to break the colour pass's occlusion.
+        if (!g_msaaDepth1x &&
+            samples >= 1 && pRT && g_depthRtMain && (void *)pRT == g_depthRtMain &&
             g_msDepth && g_msW) {
             D3DSURFACE_DESC dd;
             if (SUCCEEDED(IDirect3DSurface9_GetDesc(pRT, &dd)) &&
