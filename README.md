@@ -72,3 +72,11 @@ different thing from shipping a mod.
 
 Requires a legally owned copy of the game. This mod is unaffiliated with
 Square Enix.
+
+## Licence
+
+GPL-3.0-or-later. Copyright (C) 2026 Dendonflo. Full text in [LICENSE](LICENSE).
+
+Same licence as the FF13 HD GUI & Fonts mod, deliberately — the two are
+designed to work together and share an interop path, and matching licences
+means code can move between them in either direction.
