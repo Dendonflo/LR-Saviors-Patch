@@ -26,6 +26,34 @@ static volatile LONG g_ssaaInterFails = 0;
 // overridden. Config-only; the sensible default is to do what was asked.
 static volatile LONG g_ssaaOutputRes = 1;
 
+// ---- In-place scene resolve (2026-08-13, the 720p fix) ---------------------
+// The backbuffer-copy reroute below turned out to depend on a coincidence:
+// the engine only presents via StretchRect when the internal resolution
+// EQUALS the backbuffer size (chosen x scale == desktop - i.e. 1080p x2 on a
+// 4K display, and nothing else). Everywhere else the final hop is the
+// engine's own scaling DRAW (all three of its Scaling modes; probed
+// 2026-08-13: zero backbuffer-bound StretchRects at 720p x2), which a blit
+// hook cannot see.
+//
+// So stop chasing the final copy. At the entry of the DRAW_FILTER pass - the
+// scene is complete, post has not read it yet - downsample the scene target
+// to the CHOSEN resolution and blit straight back up, both LINEAR. The
+// engine then presents through whatever path it likes, at any resolution and
+// any Scaling mode, but the image it presents carries chosen-res information
+// with real box-filter AA. Two bonuses over the old reroute: post/bloom
+// operate on the antialiased image, and the UI - drawn after this - stays
+// native-crisp, which was the original "scene only, excluding UI" goal (the
+// old reroute softened UI along with the scene).
+//
+// MSAA interplay: under MSAA the engine's scene target may be stale at this
+// instant (content still in the substituted MS target until its resolve
+// fires on the next RT switch), so this engages only with MsaaSamples=0; the
+// old reroute below stays as the fallback for the MSAA+SSAA combination.
+static IDirect3DSurface9 *g_ssaaResolveRt = NULL;
+static UINT g_ssaaResolveW = 0, g_ssaaResolveH = 0;
+static volatile LONG g_ssaaResolves = 0;
+static volatile LONG g_ssaaResolveFails = 0;
+
 static void SsaaReleaseIntermediate(void)
 {
     if (g_ssaaInter) {
@@ -33,6 +61,76 @@ static void SsaaReleaseIntermediate(void)
         g_ssaaInter = NULL;
     }
     g_ssaaInterW = g_ssaaInterH = 0;
+    // Same lifecycle: D3DPOOL_DEFAULT, must not survive a Reset.
+    if (g_ssaaResolveRt) {
+        IDirect3DSurface9_Release(g_ssaaResolveRt);
+        g_ssaaResolveRt = NULL;
+    }
+    g_ssaaResolveW = g_ssaaResolveH = 0;
+}
+
+// Called from Detour_filter at the pass handler's entry: main thread, mid
+// frame, between passes - the same context class the MSAA resolves already
+// run device calls from.
+void __cdecl SsaaInPlaceResolve_C(void)
+{
+    static LONG lastSeq = -1;
+    static LONG loggedW = 0, loggedH = 0;
+    if (!g_ssaaActive || !g_ssaaOutputRes || g_msaaSamples != 0) return;
+    if (!g_dev || !g_sceneRtMain || !g_mainModBase) return;
+    if (g_msFrameSeq == lastSeq) return;      // once per frame
+    lastSeq = g_msFrameSeq;
+
+    LONG chosenW = 0, chosenH = 0;
+    __try {
+        DWORD so = *(DWORD *)(g_mainModBase + SHADOW_SETTINGS_PTR_RVA);
+        if (so) { chosenW = *(LONG *)(so + 0x10); chosenH = *(LONG *)(so + 0x14); }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    if (chosenW < 320 || chosenH < 200) return;
+
+    IDirect3DSurface9 *scene = (IDirect3DSurface9 *)g_sceneRtMain;
+    D3DSURFACE_DESC sd;
+    if (FAILED(IDirect3DSurface9_GetDesc(scene, &sd))) return;
+    // Only when the scene genuinely overshoots the chosen resolution.
+    if (sd.Width <= (UINT)chosenW || sd.Height <= (UINT)chosenH) return;
+
+    if (g_ssaaResolveRt && (g_ssaaResolveW != (UINT)chosenW ||
+                            g_ssaaResolveH != (UINT)chosenH)) {
+        IDirect3DSurface9_Release(g_ssaaResolveRt);
+        g_ssaaResolveRt = NULL;
+        g_ssaaResolveW = g_ssaaResolveH = 0;
+    }
+    if (!g_ssaaResolveRt) {
+        // The SCENE's format (A8R8G8B8), not the backbuffer's - this surface
+        // round-trips scene content, it never touches the swap chain.
+        if (FAILED(IDirect3DDevice9_CreateRenderTarget(
+                g_dev, (UINT)chosenW, (UINT)chosenH, sd.Format,
+                D3DMULTISAMPLE_NONE, 0, FALSE, &g_ssaaResolveRt, NULL))) {
+            InterlockedIncrement(&g_ssaaResolveFails);
+            return;
+        }
+        g_ssaaResolveW = (UINT)chosenW;
+        g_ssaaResolveH = (UINT)chosenH;
+    }
+
+    HRESULT h1 = g_origStretchRect(g_dev, scene, NULL, g_ssaaResolveRt, NULL,
+                                   D3DTEXF_LINEAR);
+    HRESULT h2 = FAILED(h1) ? h1
+               : g_origStretchRect(g_dev, g_ssaaResolveRt, NULL, scene, NULL,
+                                   D3DTEXF_LINEAR);
+    if (SUCCEEDED(h2)) {
+        InterlockedIncrement(&g_ssaaResolves);
+        if (loggedW != chosenW || loggedH != chosenH) {
+            loggedW = chosenW; loggedH = chosenH;
+            char l[176];
+            sprintf(l, "[ssaa] in-place resolve engaged: scene %ux%u -> %ldx%ld -> back"
+                       " (pre-post, pre-UI; presentation path untouched)",
+                    sd.Width, sd.Height, chosenW, chosenH);
+            LogLine(l);
+        }
+    } else {
+        InterlockedIncrement(&g_ssaaResolveFails);
+    }
 }
 // Swap-chain resizes intercepted and held at the pre-scale size. 0 while a
 // scale is set means the presentation followed the scaled resolution and no
@@ -87,7 +185,12 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
                              ^ ((unsigned int)dw << 5) ^ ((unsigned int)dh << 7)
                              ^ ((unsigned int)s.Format << 11)
                              ^ ((unsigned int)d.Format << 13)
-                             ^ ((unsigned int)Filter << 17);
+                             ^ ((unsigned int)Filter << 17)
+                             // Rect PRESENCE is part of the shape: a full-surface
+                             // rect computes the same sw/sh as a NULL rect, but the
+                             // output-res reroute only accepts NULL - which is the
+                             // 720p bug hypothesis this probe exists to test.
+                             ^ (pSrcRect ? 1u << 21 : 0) ^ (pDstRect ? 1u << 22 : 0);
             LONG n = g_srSeenCount, i, found = 0;
             if (n > SR_SEEN_MAX) n = SR_SEEN_MAX;
             for (i = 0; i < n; i++) if (g_srSeen[i] == sig) { found = 1; break; }
@@ -98,9 +201,10 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
                                   : (Filter == D3DTEXF_POINT) ? "POINT"
                                   : (Filter == D3DTEXF_LINEAR) ? "LINEAR" : "other";
                 char l[288];
-                sprintf(l, "[ssaa-probe] %-18s %ldx%ld fmt=%d -> %ldx%ld fmt=%d  filter=%s(%d)%s%s%s",
+                sprintf(l, "[ssaa-probe] %-18s %ldx%ld fmt=%d -> %ldx%ld fmt=%d  filter=%s(%d)  rects=%s/%s%s%s%s",
                         g_passNames[p], sw, sh, (int)s.Format, dw, dh, (int)d.Format,
                         fname, (int)Filter,
+                        pSrcRect ? "SRC" : "null", pDstRect ? "DST" : "null",
                         (sw != dw || sh != dh) ? "  *** SCALING ***" : "  (1:1)",
                         (d.Format == D3DFMT_X8R8G8B8) ? "  [dst=BACKBUFFER fmt]" : "",
                         (pSrc == (IDirect3DSurface9 *)g_sceneRtMain) ? "  [src=SCENE-LATCHED]" : "");
@@ -187,12 +291,18 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
         }
     }
 #endif  // ENABLE_SURFACE_DIAG
-    // ---- SSAA: honour the chosen resolution ------------------------------
-    // Only the final copy to the backbuffer, only when supersampling is live,
-    // and only when the chosen resolution is genuinely below the presented
-    // size. Whole-surface copies only (NULL rects): a sub-rect copy is some
-    // other operation and must not be rerouted.
-    if (g_ssaaActive && g_ssaaOutputRes && pSrc && pDst && !pSrcRect && !pDstRect &&
+    // ---- SSAA: honour the chosen resolution (MSAA fallback path) ---------
+    // DEMOTED 2026-08-13: this only ever fires when the engine presents via
+    // StretchRect, which requires internal size == backbuffer size - i.e.
+    // chosen x scale == desktop, one arithmetic coincidence (1080p x2 on 4K).
+    // Everywhere else the final hop is the engine's scaling DRAW and this
+    // hook never sees it. SsaaInPlaceResolve_C above is the real fix; this
+    // block remains only for the MSAA+SSAA combination, where the in-place
+    // resolve must not run (the scene target can be stale mid-frame under MS
+    // substitution) - so MSAA users keep the old geometry-limited behaviour
+    // rather than losing the feature outright.
+    if (g_msaaSamples != 0 &&
+        g_ssaaActive && g_ssaaOutputRes && pSrc && pDst && !pSrcRect && !pDstRect &&
         g_mainModBase) {
         D3DSURFACE_DESC s, d;
         if (SUCCEEDED(IDirect3DSurface9_GetDesc(pSrc, &s)) &&
@@ -207,6 +317,33 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) { chosenW = chosenH = 0; }
 
+            // Decision transparency (2026-08-13, the 720p bug). The probe run
+            // proved the reroute declines at a 720p setting while every
+            // condition LOOKS satisfiable from outside, so log the actual
+            // tuple it evaluates, deduplicated per distinct combination. One
+            // eval per frame at most, a handful of distinct tuples per
+            // session - noise-free by construction.
+            {
+                static unsigned int evalSeen[16];
+                static LONG evalCount = 0;
+                unsigned int esig = ((unsigned int)chosenW << 1) ^ ((unsigned int)chosenH << 5)
+                                  ^ (s.Width << 9) ^ (s.Height << 13)
+                                  ^ (d.Width << 17) ^ (d.Height << 21);
+                LONG en = evalCount, ei, efound = 0;
+                if (en > 16) en = 16;
+                for (ei = 0; ei < en; ei++) if (evalSeen[ei] == esig) { efound = 1; break; }
+                if (!efound && en < 16) {
+                    evalSeen[en] = esig;
+                    evalCount = en + 1;
+                    char el[192];
+                    sprintf(el, "[ssaa] reroute-eval chosen=%ldx%ld src=%ux%u dst=%ux%u -> %s",
+                            chosenW, chosenH, s.Width, s.Height, d.Width, d.Height,
+                            (chosenW >= 320 && chosenH >= 200 &&
+                             (UINT)chosenW < d.Width && (UINT)chosenH < d.Height &&
+                             s.Width > (UINT)chosenW) ? "REROUTE" : "decline");
+                    LogLine(el);
+                }
+            }
             if (chosenW >= 320 && chosenH >= 200 &&
                 (UINT)chosenW < d.Width && (UINT)chosenH < d.Height &&
                 s.Width > (UINT)chosenW) {

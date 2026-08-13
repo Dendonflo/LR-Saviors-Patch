@@ -132,8 +132,15 @@ __declspec(naked) void Detour_msShadow(void)
 __declspec(naked) void Detour_ms(void)
 { __asm { mov dword ptr [g_curPass], PASS_MS
           jmp dword ptr [g_trampoline_ms] } }
+// The filter (post) pass entry doubles as the SSAA in-place resolve point:
+// scene complete, post has not read it yet. PUSHAD around the C call out of
+// caution; at a function entry the caller-saved registers are dead by ABI,
+// but this costs nothing on a once-per-frame path.
 __declspec(naked) void Detour_filter(void)
 { __asm { mov dword ptr [g_curPass], PASS_FILTER
+          pushad
+          call SsaaInPlaceResolve_C
+          popad
           jmp dword ptr [g_trampoline_filter] } }
 __declspec(naked) void Detour_menu(void)
 { __asm { mov dword ptr [g_curPass], PASS_MENU
