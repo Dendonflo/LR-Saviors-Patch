@@ -672,6 +672,34 @@ void InstallPrefetchHook(void)
                 (unsigned int)dsHf.target, dsOk ? "installed" : "FAILED");
         LogLine(line);
 
+#if ENABLE_LOADER_DIAG
+        // Cause 3 measurement timers. Patch lengths from the verified
+        // prologues (ghidra_output/loader_hook_safety.txt): 009dff70 is
+        // 55 8B EC / 8B 45 1C (boundary +6), 009ddfe0 is 55 8B EC /
+        // 81 EC 0C 03 00 00 (boundary +9), 009fcfd0 is 8B 44 24 10 / 53
+        // (boundary +5). All position-independent, so they relocate into
+        // the trampolines unchanged.
+        {
+            struct { const char *name; DWORD rva; int len; void *detour; void **tramp; } ldr[] = {
+                { "FUN_009dff70(load)",    LDR_LOAD_RVA,    6, (void *)Detour_ldrLoad, &g_tramp_ldrLoad },
+                { "FUN_009ddfe0(bind)",    LDR_BIND_RVA,    9, (void *)Detour_ldrBind, &g_tramp_ldrBind },
+                { "FUN_009fcfd0(decrypt)", LDR_DECRYPT_RVA, 5, (void *)Detour_ldrDec,  &g_tramp_ldrDec },
+            };
+            for (int li = 0; li < (int)(sizeof(ldr)/sizeof(ldr[0])); li++) {
+                HookedFunc lh;
+                lh.name = ldr[li].name;
+                lh.rva = ldr[li].rva;
+                lh.target = base + ldr[li].rva;
+                lh.patchLen = ldr[li].len;
+                int lok = InstallJmpHook(&lh, ldr[li].detour, ldr[li].tramp);
+                sprintf(line, "[loader] timer %s @ 0x%08X (len %d): %s",
+                        ldr[li].name, (unsigned int)lh.target, ldr[li].len,
+                        lok ? "installed" : "FAILED");
+                LogLine(line);
+            }
+        }
+#endif
+
         // Shadow-render skip (ShadowsOff diagnostic). Separate from the timer
         // above: that one wraps the pass HANDLER, this one skips the RENDER
         // inside it, so the handler's completion work still runs.

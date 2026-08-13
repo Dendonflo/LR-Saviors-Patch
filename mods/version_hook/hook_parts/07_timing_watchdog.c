@@ -467,7 +467,15 @@ static DWORD WINAPI StutterWatchdogThread(LPVOID param)
     LONG lastSeq = -1;
     int samplesThisFrame = 0;
     for (;;) {
-        Sleep(2);
+        // Adaptive poll. At the shipping threshold (1s = the menu's "Off")
+        // this thread used to wake 500 times a second only to compare two
+        // numbers - harmless on a desktop CPU, pure waste on a weak one, and
+        // a 2026-08-13 A/B showed the ARMED watchdog itself is a measurable
+        // stutter source near the frame cap (79 suspend+stackwalk captures
+        // at thr=20ms vs 1 at 100ms; the same route felt visibly smoother).
+        // Disarmed it now idles at 10Hz; arming it from the menu takes
+        // effect within one long tick, which is nothing for a diagnostic.
+        Sleep(g_stutterThresholdUsec >= 500000 ? 100 : 2);
         if (!g_mainThreadHandle || g_cyclesPerUsec <= 0.0) continue;
 
         LONG seq = g_frameSeq;
@@ -1029,3 +1037,143 @@ static LONGLONG g_prevAllocThreadBytes[MAX_ALLOC_THREADS][NUM_ALLOC_SRC];
 static LONG g_prevWarmEnqueued = 0, g_prevWarmDone = 0, g_prevWarmDropped = 0;
 static LONGLONG g_prevWarmBytes = 0;
 
+// ---- Cause 3 measurement: script/class-loader timing -----------------------
+// The class loader parses script classes synchronously on the main thread on
+// first encounter (PROGRESS.md "Cause 3"; re-confirmed live 2026-08-13 by a
+// 41.3ms capture whose EBP chain matched the predicted stack frame-for-frame).
+// The two hot loops are known from decompile - FUN_009ddfe0 rescans the whole
+// obfuscated native-method table per method, XOR-decoding two strings per
+// entry; FUN_009fd110 runs 8 substitution rounds per byte of class data - but
+// their SPLIT is not, and the split decides whether the memoised binder alone
+// is enough or the decrypt fast-path is needed too. So: wall-clock the
+// outermost load (FUN_009dff70), the binder, and the decrypt caller
+// (FUN_009fcfd0, per buffer not per block), and let one walking session
+// answer it.
+//
+// All three take the standard paired hook (prologues verified in
+// ghidra_output/loader_hook_safety.txt: no SEH, no inbound refs, boundaries
+// at +6/+9/+5). Loads recurse into nested class dependencies, so a single
+// saved-return slot would be clobbered by an inner call - the enter handler
+// declines anything that is not the outermost main-thread call. Declined
+// inner entries are still counted (g_ldrNested: closure size per window) and
+// their time is inside the outermost measurement anyway. Off-main-thread
+// entries are declined and counted rather than assumed impossible.
+#if ENABLE_LOADER_DIAG
+#define LDR_LOAD_RVA    (0x009dff70 - 0x00400000)
+#define LDR_BIND_RVA    (0x009ddfe0 - 0x00400000)
+#define LDR_DECRYPT_RVA (0x009fcfd0 - 0x00400000)
+static void *g_tramp_ldrLoad = NULL, *g_tramp_ldrBind = NULL, *g_tramp_ldrDec = NULL;
+
+// Window accumulators, drained by the monitor thread.
+static volatile LONG g_ldrLoads = 0;       // outermost loads completed
+static volatile LONG g_ldrNested = 0;      // nested (declined) entries = closure size
+static volatile LONG g_ldrUsec = 0;        // wall time of outermost loads
+static volatile LONG g_ldrWorstUsec = 0;   // worst single load
+static volatile LONG g_ldrBindUsec = 0, g_ldrBindCalls = 0;
+static volatile LONG g_ldrDecUsec = 0, g_ldrDecCalls = 0;
+static volatile LONG g_ldrOffThread = 0;   // entries seen on non-main threads
+static LONG g_ldrCumLoads = 0;             // session total (monitor thread only)
+
+// Per-hook single-slot state (main thread only by construction).
+static DWORD g_ldrLoadRet, g_ldrBindRet, g_ldrDecRet;
+static LONG g_ldrLoadDepth = 0, g_ldrBindDepth = 0, g_ldrDecDepth = 0;
+static unsigned __int64 g_ldrLoadT0, g_ldrBindT0, g_ldrDecT0;
+
+// If an engine SEH unwind ever skips a return stub the depth latches at 1 and
+// measurement stops for the session - a lost diagnostic, never a crash, and
+// visible as a [loader] line that goes silent while stutters continue.
+#define LDR_ENTER(depth, retSlot, t0, retAddr)                              \
+    do {                                                                    \
+        if ((LONG)GetCurrentThreadId() != g_mainThreadId) {                 \
+            InterlockedIncrement(&g_ldrOffThread); return 0;                \
+        }                                                                   \
+        if ((depth) != 0) { InterlockedIncrement(&g_ldrNested); return 0; } \
+        (depth) = 1; (retSlot) = (DWORD)(retAddr); (t0) = __rdtsc();        \
+        return 1;                                                           \
+    } while (0)
+
+__declspec(noinline) int __cdecl OnEnter_ldrLoad_C(void *retAddr)
+{
+    LDR_ENTER(g_ldrLoadDepth, g_ldrLoadRet, g_ldrLoadT0, retAddr);
+}
+__declspec(noinline) void *__cdecl OnReturn_ldrLoad_C(void)
+{
+    void *ret = (void *)g_ldrLoadRet;
+    if (g_cyclesPerUsec > 0.0) {
+        LONG us = (LONG)((double)(__rdtsc() - g_ldrLoadT0) / g_cyclesPerUsec);
+        g_ldrUsec += us;
+        if (us > g_ldrWorstUsec) g_ldrWorstUsec = us;
+        InterlockedIncrement(&g_ldrLoads);
+    }
+    g_ldrLoadDepth = 0;
+    return ret;
+}
+
+__declspec(noinline) int __cdecl OnEnter_ldrBind_C(void *retAddr)
+{
+    LDR_ENTER(g_ldrBindDepth, g_ldrBindRet, g_ldrBindT0, retAddr);
+}
+__declspec(noinline) void *__cdecl OnReturn_ldrBind_C(void)
+{
+    void *ret = (void *)g_ldrBindRet;
+    if (g_cyclesPerUsec > 0.0) {
+        g_ldrBindUsec += (LONG)((double)(__rdtsc() - g_ldrBindT0) / g_cyclesPerUsec);
+        InterlockedIncrement(&g_ldrBindCalls);
+    }
+    g_ldrBindDepth = 0;
+    return ret;
+}
+
+__declspec(noinline) int __cdecl OnEnter_ldrDec_C(void *retAddr)
+{
+    LDR_ENTER(g_ldrDecDepth, g_ldrDecRet, g_ldrDecT0, retAddr);
+}
+__declspec(noinline) void *__cdecl OnReturn_ldrDec_C(void)
+{
+    void *ret = (void *)g_ldrDecRet;
+    if (g_cyclesPerUsec > 0.0) {
+        g_ldrDecUsec += (LONG)((double)(__rdtsc() - g_ldrDecT0) / g_cyclesPerUsec);
+        InterlockedIncrement(&g_ldrDecCalls);
+    }
+    g_ldrDecDepth = 0;
+    return ret;
+}
+
+// The naked stubs mirror Detour_drawShadow / OnReturn_drawShadow exactly.
+#define LDR_STUBS(name)                                                 \
+    __declspec(naked) void OnReturn_##name(void)                        \
+    {                                                                   \
+        __asm { push eax }                                              \
+        __asm { pushfd }                                                \
+        __asm { call OnReturn_##name##_C }                              \
+        __asm { mov ecx, eax }                                          \
+        __asm { popfd }                                                 \
+        __asm { pop eax }                                               \
+        __asm { jmp ecx }                                               \
+    }
+LDR_STUBS(ldrLoad)
+LDR_STUBS(ldrBind)
+LDR_STUBS(ldrDec)
+
+#define LDR_DETOUR(name, tramp)                                         \
+    __declspec(naked) void Detour_##name(void)                          \
+    {                                                                   \
+        __asm { push ecx }                                              \
+        __asm { push edx }                                              \
+        __asm { mov eax, [esp + 8] }                                    \
+        __asm { push eax }                                              \
+        __asm { call OnEnter_##name##_C }                               \
+        __asm { add esp, 4 }                                            \
+        __asm { test eax, eax }                                         \
+        __asm { jz decline }                                            \
+        __asm { mov eax, offset OnReturn_##name }                       \
+        __asm { mov dword ptr [esp + 8], eax }                          \
+        __asm { decline: }                                              \
+        __asm { pop edx }                                               \
+        __asm { pop ecx }                                               \
+        __asm { jmp dword ptr [tramp] }                                 \
+    }
+LDR_DETOUR(ldrLoad, g_tramp_ldrLoad)
+LDR_DETOUR(ldrBind, g_tramp_ldrBind)
+LDR_DETOUR(ldrDec,  g_tramp_ldrDec)
+#endif  // ENABLE_LOADER_DIAG

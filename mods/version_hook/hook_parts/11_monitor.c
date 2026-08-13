@@ -350,6 +350,30 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             }
         }
 
+#if ENABLE_LOADER_DIAG
+        // Cause 3 split: whole-load wall time vs binder vs decrypt, per
+        // window. nested = classes pulled in by dependency closures; cum
+        // makes the taper visible across a session. bind+decrypt <= total;
+        // the remainder is parse/alloc/registry work between the two loops.
+        {
+            LONG loads  = InterlockedExchange(&g_ldrLoads, 0);
+            LONG nested = InterlockedExchange(&g_ldrNested, 0);
+            LONG lus    = InterlockedExchange(&g_ldrUsec, 0);
+            LONG worst  = InterlockedExchange(&g_ldrWorstUsec, 0);
+            LONG bus    = InterlockedExchange(&g_ldrBindUsec, 0);
+            LONG bn     = InterlockedExchange(&g_ldrBindCalls, 0);
+            LONG dus    = InterlockedExchange(&g_ldrDecUsec, 0);
+            LONG dn     = InterlockedExchange(&g_ldrDecCalls, 0);
+            LONG off    = InterlockedExchange(&g_ldrOffThread, 0);
+            if (loads | nested | bn | dn | off) {
+                g_ldrCumLoads += loads;
+                sprintf(line, "[loader] loads=%ld nested=%ld cum=%ld | total=%ldus worst=%ldus | bind=%ldus/%ld decrypt=%ldus/%ld | offthread=%ld",
+                        loads, nested, g_ldrCumLoads, lus, worst, bus, bn, dus, dn, off);
+                LogLine(line);
+            }
+        }
+#endif
+
         // Drain whatever the stutter watchdog captured. Logged as Ghidra VAs
         // (runtime address - module base + 0x00400000) so they can be pasted
         // straight into Ghidra with no per-session ASLR arithmetic.

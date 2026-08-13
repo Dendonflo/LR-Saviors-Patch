@@ -152,7 +152,12 @@
 #define ENABLE_SHADER_DIAG    0
 #define ENABLE_SURFACE_DIAG   0
 #define ENABLE_CUTOUT_AA      0
-#define ENABLE_PASS_PROBE     0
+#define ENABLE_PASS_PROBE     1   // re-armed 2026-08-13: [ssaa-probe] blit
+                                  // shapes for the 720p SsaaOutputRes bug -
+                                  // suspicion is the engine passes explicit
+                                  // rects on scaling copies, so the NULL-rect
+                                  // -only reroute never fires when scene !=
+                                  // backbuffer. Return to 0 when confirmed.
 #define ENABLE_FRAMETIME_DUMP 0
 #define ENABLE_SHADOWS_OFF    0
 #define ENABLE_SCALING_MODE   0
@@ -165,6 +170,15 @@
 //   mechanism aimed at a problem that is already fixed properly - retired
 //   rather than left as a checkbox that invites double-treating it.
 #define ENABLE_CLAMP_DEADLINE 0
+
+// ENABLE_LOADER_DIAG - Cause 3 (script/class-loader) measurement, 2026-08-13.
+//   Wall-clocks the outermost class load (FUN_009dff70) against its two known
+//   hot loops - the native-method binder (FUN_009ddfe0) and the block-decrypt
+//   caller (FUN_009fcfd0) - as a per-window [loader] line. The split decides
+//   which fix ships: the memoised binder table, the decrypt fast-path, or
+//   both. Costs three rare paired hooks; loads happen on first encounter of
+//   each class only.
+#define ENABLE_LOADER_DIAG 1
 
 // ENABLE_GUI_PANEL - the standalone "LR Stutter Fix - Debug Panel" window.
 //   DEPRECATED 2026-08-11: superseded by the game-menu integration
