@@ -48,13 +48,22 @@ D3D9 device racing the game's own through a wrapper is what crashed startup.
 ## Repository layout
 
 ```
-mods/version_hook/     the mod itself (hook.c is the bulk of it)
-tools/ghidra_scripts/  headless Ghidra scripts used for the analysis
-tools/clb/             tools for reading the engine's script resources
-tools/*.ps1            log monitoring helpers
+mods/version_hook/             the mod itself
+mods/version_hook/hook.c       ordered #include manifest - the mod is ONE
+                               translation unit, assembled from:
+mods/version_hook/hook_parts/  19 subsystem files (config, SSAA, MSAA, menu,
+                               watchdog, staging, boot/install, ...)
+tools/ghidra_scripts/          headless Ghidra scripts used for the analysis
+tools/clb/                     tools for reading the engine's script resources
+tools/*.ps1                    log monitoring helpers
 ```
 
-`hook.c` carries its own reasoning inline. Nearly every fix sits under a
+The single-TU structure is deliberate, not an accident to fix: the code
+relies on TU-wide tentative definitions and statics shared across
+subsystems. `hook.c`'s header comment explains; do not compile the parts
+individually or reorder the includes.
+
+The code carries its own reasoning inline. Nearly every fix sits under a
 comment explaining what it addresses, what was measured, and — where it
 applies — which earlier theories were wrong and why. Several conclusions here
 were only reached after two or three wrong ones, and those are recorded
