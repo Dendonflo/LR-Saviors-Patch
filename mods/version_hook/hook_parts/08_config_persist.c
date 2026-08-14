@@ -144,6 +144,16 @@ static NumericSetting g_numerics[] = {
     // Observed stock values: near 10.0, far 79.2.
     { &g_shadowSplitNearPct, "ShadowSplitNearPct", 0, 2000 },
     { &g_shadowSplitFarPct,  "ShadowSplitFarPct",  0, 2000 },
+    // Cutscene-aware revert (21_cutscene_shadow.c). Cutscenes are authored
+    // against the engine's own splits, so the option above breaks shadows in
+    // some of them; while a cutscene plays the split is held at the engine
+    // default and the player's setting resumes afterwards.
+    // CutsceneFlagMask 0 = the "playing" bit is not identified yet, which
+    // leaves the whole feature inert. Run once with ENABLE_CUTSCENE_DIAG and
+    // read the [cutdiag] lines to find it, then set it here - no rebuild.
+    { &g_cutsceneRevert,   "CutsceneShadowRevert", 0, 1 },
+    { &g_cutsceneFlagOff,  "CutsceneFlagOffset",   0, 0x4000 },
+    { &g_cutsceneFlagMask, "CutsceneFlagMask",     0, 0x7fffffff },
 #if ENABLE_CASCADE_HUNT
     // Near-cascade extent multiplier, percent. 0/100 = untouched,
     // 200 = twice the ground covered by the sharp cascade.

@@ -180,6 +180,14 @@
 //   each class only.
 #define ENABLE_LOADER_DIAG 1
 
+// ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
+//   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of
+//   CinemaController fields whenever any of them changes, so the field/bit
+//   that means "a cutscene is playing" can be identified from a single run
+//   instead of guessed from decompilation. Output is capped; turn back to 0
+//   once CutsceneFlagMask is set in the ini.
+#define ENABLE_CUTSCENE_DIAG 1
+
 // ENABLE_DEBUG_MENU - attempt to re-enable the game's retail-dormant debug
 //   menu. SEPARATE PROJECT from the stutter/graphics mod (DEBUG_MENU.md).
 //
@@ -332,6 +340,7 @@ static volatile LONG g_deferUploadsEnabled = 0;
 static volatile LONG g_deferPerFrame = 12;
 static void DrainStagedUploads(void);
 static void ApplyCascadeSplitSource(void);   // per-frame; see the split-source block
+static void CutsceneDetectTick(void);        // per-frame; see 21_cutscene_shadow.c
 // Texture pool: when a poolable texture's game-visible refcount reaches
 // zero, keep the underlying D3D object alive instead of letting it be
 // destroyed, and hand it back out on a later CreateTexture call with

@@ -452,6 +452,10 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     // twice-a-second blinking - our value for one frame, the engine's for the
     // rest. Writing on the engine's own frame boundary keeps it applied, and
     // confirms the fields are both correct and visibly effective.
+    // Immediately before the split write, so the decision always uses THIS
+    // frame's cinema state. On the 500ms monitor tick instead, every cutscene
+    // boundary would carry up to half a second of wrong shadows.
+    CutsceneDetectTick();
     ApplyCascadeSplitSource();
 
     g_frameStartUsec = NowUsec();

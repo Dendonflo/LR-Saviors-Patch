@@ -551,6 +551,28 @@ static volatile LONG g_pendingShadowCapture;
 // addresses; the hook that uses them lives with the real-device hooks.
 static volatile LONG g_shadowSplitNearPct;
 static volatile LONG g_shadowSplitFarPct;
+
+// Cutscene-aware override. Cutscenes are authored against the engine's own
+// cascade splits, so scaling them breaks shadows in some of them (reported in
+// game). While a cutscene is playing the percentages are forced to 0, which
+// makes ApplyCascadeSplitSource take its existing "turned off" path and hand
+// the engine's own values back - the same path a manual toggle already uses,
+// so no new restore logic is introduced. The user's setting is untouched and
+// resumes automatically on the way out.
+//
+// Detection lives in 21_cutscene_shadow.c and is deliberately data-driven
+// (offset + mask from the ini) so candidate signals can be tried without a
+// rebuild while the right one is being pinned down.
+static volatile LONG g_cutsceneActive;      // 1 while a cutscene is detected
+static volatile LONG g_cutsceneEdges;       // transition count, for the log
+static volatile LONG g_cutsceneSuppressed;  // frames we forced the split off
+// ini-tunable; registered in 08_config_persist.c, which is included before
+// 21_cutscene_shadow.c, so these have to be defined here rather than there.
+// FlagMask 0 means "the playing bit is not identified yet" and keeps the
+// whole feature inert.
+static volatile LONG g_cutsceneRevert   = 1;     // feature master switch
+static volatile LONG g_cutsceneFlagOff  = 0x1c;  // field offset in CinemaController
+static volatile LONG g_cutsceneFlagMask = 0;     // 0 -> inert
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
 // 4K the game allocates a 2048x4096 R32F atlas (two cascades stacked) plus
@@ -645,8 +667,22 @@ static float g_splitSrcSeenNear = 0.0f, g_splitSrcSeenFar = 0.0f;
 
 static void ApplyCascadeSplitSource(void)
 {
+    // EFFECTIVE percentages. Everything below reads these rather than the
+    // user's settings, so a cutscene simply looks like "the option is off" -
+    // including the restore path at the bottom, which already puts the
+    // engine's own values back. The stored settings are never modified, so
+    // whatever the player chose is still there when the cutscene ends.
+    LONG nearPct = g_shadowSplitNearPct;
+    LONG farPct  = g_shadowSplitFarPct;
+    if (g_cutsceneActive) {
+        if (nearPct > 0 || farPct > 0) InterlockedIncrement(&g_cutsceneSuppressed);
+        nearPct = 0;
+        farPct  = 0;
+    }
     if (g_mainModBase == 0) return;
-    if (g_shadowSplitNearPct <= 0 && g_shadowSplitFarPct <= 0) return;
+    // Note: with a cutscene active this is deliberately NOT an early-out on
+    // the user's settings - we must still run to restore the engine's values.
+    if (nearPct <= 0 && farPct <= 0 && !g_cutsceneActive) return;
     __try {
         DWORD obj = *(DWORD *)(g_mainModBase + SCENE_PTR_RVA);
         if (!obj) return;
@@ -686,18 +722,18 @@ static void ApplyCascadeSplitSource(void)
         if (a != lastWroteFarA) baseFarA = a;
         g_splitSrcSeenNear = baseNear;
         g_splitSrcSeenFar = baseFarA * b;
-        if (g_shadowSplitNearPct > 0 && baseNear > 0.0f) {
-            float want = baseNear * (g_shadowSplitNearPct / 100.0f);
+        if (nearPct > 0 && baseNear > 0.0f) {
+            float want = baseNear * (nearPct / 100.0f);
             if (*nearF != want) {
                 *nearF = want;
                 lastWroteNear = want;
                 InterlockedIncrement(&g_splitSrcWrites);
             }
         }
-        if (g_shadowSplitFarPct > 0 && baseFarA > 0.0f) {
+        if (farPct > 0 && baseFarA > 0.0f) {
             // scale one factor only - the other is left alone so whatever
             // per-area meaning it carries is preserved
-            float want = baseFarA * (g_shadowSplitFarPct / 100.0f);
+            float want = baseFarA * (farPct / 100.0f);
             if (*farA != want) {
                 *farA = want;
                 lastWroteFarA = want;
@@ -708,8 +744,8 @@ static void ApplyCascadeSplitSource(void)
         // engine's next recompute puts its own value back. lastWrote is left
         // alone on purpose: clearing it was what let the baseline be poisoned
         // by our own output on re-enable.
-        if (g_shadowSplitNearPct <= 0) { *nearF = baseNear > 0.0f ? baseNear : n; }
-        if (g_shadowSplitFarPct <= 0)  { *farA  = baseFarA > 0.0f ? baseFarA : a; }
+        if (nearPct <= 0) { *nearF = baseNear > 0.0f ? baseNear : n; }
+        if (farPct  <= 0) { *farA  = baseFarA > 0.0f ? baseFarA : a; }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }

@@ -51,3 +51,4 @@
 #include "hook_parts/18_fileprobe_shaderid.c"
 #include "hook_parts/19_boot_install.c"
 #include "hook_parts/20_debug_menu.c"
+#include "hook_parts/21_cutscene_shadow.c"
