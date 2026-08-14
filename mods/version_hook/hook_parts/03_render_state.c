@@ -589,8 +589,24 @@ static volatile LONG g_cutsceneSuppressed;  // frames we forced the split off
 // cinema, then 1 for frames 3321..18623, which is precisely the long cutscene
 // the run was built around. Mask 1, offset 0x5c (92 decimal in the ini).
 static volatile LONG g_cutsceneRevert   = 1;     // feature master switch
-static volatile LONG g_cutsceneFlagOff  = 0x5c;  // CinemaController +0x5c
-static volatile LONG g_cutsceneFlagMask = 1;     // bit 0; 0 would disable detection
+static volatile LONG g_cutsceneFlagOff  = 0x5c;  // CinemaController +0x5c (mode 1 only)
+static volatile LONG g_cutsceneFlagMask = 1;     // bit 0 (mode 1 only)
+// Detection mode. 1 = the controller flag at +0x5c; 2 = named cut slots.
+//
+// Mode 1 was the first shipping attempt and is WRONG for this purpose:
+// confirmed in game that +0x5c also rises for ordinary NPC dialogue and even
+// for UI prompts (the teleporter asking whether to go back down), none of
+// which involve a cinematic camera. It is really "a cinema context exists",
+// not "a cutscene is playing". Kept selectable rather than deleted.
+//
+// Mode 2 reads the cut player's slots and requires the cut's NAME to look
+// cinematic - the real cutscene was "cut_f406" while conversations were
+// "en_npc_*" and bare character names. Default.
+static volatile LONG g_cutsceneMode = 2;
+// Name of the cut currently holding the shadow distance, "" when none. Shown
+// on the status panel so the reason for a trigger is visible at a glance
+// instead of needing the log.
+static char g_cutsceneName[24];
 // Detection is INSTANT in both directions, by request. A frame-count debounce
 // was built and removed: the flag also rises for very short conversation
 // cinemas (the correlation run caught one of ~57 frames, cut name "en_npc_0"),

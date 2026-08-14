@@ -377,7 +377,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      248
+#define STAT_H      228           // footer removed, so the rows are all of it
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -439,7 +439,11 @@ static void DrawStatusPanel(HDC dc)
     {
         int cut = (int)g_cutsceneActive;
         sprintf(set, "%s", g_cutsceneRevert ? "auto-revert on" : "auto-revert off");
-        sprintf(app, "%s", cut ? "CUTSCENE" : "gameplay");
+        // Show WHICH cut is holding it - if it ever triggers on something it
+        // should not, the name is the answer, and it is right here.
+        if (cut && g_cutsceneName[0]) sprintf(app, "CUTSCENE %.14s", g_cutsceneName);
+        else if (cut)                 sprintf(app, "CUTSCENE");
+        else                          sprintf(app, "gameplay");
         StatRow(dc, &y, "Scene state", set, app, cut);
     }
     {
@@ -506,9 +510,6 @@ static void DrawStatusPanel(HDC dc)
         StatRow(dc, &y, "Stutter watchdog", set, app, 0);
     }
 
-    SetTextColor(dc, RGB(110, 110, 125));
-    TextOutA(dc, STAT_COL_L, STAT_H - STAT_FONT_H - 7,
-             "amber = differs from setting  -  drag to move", 44);
 }
 
 static LRESULT CALLBACK StatusWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)

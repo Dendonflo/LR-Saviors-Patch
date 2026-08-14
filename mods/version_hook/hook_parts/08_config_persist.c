@@ -153,6 +153,9 @@ static NumericSetting g_numerics[] = {
     // leaves the whole feature inert. Run once with ENABLE_CUTSCENE_DIAG and
     // read the [cutdiag] lines to find it, then set it here - no rebuild.
     { &g_cutsceneRevert,   "CutsceneShadowRevert", 0, 1 },
+    // 2 = named cut slots (cinematics only); 1 = raw CinemaController flag,
+    // which also fires on dialogue and UI prompts. See g_cutsceneMode.
+    { &g_cutsceneMode,     "CutsceneDetectMode",   1, 2 },
     { &g_cutsceneFlagOff,  "CutsceneFlagOffset",   0, 0x4000 },
     { &g_cutsceneFlagMask, "CutsceneFlagMask",     0, 0x7fffffff },
 #if ENABLE_CASCADE_HUNT

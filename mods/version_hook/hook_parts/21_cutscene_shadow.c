@@ -35,6 +35,68 @@
 // 08_config_persist.c registers them as ini keys, and that part is included
 // before this one, so their definitions have to precede it.
 
+// ---- cut-slot layout, read off the pass-2 capture -------------------------
+// The player object at CinemaController+0x28 holds an array of slots. Two
+// were live simultaneously during the captured cutscene, and their fields
+// line up on a clean 0x40 stride:
+//        slot 0        slot 1
+//   id   +0x18         +0x58      (0xffffffff when free)
+//   act  +0x20         +0x60
+//   name +0x38         +0x78      (NUL-terminated ASCII)
+// which gives base 0x18, stride 0x40, and within a slot: active +0x08,
+// name +0x20. Eight slots are scanned; the array is certainly not smaller
+// (the object is 0x2030 bytes) and a free slot reads as inactive anyway.
+#define CUT_SLOT_BASE    0x18
+#define CUT_SLOT_STRIDE  0x40
+#define CUT_SLOT_ACTIVE  0x08
+#define CUT_SLOT_NAME    0x20
+#define CUT_SLOTS        8
+#define CUT_NAME_MAX     24
+
+// Accepted cinematic prefixes. "cut_" is what the confirmed cinematic
+// cutscene used ("cut_f406") while conversations used "en_npc_*" and bare
+// character names. If a run turns up a cinematic with a different prefix,
+// the [cutname] lines below will show it and it gets added here.
+static const char *g_cutPrefixes[] = { "cut_" };
+#define CUT_PREFIX_N (sizeof(g_cutPrefixes) / sizeof(g_cutPrefixes[0]))
+
+static char g_cutsceneNamePend[CUT_NAME_MAX];
+
+static int CutsceneNameIsCinematic(const char *nm)
+{
+    size_t i;
+    for (i = 0; i < CUT_PREFIX_N; i++) {
+        size_t n = strlen(g_cutPrefixes[i]);
+        if (_strnicmp(nm, g_cutPrefixes[i], n) == 0) return 1;
+    }
+    return 0;
+}
+
+// Log each DISTINCT cut name once. This is the safety net for the prefix
+// list: whatever the game actually calls its cinematics, one run puts the
+// full vocabulary in the log, with a mark showing which ones we treated as
+// cinematic. Cheap - the distinct set is small and it is capped.
+#define CUT_NAME_SEEN_MAX 48
+static char g_cutSeen[CUT_NAME_SEEN_MAX][CUT_NAME_MAX];
+static LONG g_cutSeenN = 0;
+
+static void CutsceneNoteName(const char *nm)
+{
+    LONG i, n = g_cutSeenN;
+    if (n >= CUT_NAME_SEEN_MAX) return;
+    for (i = 0; i < n; i++) if (strcmp(g_cutSeen[i], nm) == 0) return;
+    strncpy(g_cutSeen[n], nm, CUT_NAME_MAX - 1);
+    g_cutSeen[n][CUT_NAME_MAX - 1] = 0;
+    g_cutSeenN = n + 1;
+    {
+        char l[128];
+        sprintf(l, "[cutname] \"%s\" -> %s", nm,
+                CutsceneNameIsCinematic(nm) ? "CINEMATIC (shadow distance held)"
+                                            : "ignored (dialogue/prompt/other)");
+        LogLine(l);
+    }
+}
+
 // Returns the CinemaController instance, or 0 if it does not exist yet
 // (it is built during boot init, so this is null for the first seconds).
 static DWORD CinemaController(void)
@@ -196,26 +258,86 @@ static void CutsceneDetectTick(void)
 #if ENABLE_CUTSCENE_DIAG
     CutsceneDiagTick(ctrl);
 #endif
-    if (!g_cutsceneRevert || g_cutsceneFlagMask == 0) {
+    if (!g_cutsceneRevert) {
         if (g_cutsceneActive) InterlockedExchange(&g_cutsceneActive, 0);
         return;
     }
-    __try {
-        DWORD v = *(DWORD *)(ctrl + (DWORD)g_cutsceneFlagOff);
-        want = (v & (DWORD)g_cutsceneFlagMask) ? 1 : 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return;
+
+    if (g_cutsceneMode == 1) {
+        // MODE 1 - the controller flag at +0x5c. Kept because it is the
+        // broadest signal available and one ini key away, but it is NOT
+        // "a cutscene is playing": confirmed in game to also rise for
+        // ordinary NPC dialogue and even for UI prompts like the teleporter
+        // asking whether to go back down. Mode 2 is the shipping default.
+        if (g_cutsceneFlagMask == 0) {
+            if (g_cutsceneActive) InterlockedExchange(&g_cutsceneActive, 0);
+            return;
+        }
+        __try {
+            DWORD v = *(DWORD *)(ctrl + (DWORD)g_cutsceneFlagOff);
+            want = (v & (DWORD)g_cutsceneFlagMask) ? 1 : 0;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return;
+        }
+        g_cutsceneName[0] = 0;
+    } else {
+        // MODE 2 (default) - NAMED CUT SLOTS. The player object at
+        // controller+0x28 holds an array of slots; each carries an id, an
+        // active flag and the cut's NAME, and the name is what separates a
+        // real cinematic from a conversation:
+        //     "cut_f406"    <- the cinematic cutscene
+        //     "en_npc_0..." <- talking to an NPC
+        //     "lightning"   <- short character cinema
+        // so a slot only counts when its name starts with an accepted
+        // cinematic prefix. Every activating name is logged (capped), so if
+        // some cutscene uses a prefix not listed here, one run says so
+        // instead of leaving it a mystery.
+        want = 0;
+        __try {
+            DWORD player = *(DWORD *)(ctrl + 0x28);
+            if (player >= 0x10000 && !(player & 3)) {
+                int slot;
+                for (slot = 0; slot < CUT_SLOTS; slot++) {
+                    DWORD sb = player + CUT_SLOT_BASE + (DWORD)slot * CUT_SLOT_STRIDE;
+                    char nm[CUT_NAME_MAX];
+                    int k;
+                    if (*(DWORD *)(sb + CUT_SLOT_ACTIVE) == 0) continue;
+                    for (k = 0; k < CUT_NAME_MAX - 1; k++) {
+                        char ch = *(char *)(sb + CUT_SLOT_NAME + k);
+                        if (ch == 0) break;
+                        if (ch < 0x20 || ch >= 0x7f) { k = 0; break; }   /* not a name */
+                        nm[k] = ch;
+                    }
+                    nm[k] = 0;
+                    if (!k) continue;
+                    CutsceneNoteName(nm);
+                    if (CutsceneNameIsCinematic(nm)) {
+                        want = 1;
+                        strncpy(g_cutsceneNamePend, nm, sizeof(g_cutsceneNamePend) - 1);
+                        g_cutsceneNamePend[sizeof(g_cutsceneNamePend) - 1] = 0;
+                        break;
+                    }
+                }
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return;
+        }
     }
+
     // Instant in both directions - no hold counter. See the note in
     // 03_render_state.c for the debounce that was considered and dropped.
     if (want != g_cutsceneActive) {
         InterlockedExchange(&g_cutsceneActive, want);
         InterlockedIncrement(&g_cutsceneEdges);
+        if (want) strcpy(g_cutsceneName, g_cutsceneNamePend);
+        else      g_cutsceneName[0] = 0;
         {
-            char l[160];
-            sprintf(l, "[cutscene] %s (edge #%ld, split neutralised %ld frames so far)",
+            char l[220];
+            sprintf(l, "[cutscene] %s%s%s (edge #%ld, split neutralised %ld frames so far)",
                     want ? "ENTER - shadow distance neutralised to 100%"
                          : "EXIT - shadow distance restored to user setting",
+                    want && g_cutsceneName[0] ? " cut=" : "",
+                    want ? g_cutsceneName : "",
                     g_cutsceneEdges, g_cutsceneSuppressed);
             LogLine(l);
         }
