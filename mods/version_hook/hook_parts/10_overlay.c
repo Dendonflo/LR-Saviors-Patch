@@ -374,118 +374,141 @@ static void EnsureOverlayWindow(void)
 //
 // Deliberately a SECOND window rather than a mode on the frametime graph:
 // they answer different questions and are useful simultaneously.
-#define STAT_W 560
-#define STAT_H 330
-static HWND g_hStatus = NULL;
+#define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
+#define STAT_ROW_H  17
+#define STAT_W      470
+#define STAT_H      248
+#define STAT_COL_L  12           // label
+#define STAT_COL_S  170          // configured value
+#define STAT_COL_A  310          // value actually in force
+static HWND  g_hStatus = NULL;
+static HFONT g_statFont = NULL, g_statFontB = NULL;
 
-// One row: label, the configured value, and what is actually applied. `note`
-// is for the cases where those two differ and the reason is not obvious.
+static void EnsureStatusFonts(void)
+{
+    // Its own fonts, NOT the graph's. The graph is meant to be readable from
+    // across the room at 34px bold; reusing that here is what made the first
+    // version overflow its own window and collide column with column.
+    if (!g_statFont)
+        g_statFont = CreateFontA(-STAT_FONT_H, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                 DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                 CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+    if (!g_statFontB)
+        g_statFontB = CreateFontA(-STAT_FONT_H, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                  DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                  CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+}
+
+// One row: label, configured value, value actually applied. `differs` paints
+// the applied column amber - the entire reason the panel exists.
 static void StatRow(HDC dc, int *y, const char *label, const char *set,
                     const char *applied, int differs)
 {
-    const int xL = 12, xS = 190, xA = 330;
-    SetTextColor(dc, RGB(150, 150, 165));
-    TextOutA(dc, xL, *y, label, (int)strlen(label));
-    SetTextColor(dc, RGB(200, 200, 215));
-    TextOutA(dc, xS, *y, set, (int)strlen(set));
-    // Amber when the applied value is not the configured one - that is the
-    // whole point of the panel, so it has to be visible at a glance.
-    SetTextColor(dc, differs ? RGB(235, 180, 70) : RGB(120, 210, 140));
-    TextOutA(dc, xA, *y, applied, (int)strlen(applied));
-    *y += OVL_LABEL_H + 5;
+    SetTextColor(dc, RGB(145, 145, 160));
+    TextOutA(dc, STAT_COL_L, *y, label, (int)strlen(label));
+    SetTextColor(dc, RGB(195, 195, 210));
+    TextOutA(dc, STAT_COL_S, *y, set, (int)strlen(set));
+    SetTextColor(dc, differs ? RGB(240, 185, 70) : RGB(120, 205, 140));
+    TextOutA(dc, STAT_COL_A, *y, applied, (int)strlen(applied));
+    *y += STAT_ROW_H;
 }
 
 static void DrawStatusPanel(HDC dc)
 {
     char set[64], app[64];
     RECT full = { 0, 0, STAT_W, STAT_H };
-    HBRUSH bg = CreateSolidBrush(RGB(12, 12, 16));
-    int y = 10;
-    EnsureOverlayFonts();
+    HBRUSH bg = CreateSolidBrush(RGB(14, 14, 18));
+    int y = 9;
+    EnsureStatusFonts();
     FillRect(dc, &full, bg);
     DeleteObject(bg);
-    SelectObject(dc, g_ovlFontSmall);
+    // Without this every string paints its own opaque black box, which is
+    // what gave the first version its blocky, chopped-up look.
+    SetBkMode(dc, TRANSPARENT);
 
+    SelectObject(dc, g_statFontB);
     SetTextColor(dc, RGB(235, 235, 245));
-    TextOutA(dc, 12, y, "MOD STATUS", 10);
-    SetTextColor(dc, RGB(110, 110, 125));
-    TextOutA(dc, 190, y, "SETTING", 7);
-    TextOutA(dc, 330, y, "APPLIED NOW", 11);
-    y += OVL_LABEL_H + 9;
+    TextOutA(dc, STAT_COL_L, y, "MOD STATUS", 10);
+    SetTextColor(dc, RGB(105, 105, 120));
+    TextOutA(dc, STAT_COL_S, y, "SETTING", 7);
+    TextOutA(dc, STAT_COL_A, y, "APPLIED NOW", 11);
+    y += STAT_ROW_H + 6;
+    SelectObject(dc, g_statFont);
 
-    // --- the live state this panel was actually built for -----------------
+    // --- the live state this panel was built for --------------------------
     {
         int cut = (int)g_cutsceneActive;
-        sprintf(set, "%s", g_cutsceneRevert ? "auto-revert on" : "auto-revert OFF");
+        sprintf(set, "%s", g_cutsceneRevert ? "auto-revert on" : "auto-revert off");
         sprintf(app, "%s", cut ? "CUTSCENE" : "gameplay");
         StatRow(dc, &y, "Scene state", set, app, cut);
     }
     {
         LONG n = g_shadowSplitNearPct;
         int held = (g_cutsceneActive && n > 0);
-        sprintf(set, n > 0 ? "%ld%%" : "off", n);
-        if (held) sprintf(app, "100%% (held for cutscene)");
-        else      sprintf(app, n > 0 ? "%ld%%" : "off", n);
+        if (n > 0) sprintf(set, "%ld%%", n); else sprintf(set, "off");
+        if (held) sprintf(app, "100%% (cutscene)");
+        else if (n > 0) sprintf(app, "%ld%%", n);
+        else sprintf(app, "off");
         StatRow(dc, &y, "Shadow distance", set, app, held);
     }
     {
         LONG f = g_shadowSplitFarPct;
         int held = (g_cutsceneActive && f > 0);
-        sprintf(set, f > 0 ? "%ld%%" : "off", f);
-        if (held) sprintf(app, "100%% (held)");
-        else      sprintf(app, f > 0 ? "%ld%%" : "off", f);
+        if (f > 0) sprintf(set, "%ld%%", f); else sprintf(set, "off");
+        if (held) sprintf(app, "100%% (cutscene)");
+        else if (f > 0) sprintf(app, "%ld%%", f);
+        else sprintf(app, "off");
         StatRow(dc, &y, "Shadow far split", set, app, held);
     }
     sprintf(set, "%ld edges", g_cutsceneEdges);
     sprintf(app, "%ld frames held", g_cutsceneSuppressed);
     StatRow(dc, &y, "Cutscene counters", set, app, 0);
 
-    y += 6;
+    y += 7;
     // --- the rest of the graphics state -----------------------------------
     {
         LONG r = g_shadowMapRes;
-        sprintf(set, r > 0 ? "%ld" : "game default", r);
+        if (r > 0) sprintf(set, "%ld", r); else sprintf(set, "game default");
         sprintf(app, "%s", g_shadowResWrites > 0 ? "written" : "not written");
         StatRow(dc, &y, "Shadow map res", set, app, r > 0 && g_shadowResWrites == 0);
     }
     {
         LONG p = g_shadowBufResPct;
-        sprintf(set, p > 0 ? "%ld%%" : "game default", p);
-        sprintf(app, p > 0 ? "%ld%%" : "-", p);
+        if (p > 0) { sprintf(set, "%ld%%", p); sprintf(app, "%ld%%", p); }
+        else       { sprintf(set, "game default"); sprintf(app, "-"); }
         StatRow(dc, &y, "Shadow buffer", set, app, 0);
     }
     {
-        LONG s = g_ssaaScale;
+        LONG sc = g_ssaaScale;
         int on = (g_ssaaActive != 0);
-        sprintf(set, s == 100 ? "off" : "%ld%%", s);
+        if (sc == 100) sprintf(set, "off"); else sprintf(set, "%ld%%", sc);
         if (on && g_ssaaCurW > 0) sprintf(app, "%ldx%ld", g_ssaaCurW, g_ssaaCurH);
         else if (on)              sprintf(app, "active");
         else                      sprintf(app, "off");
-        StatRow(dc, &y, "SSAA", set, app, (s != 100) != on);
+        StatRow(dc, &y, "SSAA", set, app, (sc != 100) != on);
     }
     {
         LONG m = g_msaaSamples;
-        sprintf(set, m > 0 ? "%ldx" : "off", m);
+        if (m > 0) sprintf(set, "%ldx", m); else sprintf(set, "off");
         sprintf(app, "%ld subs", g_msSubstitutions);
         StatRow(dc, &y, "MSAA", set, app, m > 0 && g_msSubstitutions == 0);
     }
     {
         LONG c = g_targetFpsX100;
-        if (c > 0) sprintf(set, "%.2f fps", c / 100.0);
-        else       sprintf(set, "unlocked");
+        if (c > 0) sprintf(set, "%.2f fps", c / 100.0); else sprintf(set, "unlocked");
         sprintf(app, "p50 %.1f ms", g_liveP50 / 1000.0);
         StatRow(dc, &y, "Frame cap", set, app, 0);
     }
     {
         LONG t = g_stutterThresholdUsec;
-        sprintf(set, t >= 500000 ? "off" : "%ld ms", t / 1000);
+        if (t >= 500000) sprintf(set, "off"); else sprintf(set, "%ld ms", t / 1000);
         sprintf(app, "%ld over", g_liveOver16);
         StatRow(dc, &y, "Stutter watchdog", set, app, 0);
     }
 
-    SetTextColor(dc, RGB(120, 120, 135));
-    TextOutA(dc, 12, STAT_H - OVL_LABEL_H - 8,
-             "amber = applied differs from setting", 36);
+    SetTextColor(dc, RGB(110, 110, 125));
+    TextOutA(dc, STAT_COL_L, STAT_H - STAT_FONT_H - 7,
+             "amber = differs from setting  -  drag to move", 44);
 }
 
 static LRESULT CALLBACK StatusWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -496,14 +519,29 @@ static LRESULT CALLBACK StatusWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         HDC mem = CreateCompatibleDC(dc);
         HBITMAP bmp = CreateCompatibleBitmap(dc, STAT_W, STAT_H);
         HBITMAP oldBmp = (HBITMAP)SelectObject(mem, bmp);
-        HGDIOBJ oldFont = SelectObject(mem, g_ovlFontSmall);
         DrawStatusPanel(mem);
-        SelectObject(mem, oldFont);
         BitBlt(dc, 0, 0, STAT_W, STAT_H, mem, 0, 0, SRCCOPY);
         SelectObject(mem, oldBmp);
         DeleteObject(bmp);
         DeleteDC(mem);
         EndPaint(hwnd, &ps);
+        return 0;
+    }
+    // Drag from anywhere on the panel: it has no title bar to grab, and one
+    // is not worth the vertical space. HTCAPTION makes the whole surface the
+    // caption as far as the window manager is concerned.
+    if (msg == WM_NCHITTEST) return HTCAPTION;
+    // Remember where it was dropped, and persist it. Done on button-up rather
+    // than per WM_MOVE so a drag writes the ini once instead of every pixel.
+    if (msg == WM_EXITSIZEMOVE || msg == WM_NCLBUTTONUP) {
+        RECT rc;
+        if (GetWindowRect(hwnd, &rc)) {
+            if (rc.left != g_statusX || rc.top != g_statusY) {
+                InterlockedExchange(&g_statusX, rc.left);
+                InterlockedExchange(&g_statusY, rc.top);
+                SaveConfig();
+            }
+        }
         return 0;
     }
     if (msg == WM_ERASEBKGND) return 1;
@@ -520,15 +558,19 @@ static void EnsureStatusWindow(void)
     wc.lpszClassName = "LRStutterStatus";
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     RegisterClassA(&wc);
+    // NO WS_EX_TRANSPARENT here, unlike the frametime graph: this one has to
+    // receive the mouse to be draggable. WS_EX_NOACTIVATE still keeps it from
+    // taking focus off the game when it is clicked.
     g_hStatus = CreateWindowExA(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         "LRStutterStatus", "", WS_POPUP,
         20, 20, STAT_W, STAT_H, NULL, NULL, GetModuleHandleA(NULL), NULL);
-    if (g_hStatus) SetLayeredWindowAttributes(g_hStatus, 0, 215, LWA_ALPHA);
+    if (g_hStatus) SetLayeredWindowAttributes(g_hStatus, 0, 225, LWA_ALPHA);
 }
 
-// Places the status panel in the corner OPPOSITE the frametime graph, so the
-// two never sit on top of each other whichever corner the graph is using.
+// Auto-place in the corner OPPOSITE the frametime graph so the two cannot
+// overlap - but only until the user drags it somewhere, after which their
+// position wins and this does nothing.
 static void PositionStatusPanel(void)
 {
     RECT rc;
@@ -536,6 +578,11 @@ static void PositionStatusPanel(void)
     HWND gw = g_gameHwnd;
     int have = 0, x = 20, y = 20;
     const int m = 20;
+    if (g_statusX >= 0 && g_statusY >= 0) {
+        SetWindowPos(g_hStatus, HWND_TOPMOST, g_statusX, g_statusY, 0, 0,
+                     SWP_NOSIZE | SWP_NOACTIVATE);
+        return;
+    }
     if (gw && IsWindow(gw) && GetClientRect(gw, &rc) &&
         rc.right > rc.left && rc.bottom > rc.top) {
         tl.x = rc.left;  tl.y = rc.top;
@@ -551,12 +598,11 @@ static void PositionStatusPanel(void)
         }
     }
     if (have) {
-        // graph 3=BR -> panel TR; 1=TR -> panel BR; 2=BL -> panel TR; 0=TL -> BR
         switch (g_overlayPos) {
-        case 1:  x = br.x - STAT_W - m; y = br.y - STAT_H - m; break;
-        case 2:  x = br.x - STAT_W - m; y = tl.y + m;          break;
-        case 3:  x = br.x - STAT_W - m; y = tl.y + m;          break;
-        default: x = br.x - STAT_W - m; y = br.y - STAT_H - m; break;
+        case 1:  x = br.x - STAT_W - m; y = br.y - STAT_H - m; break;  // graph TR
+        case 2:  x = br.x - STAT_W - m; y = tl.y + m;          break;  // graph BL
+        case 3:  x = br.x - STAT_W - m; y = tl.y + m;          break;  // graph BR
+        default: x = br.x - STAT_W - m; y = br.y - STAT_H - m; break;  // graph TL
         }
     }
     SetWindowPos(g_hStatus, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);

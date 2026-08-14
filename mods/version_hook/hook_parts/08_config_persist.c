@@ -258,6 +258,9 @@ static NumericSetting g_numerics[] = {
     // 0 is still accepted here but is deliberately not offered in the menu -
     // it is where the game's menu bar starts, so it always collides.
     { &g_overlayPos, "OverlayPos", 0, 3 },
+    // Status panel position in screen pixels; -1 = auto-place (see g_statusX).
+    { &g_statusX, "StatusPanelX", -1, 16384 },
+    { &g_statusY, "StatusPanelY", -1, 16384 },
     // Log file control. LogAppend=1 keeps one file across runs (developer
     // behaviour); 0 recreates it each launch (shipping). LogMaxMB bounds a
     // single run, 0 = unlimited. Both ini-only - they are not user options.

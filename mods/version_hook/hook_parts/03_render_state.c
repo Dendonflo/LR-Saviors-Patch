@@ -563,6 +563,14 @@ static volatile LONG g_shadowSplitFarPct;
 // Detection lives in 21_cutscene_shadow.c and is deliberately data-driven
 // (offset + mask from the ini) so candidate signals can be tried without a
 // rebuild while the right one is being pinned down.
+// Status panel position, persisted so it stays where it was dragged. -1/-1
+// means "never moved": the panel auto-places itself opposite the frametime
+// graph until the user puts it somewhere, and from then on its own position
+// wins. Without this it would snap back to the corner every launch, and
+// jump across the screen whenever the graph's corner setting changed.
+static volatile LONG g_statusX = -1;
+static volatile LONG g_statusY = -1;
+
 // Tentative def; the real one (with its initialiser) is in 15_msaa.c, which
 // the manifest includes after the overlay. The status panel needs it to show
 // whether MSAA actually latched onto the scene target, so it has to be
