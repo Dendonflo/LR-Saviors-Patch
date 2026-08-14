@@ -186,7 +186,14 @@
 //   that means "a cutscene is playing" can be identified from a single run
 //   instead of guessed from decompilation. Output is capped; turn back to 0
 //   once CutsceneFlagMask is set in the ini.
-#define ENABLE_CUTSCENE_DIAG 1
+//   ANSWERED 2026-08-14. Pass 1 (8 controller fields) found the inverse of
+//   the assumption - everything froze for the whole cutscene - so pass 2
+//   widened to the three sub-objects the ctor allocates and muted per-field
+//   churn. That found CinemaController+0x5c, mask 1: four transitions in an
+//   entire session, no noise, high for exactly the cutscene's frame range.
+//   Back to 0 - the shipping [cutscene] ENTER/EXIT lines show the feature
+//   working without the 300-line field dump.
+#define ENABLE_CUTSCENE_DIAG 0
 
 // ENABLE_DEBUG_MENU - attempt to re-enable the game's retail-dormant debug
 //   menu. SEPARATE PROJECT from the stutter/graphics mod (DEBUG_MENU.md).

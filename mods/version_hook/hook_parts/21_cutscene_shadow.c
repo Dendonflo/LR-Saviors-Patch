@@ -206,6 +206,20 @@ static void CutsceneDetectTick(void)
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return;
     }
+    // Asymmetric debounce: engaging waits for the flag to hold for
+    // g_cutsceneMinFrames consecutive frames, disengaging is immediate.
+    // Short talk cinemas therefore never reach the threshold, while a real
+    // cutscene loses only a fraction of a second at its start and gets its
+    // setting back the instant it ends.
+    {
+        static LONG heldFrames = 0;
+        if (want) {
+            if (heldFrames < 0x7fffffff) heldFrames++;
+            if (!g_cutsceneActive && heldFrames < g_cutsceneMinFrames) return;
+        } else {
+            heldFrames = 0;
+        }
+    }
     if (want != g_cutsceneActive) {
         InterlockedExchange(&g_cutsceneActive, want);
         InterlockedIncrement(&g_cutsceneEdges);

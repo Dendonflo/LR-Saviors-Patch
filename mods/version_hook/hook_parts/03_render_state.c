@@ -568,11 +568,24 @@ static volatile LONG g_cutsceneEdges;       // transition count, for the log
 static volatile LONG g_cutsceneSuppressed;  // frames we forced the split off
 // ini-tunable; registered in 08_config_persist.c, which is included before
 // 21_cutscene_shadow.c, so these have to be defined here rather than there.
-// FlagMask 0 means "the playing bit is not identified yet" and keeps the
-// whole feature inert.
+//
+// CONFIRMED 2026-08-14 by the pass-2 correlation run: CinemaController+0x5c
+// is a clean "a cinema is active" boolean. Across a whole session it had
+// exactly four transitions and no noise at all - 1 for a ~57-frame talk
+// cinema, then 1 for frames 3321..18623, which is precisely the long cutscene
+// the run was built around. Mask 1, offset 0x5c (92 decimal in the ini).
 static volatile LONG g_cutsceneRevert   = 1;     // feature master switch
-static volatile LONG g_cutsceneFlagOff  = 0x1c;  // field offset in CinemaController
-static volatile LONG g_cutsceneFlagMask = 0;     // 0 -> inert
+static volatile LONG g_cutsceneFlagOff  = 0x5c;  // CinemaController +0x5c
+static volatile LONG g_cutsceneFlagMask = 1;     // bit 0; 0 would disable detection
+// Debounce, in frames. The flag also goes up for very short conversation
+// cinemas (the run caught one lasting ~1 second, cut name "en_npc_0"), and
+// toggling the shadow distance for those would trade the cutscene artefact
+// for a visible shadow pop twice per NPC chat during normal play. Engaging
+// is delayed by this many frames; DISENGAGING is immediate, so a real
+// cutscene is only unprotected for a fraction of a second at its start -
+// usually behind the fade-in - while sub-second cinemas are ignored entirely.
+// 0 disables the debounce and reacts to everything.
+static volatile LONG g_cutsceneMinFrames = 12;
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
 // 4K the game allocates a 2048x4096 R32F atlas (two cascades stacked) plus
