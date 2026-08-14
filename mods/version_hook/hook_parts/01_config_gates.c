@@ -180,18 +180,25 @@
 //   each class only.
 #define ENABLE_LOADER_DIAG 1
 
-// ENABLE_DEBUG_MENU - re-enable the game's OWN retail-dormant debug menu.
-//   SEPARATE PROJECT from the stutter/graphics mod (notes: DEBUG_MENU.md) -
-//   this is exploratory and MUST BE 0 IN ANY RELEASE BUILD of the mod.
-//   Survey result (2026-08-14): all 39 DebugMenuPage classes, the LoadViewer
-//   profiler, the debug terminal and the debug states survive in retail. The
-//   enable predicate FUN_00ccea50 is compiled to `return 0` and ICF-folded
-//   into ~1000 vtable slots, so it cannot be body-patched - but the menu
-//   manager singleton (DAT_024c3d74) is BUILT unconditionally at boot and
-//   ticked every frame; retail merely never sets its enable bits. This gate
-//   compiles in a monitor-thread poke that sets those bits on the live
-//   objects (no exe patch). See 20_debug_menu.c.
-#define ENABLE_DEBUG_MENU 1
+// ENABLE_DEBUG_MENU - attempt to re-enable the game's retail-dormant debug
+//   menu. SEPARATE PROJECT from the stutter/graphics mod (DEBUG_MENU.md).
+//
+//   OFF, AND THE PREMISE IS DISPROVED (2026-08-14, experiment 1).
+//   The poke worked mechanically - the log confirms all three writes landed
+//   and STUCK (one apply, no re-assert) - and nothing changed in game.
+//   Follow-up analysis found the reason: DAT_024c3d74 is NOT the debug menu
+//   manager. Its vtable is white::actor::ActorInterface and its per-frame
+//   virtual leads into ScenePathSearch.cpp, so this code was setting debug
+//   bits on the SCENE/ACTOR manager. Whatever INTERVAL_DEBUG_MENU_WHITE's
+//   handler forwards to, it is not a menu.
+//   Worse for the whole idea: the page-registration layer is gone. Nearly
+//   every page-id string ("debug_menu_common", "debug_menu_field",
+//   "debug_menu_battle", ...) has ZERO references anywhere in the binary
+//   (raw pointer search, not just Ghidra), and the DebugMenuPage vtables are
+//   referenced only by their own destructors - orphaned vtables the linker
+//   kept for RTTI. Flag flipping cannot revive what is never constructed.
+//   Left compiled-out rather than deleted, per project convention.
+#define ENABLE_DEBUG_MENU 0
 
 // ENABLE_GUI_PANEL - the standalone "LR Stutter Fix - Debug Panel" window.
 //   DEPRECATED 2026-08-11: superseded by the game-menu integration

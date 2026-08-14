@@ -1,4 +1,34 @@
 // ---- LR debug menu re-enable (SEPARATE PROJECT - see DEBUG_MENU.md) -------
+//
+// RETIRED 2026-08-14 after ONE run. Read this before re-arming it.
+//
+// The poke itself works: the log line proves all three writes landed and
+// stuck for the whole session (single apply, no re-assert, so nothing in the
+// engine rewrites them):
+//   [debugmenu] enable bits applied (#1): +0x680 888802be->888802ba
+//                +0x684 00145324->00105326  mgr+6 00->06
+// Nothing changed in game, including with two controllers connected (the way
+// XIII and XIII-2 open theirs).
+//
+// The reason the premise was wrong: DAT_024c3d74 is NOT the debug menu
+// manager. Its ctor installs white::actor::ActorInterface::vftable and the
+// virtual that INTERVAL_DEBUG_MENU_WHITE's handler calls (+0x84) leads to
+// ScenePathSearch.cpp. So "mgr+6 |= 6" was setting debug flags on the
+// SCENE/ACTOR manager - plausibly path-search debug draw, which would also
+// explain a silent no-op.
+//
+// And the deeper problem, which no poke can fix: the page-registration layer
+// is not in the binary. The page-id strings the engine looks pages up by
+// ("debug_menu_common", "debug_menu_field", "debug_menu_battle", ...) have
+// ZERO references anywhere - verified by raw pointer search over the whole
+// image, the same method that DOES find references for other strings. The
+// DebugMenuPage classes still have vtables and RTTI, but the only code
+// touching those vtables is each class's own destructor, reachable only from
+// its own vtable slot: a closed loop with no entry, i.e. orphaned vtables the
+// linker retained. Nothing constructs a page, so nothing can display one.
+//
+// Kept compiled-out rather than deleted so the measurement and its refutation
+// stay on the record.
 // The retail exe still contains the entire debug component: 39 DebugMenuPage
 // classes, the LoadViewer profiler, the debug terminal, the debug camera and
 // the STATE_*_DEBUG states. It is dormant because the enable predicate
