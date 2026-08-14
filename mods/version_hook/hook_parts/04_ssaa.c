@@ -109,6 +109,55 @@ static void ApplySsaaScale(void)
     // supersampling entirely.
     if (g_ssaaMode == 1) {
         g_ssaaActive = (g_ssaaScale != 100) ? 1 : 0;
+
+        // RESOLUTION CHANGE while SSAA is on - see the "screen-set rebuild
+        // detector" note in 03_render_state.c for the comparison this works
+        // around.
+        //
+        // The engine decides whether to rebuild the screen set by comparing
+        // slot 0x21's RECORDED dimensions against the settings resolution.
+        // While SSAA is scaling, slot 0x21 records the SCALED size. So if the
+        // player switches to a resolution that happens to equal the size we
+        // were already rendering, the comparison AGREES and the engine never
+        // rebuilds - leaving the buffers at that size, which against the new
+        // (larger) output is 1:1, i.e. no supersampling at all.
+        //
+        // Reported in game: 1080p fullscreen + 200% renders 3840x2160;
+        // switching the game to 4K makes the settings 3840x2160 too, they
+        // match, nothing rebuilds, and SSAA silently stops until the option is
+        // toggled off and on (which pokes the sentinel and forces a rebuild).
+        // It is the same failure as "enabling SSAA appeared to do nothing
+        // until a resolution change", just mirrored.
+        //
+        // This is the exact case the engine's own detector cannot see, so
+        // track the settings size ourselves and force one rebuild whenever it
+        // moves. Harmless when the engine would have rebuilt anyway - that
+        // path already allows a genuine resolution change, so the worst case
+        // is one extra rebuild during a resolution change that is rebuilding
+        // everything regardless.
+        if (g_mainModBase) {
+            static LONG lastSetW = 0, lastSetH = 0;
+            __try {
+                DWORD so = *(DWORD *)(g_mainModBase + SHADOW_SETTINGS_PTR_RVA);
+                if (so) {
+                    LONG sw = *(LONG *)(so + 0x10), sh = *(LONG *)(so + 0x14);
+                    if (sw >= 320 && sw <= 16384 && sh >= 200 && sh <= 16384) {
+                        if (lastSetW && (sw != lastSetW || sh != lastSetH) &&
+                            g_ssaaScale > 100) {
+                            InterlockedExchange(&g_ssaaRebuildPending, 1);
+                            SsaaForceScreenSetRebuild();
+                            char rl[176];
+                            sprintf(rl, "[ssaa] resolution %ldx%ld -> %ldx%ld with scale %ld%%"
+                                        " - forcing screen-set rebuild",
+                                    lastSetW, lastSetH, sw, sh, g_ssaaScale);
+                            LogLine(rl);
+                        }
+                        lastSetW = sw;
+                        lastSetH = sh;
+                    }
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
         // A scale change only takes effect when the screen set is rebuilt, and
         // going from unscaled to scaled leaves the detector's sentinel still
         // agreeing with the settings - so it would never ask for one. Request
