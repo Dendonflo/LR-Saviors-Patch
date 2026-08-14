@@ -52,45 +52,129 @@ static DWORD CinemaController(void)
 }
 
 #if ENABLE_CUTSCENE_DIAG
-// Fields sampled for the correlation run. Kept small and fixed so one log
-// line stays readable, and capped so a long session cannot flood the log.
-static const int g_cutDiagOffs[] = { 0x1c, 0x20, 0x24, 0x28, 0x2c, 0x30, 0x44, 0x88 };
-#define CUT_DIAG_N     (sizeof(g_cutDiagOffs) / sizeof(g_cutDiagOffs[0]))
-#define CUT_DIAG_MAX   400
+// PASS 2. Pass 1 watched 8 controller fields and found the opposite of what
+// was assumed: across the run's long cutscene every one of them was FROZEN,
+// while during gameplay they churned every few frames. So that churn is
+// gameplay-side cinema activity (automatic camera / ambient contexts) and
+// none of those fields is a play flag - the window was simply too narrow.
+//
+// The controller's constructor says where to look instead. It allocates three
+// sub-objects into the pointers that stayed rock-constant all run:
+//    +0x24 -> 0x2fc0 bytes (FUN_00909000)
+//    +0x28 -> 0x2030 bytes (FUN_0090fd50)
+//    +0x2c -> 0x80   bytes (FUN_00916ad0)
+// The cutscene player's state machine (STATE_PREFETCH/PLAY/END...) lives
+// inside one of those, not in the controller itself. So sample a wide window
+// of the controller AND dereference the three sub-objects.
+//
+// NOISE CONTROL: a wide window logged naively would bury the signal. Each
+// watched dword carries its own change counter and STOPS being logged once it
+// has changed more than CUT_NOISY times - so per-frame churn silences itself
+// after a few lines while rare, state-like transitions keep printing for the
+// whole run. A cutscene boundary is exactly a rare transition, and this run's
+// single long cutscene should show up as one field flipping twice.
+#define CUT_R0_N     64      /* controller  +0x000..+0x0fc */
+#define CUT_SUB_N    32      /* each sub-object +0x00..+0x7c */
+#define CUT_DIAG_N   (CUT_R0_N + 3 * CUT_SUB_N)
+#define CUT_DIAG_MAX 700
+#define CUT_NOISY    10      /* changes after which a dword is written off as churn */
+
 static DWORD g_cutDiagLast[CUT_DIAG_N];
+static LONG  g_cutDiagChg[CUT_DIAG_N];
 static LONG  g_cutDiagLines = 0;
 static LONG  g_cutDiagInit = 0;
+static char  g_cutDiagName[40];
+
+// Region index -> human label and the base pointer it samples.
+static DWORD CutDiagBase(DWORD ctrl, int region)
+{
+    DWORD p;
+    if (region == 0) return ctrl;
+    __try {
+        p = *(DWORD *)(ctrl + (region == 1 ? 0x24 : region == 2 ? 0x28 : 0x2c));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+    if (p < 0x10000 || (p & 3)) return 0;
+    return p;
+}
 
 static void CutsceneDiagTick(DWORD ctrl)
 {
     DWORD cur[CUT_DIAG_N];
-    int i, changed = 0;
+    DWORD base[4];
+    int r, i, idx;
     if (g_cutDiagLines >= CUT_DIAG_MAX) return;
+
+    for (r = 0; r < 4; r++) base[r] = CutDiagBase(ctrl, r);
+    if (!base[0]) return;
+
     __try {
-        for (i = 0; i < (int)CUT_DIAG_N; i++) cur[i] = *(DWORD *)(ctrl + g_cutDiagOffs[i]);
+        idx = 0;
+        for (i = 0; i < CUT_R0_N; i++) cur[idx++] = *(DWORD *)(base[0] + i * 4);
+        for (r = 1; r < 4; r++)
+            for (i = 0; i < CUT_SUB_N; i++)
+                cur[idx++] = base[r] ? *(DWORD *)(base[r] + i * 4) : 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return;
     }
+
     if (!g_cutDiagInit) {
+        char l[224];
         g_cutDiagInit = 1;
-        for (i = 0; i < (int)CUT_DIAG_N; i++) g_cutDiagLast[i] = cur[i];
-        LogLine("[cutdiag] baseline captured - watching CinemaController fields"
-                " (+1c +20 +24 +28 +2c +30 +44 +88)");
+        for (i = 0; i < CUT_DIAG_N; i++) g_cutDiagLast[i] = cur[i];
+        sprintf(l, "[cutdiag] pass2 baseline: ctrl=%08lx sub24=%08lx sub28=%08lx sub2c=%08lx"
+                   " | R0=ctrl+0x000..0fc, R1/R2/R3=sub+0x00..7c, noisy cutoff=%d",
+                (unsigned long)base[0], (unsigned long)base[1],
+                (unsigned long)base[2], (unsigned long)base[3], CUT_NOISY);
+        LogLine(l);
         return;
     }
-    for (i = 0; i < (int)CUT_DIAG_N; i++) if (cur[i] != g_cutDiagLast[i]) { changed = 1; break; }
-    if (!changed) return;
-    {
-        char l[320];
-        int n = sprintf(l, "[cutdiag] f=%ld", (long)g_frameSeq);
-        for (i = 0; i < (int)CUT_DIAG_N; i++) {
-            n += sprintf(l + n, " +%02x=%08lx%s", g_cutDiagOffs[i],
-                         (unsigned long)cur[i], cur[i] != g_cutDiagLast[i] ? "*" : "");
+
+    for (i = 0; i < CUT_DIAG_N; i++) {
+        if (cur[i] == g_cutDiagLast[i]) continue;
+        {
+            DWORD old = g_cutDiagLast[i];
+            LONG  c = ++g_cutDiagChg[i];
             g_cutDiagLast[i] = cur[i];
+            if (c > CUT_NOISY) continue;             /* churn - written off */
+            r = (i < CUT_R0_N) ? 0 : 1 + (i - CUT_R0_N) / CUT_SUB_N;
+            {
+                int off = (i < CUT_R0_N) ? i * 4 : ((i - CUT_R0_N) % CUT_SUB_N) * 4;
+                char l[200];
+                sprintf(l, "[cutdiag] f=%-6ld R%d+0x%02x  %08lx -> %08lx  (chg %ld%s)",
+                        (long)g_frameSeq, r, off,
+                        (unsigned long)old, (unsigned long)cur[i], c,
+                        c == CUT_NOISY ? ", now muted as churn" : "");
+                LogLine(l);
+                if (InterlockedIncrement(&g_cutDiagLines) >= CUT_DIAG_MAX) {
+                    LogLine("[cutdiag] line cap reached - no further [cutdiag] output this run");
+                    return;
+                }
+            }
         }
-        LogLine(l);
-        if (InterlockedIncrement(&g_cutDiagLines) == CUT_DIAG_MAX)
-            LogLine("[cutdiag] line cap reached - no further [cutdiag] output this run");
+    }
+
+    // The controller holds a short name buffer around +0x40 (pass 1 saw ASCII
+    // tails there: "dd", "es", "on2", "d2z"). Print it whole when it changes -
+    // if it names the playing cutscene it is a signal in its own right.
+    __try {
+        char nm[36];
+        int k;
+        for (k = 0; k < 32; k++) {
+            char ch = *(char *)(base[0] + 0x40 + k);
+            nm[k] = (ch >= 0x20 && ch < 0x7f) ? ch : (ch == 0 ? 0 : '.');
+            if (!ch) break;
+        }
+        nm[k >= 32 ? 32 : k] = 0;
+        if (strcmp(nm, g_cutDiagName) != 0) {
+            char l[120];
+            strcpy(g_cutDiagName, nm);
+            sprintf(l, "[cutdiag] f=%-6ld name@+0x40 = \"%s\"", (long)g_frameSeq, nm);
+            LogLine(l);
+            InterlockedIncrement(&g_cutDiagLines);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }
 #endif  // ENABLE_CUTSCENE_DIAG
