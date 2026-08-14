@@ -554,11 +554,11 @@ static volatile LONG g_shadowSplitFarPct;
 
 // Cutscene-aware override. Cutscenes are authored against the engine's own
 // cascade splits, so scaling them breaks shadows in some of them (reported in
-// game). While a cutscene is playing the percentages are forced to 0, which
-// makes ApplyCascadeSplitSource take its existing "turned off" path and hand
-// the engine's own values back - the same path a manual toggle already uses,
-// so no new restore logic is introduced. The user's setting is untouched and
-// resumes automatically on the way out.
+// game). While a cutscene is playing an active percentage is neutralised to
+// 100 - i.e. the engine's own value, scaled by 1.0 - rather than switched off,
+// so the write stays on the guarded, idempotent, baseline-tracking path.
+// See the long note in ApplyCascadeSplitSource for why 100 and not 0. The
+// user's setting is untouched and resumes automatically on the way out.
 //
 // Detection lives in 21_cutscene_shadow.c and is deliberately data-driven
 // (offset + mask from the ini) so candidate signals can be tried without a
@@ -668,21 +668,36 @@ static float g_splitSrcSeenNear = 0.0f, g_splitSrcSeenFar = 0.0f;
 static void ApplyCascadeSplitSource(void)
 {
     // EFFECTIVE percentages. Everything below reads these rather than the
-    // user's settings, so a cutscene simply looks like "the option is off" -
-    // including the restore path at the bottom, which already puts the
-    // engine's own values back. The stored settings are never modified, so
-    // whatever the player chose is still there when the cutscene ends.
+    // user's settings, so a cutscene neutralises the option without touching
+    // what the player chose - it is still there when the cutscene ends.
+    //
+    // 100, NOT 0. Both end up writing the engine's own value, but they take
+    // different routes and only one of them is safe:
+    //   100 -> the scaling path. want == baseNear * 1.0, the write is guarded
+    //          by `*nearF != want` so it is idempotent, and lastWroteNear is
+    //          kept in sync - which is what lets the next frame tell OUR value
+    //          apart from a fresh engine value and keep the baseline tracking
+    //          correctly (including any cutscene-specific value the engine
+    //          installs).
+    //     0 -> the restore path at the bottom, which writes unconditionally
+    //          every frame and never updates lastWroteNear. The baseline would
+    //          then be re-derived from our own output every frame - a no-op
+    //          numerically today, but exactly the poisoned-baseline failure
+    //          mode documented below, and it depends on the engine refreshing
+    //          the field, which is not guaranteed for a setting like this.
+    //
+    // Only percentages that are ACTUALLY ACTIVE are neutralised. Forcing 100
+    // unconditionally would start writing these fields for players who have
+    // the option switched off, which we otherwise never touch at all.
     LONG nearPct = g_shadowSplitNearPct;
     LONG farPct  = g_shadowSplitFarPct;
-    if (g_cutsceneActive) {
-        if (nearPct > 0 || farPct > 0) InterlockedIncrement(&g_cutsceneSuppressed);
-        nearPct = 0;
-        farPct  = 0;
+    if (g_cutsceneActive && (nearPct > 0 || farPct > 0)) {
+        if (nearPct > 0) nearPct = 100;
+        if (farPct  > 0) farPct  = 100;
+        InterlockedIncrement(&g_cutsceneSuppressed);
     }
     if (g_mainModBase == 0) return;
-    // Note: with a cutscene active this is deliberately NOT an early-out on
-    // the user's settings - we must still run to restore the engine's values.
-    if (nearPct <= 0 && farPct <= 0 && !g_cutsceneActive) return;
+    if (nearPct <= 0 && farPct <= 0) return;
     __try {
         DWORD obj = *(DWORD *)(g_mainModBase + SCENE_PTR_RVA);
         if (!obj) return;

@@ -127,8 +127,8 @@ static void CutsceneDetectTick(void)
         InterlockedIncrement(&g_cutsceneEdges);
         {
             char l[160];
-            sprintf(l, "[cutscene] %s (edge #%ld, split suppressed %ld frames so far)",
-                    want ? "ENTER - shadow distance held at engine default"
+            sprintf(l, "[cutscene] %s (edge #%ld, split neutralised %ld frames so far)",
+                    want ? "ENTER - shadow distance neutralised to 100%"
                          : "EXIT - shadow distance restored to user setting",
                     g_cutsceneEdges, g_cutsceneSuppressed);
             LogLine(l);
