@@ -180,6 +180,19 @@
 //   each class only.
 #define ENABLE_LOADER_DIAG 1
 
+// ENABLE_DEBUG_MENU - re-enable the game's OWN retail-dormant debug menu.
+//   SEPARATE PROJECT from the stutter/graphics mod (notes: DEBUG_MENU.md) -
+//   this is exploratory and MUST BE 0 IN ANY RELEASE BUILD of the mod.
+//   Survey result (2026-08-14): all 39 DebugMenuPage classes, the LoadViewer
+//   profiler, the debug terminal and the debug states survive in retail. The
+//   enable predicate FUN_00ccea50 is compiled to `return 0` and ICF-folded
+//   into ~1000 vtable slots, so it cannot be body-patched - but the menu
+//   manager singleton (DAT_024c3d74) is BUILT unconditionally at boot and
+//   ticked every frame; retail merely never sets its enable bits. This gate
+//   compiles in a monitor-thread poke that sets those bits on the live
+//   objects (no exe patch). See 20_debug_menu.c.
+#define ENABLE_DEBUG_MENU 1
+
 // ENABLE_GUI_PANEL - the standalone "LR Stutter Fix - Debug Panel" window.
 //   DEPRECATED 2026-08-11: superseded by the game-menu integration
 //   (ENABLE_GAME_MENU), which puts the options in the game's own menu bar.

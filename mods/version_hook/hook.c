@@ -50,3 +50,4 @@
 #include "hook_parts/17_limiter_simdelta.c"
 #include "hook_parts/18_fileprobe_shaderid.c"
 #include "hook_parts/19_boot_install.c"
+#include "hook_parts/20_debug_menu.c"

@@ -81,6 +81,10 @@ static void ReportAndApplyTimerResolution(void)
 }
 #endif  // ENABLE_TIMER_RES
 
+#if ENABLE_DEBUG_MENU
+static void DebugMenuApply(void);   /* 20_debug_menu.c, included after this part */
+#endif
+
 static DWORD WINAPI MonitorThread(LPVOID param)
 {
     (void)param;
@@ -125,6 +129,12 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // an engine settings field from this thread and lets the engine's own
         // change detector reallocate. That pattern is already shipping.
         ApplySsaaScale();
+#if ENABLE_DEBUG_MENU
+        // Separate project (DEBUG_MENU.md): sets the retail-dormant debug
+        // component's enable bits on the live objects. Defined in
+        // 20_debug_menu.c, forward-declared above MonitorThread.
+        DebugMenuApply();
+#endif
 #if ENABLE_SCALING_MODE
         ApplyScalingMode();
 #endif
