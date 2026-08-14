@@ -151,10 +151,9 @@ static NumericSetting g_numerics[] = {
     // CutsceneFlagMask 0 = the "playing" bit is not identified yet, which
     // leaves the whole feature inert. Run once with ENABLE_CUTSCENE_DIAG and
     // read the [cutdiag] lines to find it, then set it here - no rebuild.
-    { &g_cutsceneRevert,    "CutsceneShadowRevert", 0, 1 },
-    { &g_cutsceneFlagOff,   "CutsceneFlagOffset",   0, 0x4000 },
-    { &g_cutsceneFlagMask,  "CutsceneFlagMask",     0, 0x7fffffff },
-    { &g_cutsceneMinFrames, "CutsceneMinFrames",    0, 600 },
+    { &g_cutsceneRevert,   "CutsceneShadowRevert", 0, 1 },
+    { &g_cutsceneFlagOff,  "CutsceneFlagOffset",   0, 0x4000 },
+    { &g_cutsceneFlagMask, "CutsceneFlagMask",     0, 0x7fffffff },
 #if ENABLE_CASCADE_HUNT
     // Near-cascade extent multiplier, percent. 0/100 = untouched,
     // 200 = twice the ground covered by the sharp cascade.

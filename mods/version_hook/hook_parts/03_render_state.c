@@ -577,15 +577,12 @@ static volatile LONG g_cutsceneSuppressed;  // frames we forced the split off
 static volatile LONG g_cutsceneRevert   = 1;     // feature master switch
 static volatile LONG g_cutsceneFlagOff  = 0x5c;  // CinemaController +0x5c
 static volatile LONG g_cutsceneFlagMask = 1;     // bit 0; 0 would disable detection
-// Debounce, in frames. The flag also goes up for very short conversation
-// cinemas (the run caught one lasting ~1 second, cut name "en_npc_0"), and
-// toggling the shadow distance for those would trade the cutscene artefact
-// for a visible shadow pop twice per NPC chat during normal play. Engaging
-// is delayed by this many frames; DISENGAGING is immediate, so a real
-// cutscene is only unprotected for a fraction of a second at its start -
-// usually behind the fade-in - while sub-second cinemas are ignored entirely.
-// 0 disables the debounce and reacts to everything.
-static volatile LONG g_cutsceneMinFrames = 12;
+// Detection is INSTANT in both directions, by request. A frame-count debounce
+// was built and removed: the flag also rises for very short conversation
+// cinemas (the correlation run caught one of ~57 frames, cut name "en_npc_0"),
+// so the concern was a visible shadow pop twice per NPC chat. Reacting
+// immediately is the shipped behaviour; if talk cinemas do turn out to pop,
+// the fix is a hold counter here, not a change anywhere else.
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
 // 4K the game allocates a 2048x4096 R32F atlas (two cascades stacked) plus
