@@ -58,6 +58,7 @@ static ToggleableFix g_toggles[] = {
     { &g_traceSplitCall,       "Trace shadowSplitRange upload call site (cascade hunt)", "TraceSplitCall" },
 #endif
     { &g_overlayEnabled,        "Frametime graph overlay (engine tick)", "GraphOverlay" },
+    { &g_statusEnabled,         "Status panel (settings vs applied state)", "StatusPanel" },
 #if ENABLE_FRAMETIME_DUMP
     { &g_logFrameTimes,         "Dump raw frametimes to log (period diagnostic)", "LogFrameTimes" },
 #endif

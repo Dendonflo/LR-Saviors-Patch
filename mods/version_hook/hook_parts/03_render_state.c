@@ -563,6 +563,12 @@ static volatile LONG g_shadowSplitFarPct;
 // Detection lives in 21_cutscene_shadow.c and is deliberately data-driven
 // (offset + mask from the ini) so candidate signals can be tried without a
 // rebuild while the right one is being pinned down.
+// Tentative def; the real one (with its initialiser) is in 15_msaa.c, which
+// the manifest includes after the overlay. The status panel needs it to show
+// whether MSAA actually latched onto the scene target, so it has to be
+// visible this early - same pattern as g_mainModBase below.
+static volatile LONG g_msSubstitutions;
+
 static volatile LONG g_cutsceneActive;      // 1 while a cutscene is detected
 static volatile LONG g_cutsceneEdges;       // transition count, for the log
 static volatile LONG g_cutsceneSuppressed;  // frames we forced the split off

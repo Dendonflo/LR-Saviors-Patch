@@ -105,6 +105,7 @@ GAMEMENU_TOGGLE(MenuH_GpuSync,     g_gpuSyncSkip)
 GAMEMENU_TOGGLE(MenuH_SimDelta,    g_simDeltaFix)
 GAMEMENU_TOGGLE(MenuH_StdD3D9,     g_forceStdD3D9)
 GAMEMENU_TOGGLE(MenuH_Overlay,     g_overlayEnabled)
+GAMEMENU_TOGGLE(MenuH_Status,      g_statusEnabled)
 
 // Stutter watchdog threshold. 1s = never fires in practice = "Off", which is
 // also the shipping default; the short values re-arm the logging.
@@ -388,6 +389,10 @@ static void GameMenuAppend(void)
     mOpen(mgr, NULL, "Mod_Other"); GameMenuFixLabel(mgr, L"Other");
     mBegin(mgr, NULL);
     mAdd(mgr, NULL, "Mod_Overlay", (void *)MenuH_Overlay); GameMenuFixLabel(mgr, L"Frametime Overlay");
+    // Every setting beside what is actually in force, including the live
+    // cutscene/gameplay state. Sits next to the graph deliberately: same
+    // "show me what is happening" family, different question.
+    mAdd(mgr, NULL, "Mod_Status", (void *)MenuH_Status); GameMenuFixLabel(mgr, L"Status Panel");
     mOpen(mgr, NULL, "Mod_OverlayPos"); GameMenuFixLabel(mgr, L"Overlay Position");
     mBegin(mgr, NULL);
     // Top Left is not offered: it is where the game's menu bar starts, so it

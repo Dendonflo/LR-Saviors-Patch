@@ -290,6 +290,12 @@ static volatile LONG g_stagingCubeEnabled = 1;
 // Graph overlay visibility - a UI feature rather than a fix, but it rides
 // the same table so it gets a checkbox and config persistence for free.
 static volatile LONG g_overlayEnabled = 0;
+// Status panel: every mod setting next to what is ACTUALLY applied right now,
+// including the live cutscene/gameplay state. Separate window from the
+// frametime graph so both can be up at once - they answer different questions
+// ("is it stuttering" vs "is it doing what I set"). Off by default; it is a
+// diagnostic surface, not a feature to greet new users with.
+static volatile LONG g_statusEnabled = 0;
 // ONE threshold drives both the stutter watchdog and the graph's colouring,
 // so the detector and the visualisation can never disagree about what counts
 // as a slow frame. Default 16700us = anything failing 60fps. Raise it for
