@@ -260,8 +260,12 @@ static NumericSetting g_numerics[] = {
     // Frametime overlay corner: 0 TL, 1 TR, 2 BL, 3 BR. Default bottom-right.
     // 0 is still accepted here but is deliberately not offered in the menu -
     // it is where the game's menu bar starts, so it always collides.
+    // Retired: the overlay is dragged now, not corner-picked. Left in the
+    // table so an existing ini carrying the key still loads cleanly.
     { &g_overlayPos, "OverlayPos", 0, 3 },
-    // Status panel position in screen pixels; -1 = auto-place (see g_statusX).
+    // Window positions in screen pixels; -1 = auto-place on first show.
+    { &g_overlayX, "OverlayX", -1, 16384 },
+    { &g_overlayY, "OverlayY", -1, 16384 },
     { &g_statusX, "StatusPanelX", -1, 16384 },
     { &g_statusY, "StatusPanelY", -1, 16384 },
     // Log file control. LogAppend=1 keeps one file across runs (developer

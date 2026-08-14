@@ -1,4 +1,4 @@
-﻿// ---- Honouring the chosen resolution in borderless fullscreen -------------
+// ---- Honouring the chosen resolution in borderless fullscreen -------------
 // The game is ALWAYS borderless (every Reset logs windowed=1), so the
 // backbuffer is always the desktop size and a lower resolution setting is
 // rendered small and upscaled into it. With SSAA that produces a surprise: at
@@ -1385,6 +1385,8 @@ static HRESULT STDMETHODCALLTYPE HookedDeviceReset(
         // recognised by ratio rather than by hardcoded numbers.
         g_backbufW = pPP->BackBufferWidth;
         g_backbufH = pPP->BackBufferHeight;
+        g_presentWindowed = (LONG)(pPP->Windowed ? 1 : 0);
+        g_presentFmt = (LONG)pPP->BackBufferFormat;
         char l[224];
         sprintf(l, "[rt] Reset: %ux%u backbufFmt=%d MULTISAMPLE=%d qual=%lu autoDepth=%d depthFmt=%d windowed=%d interval=0x%lX",
                 pPP->BackBufferWidth, pPP->BackBufferHeight, (int)pPP->BackBufferFormat,

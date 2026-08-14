@@ -1,4 +1,4 @@
-﻿// ---- ForceImmediatePresent: intercept the game's OWN Direct3DCreate9 ------
+// ---- ForceImmediatePresent: intercept the game's OWN Direct3DCreate9 ------
 //
 // Investigation (see PROGRESS.md, "CONFIRMED: the 60Hz clustering is vsync")
 // found the frame-time distribution clustered sharply on multiples of
@@ -66,6 +66,8 @@ static HRESULT STDMETHODCALLTYPE HookedIDirect3D9CreateDevice(
         if (pPP->BackBufferWidth && pPP->BackBufferHeight) {
             g_backbufW = pPP->BackBufferWidth;
             g_backbufH = pPP->BackBufferHeight;
+            g_presentWindowed = (LONG)(pPP->Windowed ? 1 : 0);
+            g_presentFmt = (LONG)pPP->BackBufferFormat;
         }
         if (pPP->hDeviceWindow) g_gameHwnd = pPP->hDeviceWindow;
         char l[192];

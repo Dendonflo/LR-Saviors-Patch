@@ -155,6 +155,12 @@ static void *g_depthRtMain = NULL;           // latched by identity
 // (Declared here rather than with the RT probe: HookedCreateTexture is earlier
 // in this file than that block.)
 static UINT g_backbufW = 0, g_backbufH = 0;
+// Presentation mode and backbuffer format, captured alongside the size at
+// CreateDevice and Reset (both already had them in the present parameters -
+// they were being logged and thrown away). Status-panel rows only.
+// -1 = not seen yet, which is distinct from "windowed" (0).
+static volatile LONG g_presentWindowed = -1;
+static volatile LONG g_presentFmt = 0;
 static volatile LONG g_halfResLogged = 0;
 // ShadowBufPct: percentage applied to the half-res screen-space shadow
 // buffers. 0/100 = untouched (stock half res), 200 = full presentation res,
@@ -563,6 +569,16 @@ static volatile LONG g_shadowSplitFarPct;
 // Detection lives in 21_cutscene_shadow.c and is deliberately data-driven
 // (offset + mask from the ini) so candidate signals can be tried without a
 // rebuild while the right one is being pinned down.
+// Frametime overlay position, same scheme as the status panel below. The
+// four-corner "Overlay Position" menu was retired in favour of dragging the
+// window directly - a corner picker is a poor substitute for putting it
+// exactly where you want it, and two windows with different placement models
+// was one model too many. g_overlayPos is kept (ini key OverlayPos) only so
+// an existing config carrying it is still parsed rather than rejected;
+// nothing reads it any more.
+static volatile LONG g_overlayX = -1;
+static volatile LONG g_overlayY = -1;
+
 // Status panel position, persisted so it stays where it was dragged. -1/-1
 // means "never moved": the panel auto-places itself opposite the frametime
 // graph until the user puts it somewhere, and from then on its own position
@@ -570,6 +586,11 @@ static volatile LONG g_shadowSplitFarPct;
 // jump across the screen whenever the graph's corner setting changed.
 static volatile LONG g_statusX = -1;
 static volatile LONG g_statusY = -1;
+
+// Tentative def; real one in 14_aa_shaders.c, which the manifest includes
+// after the overlay. The status panel needs it to distinguish "FXAA removal
+// is switched on" from "the passthrough has actually been substituted".
+static volatile LONG g_fxaaSubs;
 
 // Tentative def; the real one (with its initialiser) is in 15_msaa.c, which
 // the manifest includes after the overlay. The status panel needs it to show

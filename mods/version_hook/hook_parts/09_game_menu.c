@@ -131,6 +131,9 @@ GAMEMENU_VALUE(MenuH_Ssaa150, g_ssaaScale, 150)
 GAMEMENU_VALUE(MenuH_Ssaa200, g_ssaaScale, 200)
 // Overlay corner. The overlay is a topmost window, so at the top of the screen
 // it sits over the game's own menu bar - which is what motivated this.
+// Retired with the "Overlay Position" submenu - the overlay is dragged now.
+// Kept compiled (they cost nothing) so the corner behaviour is one menu line
+// away if it is ever wanted back.
 GAMEMENU_VALUE(MenuH_OvlTL, g_overlayPos, 0)
 GAMEMENU_VALUE(MenuH_OvlTR, g_overlayPos, 1)
 GAMEMENU_VALUE(MenuH_OvlBL, g_overlayPos, 2)
@@ -393,15 +396,9 @@ static void GameMenuAppend(void)
     // cutscene/gameplay state. Sits next to the graph deliberately: same
     // "show me what is happening" family, different question.
     mAdd(mgr, NULL, "Mod_Status", (void *)MenuH_Status); GameMenuFixLabel(mgr, L"Status Panel");
-    mOpen(mgr, NULL, "Mod_OverlayPos"); GameMenuFixLabel(mgr, L"Overlay Position");
-    mBegin(mgr, NULL);
-    // Top Left is not offered: it is where the game's menu bar starts, so it
-    // is the one corner guaranteed to collide. MenuH_OvlTL and OverlayPos=0
-    // still work from the ini if it is ever wanted back.
-    mAdd(mgr, NULL, "Mod_OvlTR", (void *)MenuH_OvlTR); GameMenuFixLabel(mgr, L"Top Right");
-    mAdd(mgr, NULL, "Mod_OvlBL", (void *)MenuH_OvlBL); GameMenuFixLabel(mgr, L"Bottom Left");
-    mAdd(mgr, NULL, "Mod_OvlBR", (void *)MenuH_OvlBR); GameMenuFixLabel(mgr, L"Bottom Right");
-    mClose(mgr, NULL);
+    // "Overlay Position" (four corners) retired: both windows are dragged
+    // directly now, which places them exactly rather than approximately.
+    // The MenuH_Ovl* handlers are kept above but no longer reachable.
     mClose(mgr, NULL);
 
     // -- 2. locate the vanilla Graphics anchors BEFORE any surgery (the

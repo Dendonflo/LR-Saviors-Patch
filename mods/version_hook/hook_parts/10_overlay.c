@@ -342,6 +342,20 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         EndPaint(hwnd, &ps);
         return 0;
     }
+    // Draggable from anywhere, same as the status panel - the four-corner
+    // menu it replaces could not put the graph where the HUD wasn't.
+    if (msg == WM_NCHITTEST) return HTCAPTION;
+    if (msg == WM_EXITSIZEMOVE || msg == WM_NCLBUTTONUP) {
+        RECT rc;
+        if (GetWindowRect(hwnd, &rc)) {
+            if (rc.left != g_overlayX || rc.top != g_overlayY) {
+                InterlockedExchange(&g_overlayX, rc.left);
+                InterlockedExchange(&g_overlayY, rc.top);
+                SaveConfig();
+            }
+        }
+        return 0;
+    }
     if (msg == WM_ERASEBKGND) return 1;   // fully repainted above
     return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
@@ -356,10 +370,11 @@ static void EnsureOverlayWindow(void)
     wc.lpszClassName = "LRStutterOverlay";
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     RegisterClassA(&wc);
-    // WS_EX_TRANSPARENT makes it click-through so it never steals input from
-    // the game; WS_EX_NOACTIVATE keeps it from taking focus.
+    // WS_EX_TRANSPARENT is deliberately NOT set: click-through and draggable
+    // are mutually exclusive, and being able to place it beats never catching
+    // a click. WS_EX_NOACTIVATE still keeps it from taking focus.
     g_hOverlay = CreateWindowExA(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         "LRStutterOverlay", "", WS_POPUP,
         20, 20, OVL_W, OVL_H, NULL, NULL, GetModuleHandleA(NULL), NULL);
     if (g_hOverlay) SetLayeredWindowAttributes(g_hOverlay, 0, 205, LWA_ALPHA);
@@ -377,7 +392,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      228           // footer removed, so the rows are all of it
+#define STAT_H      262           // 12 rows + header
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -464,10 +479,6 @@ static void DrawStatusPanel(HDC dc)
         else sprintf(app, "off");
         StatRow(dc, &y, "Shadow far split", set, app, held);
     }
-    sprintf(set, "%ld edges", g_cutsceneEdges);
-    sprintf(app, "%ld frames held", g_cutsceneSuppressed);
-    StatRow(dc, &y, "Cutscene counters", set, app, 0);
-
     y += 7;
     // --- the rest of the graphics state -----------------------------------
     {
@@ -496,6 +507,39 @@ static void DrawStatusPanel(HDC dc)
         if (m > 0) sprintf(set, "%ldx", m); else sprintf(set, "off");
         sprintf(app, "%ld subs", g_msSubstitutions);
         StatRow(dc, &y, "MSAA", set, app, m > 0 && g_msSubstitutions == 0);
+    }
+    {
+        // The engine's built-in FXAA. g_fxaaOff=1 swaps the pass for a
+        // passthrough shader, so "removed" is only true once that shader has
+        // actually been substituted at least once.
+        LONG off = g_fxaaOff;
+        sprintf(set, "%s", off ? "removed" : "vanilla (on)");
+        sprintf(app, "%s", off ? (g_fxaaSubs > 0 ? "passthrough" : "not hit yet")
+                               : "active");
+        StatRow(dc, &y, "Built-in FXAA", set, app, off && g_fxaaSubs == 0);
+    }
+    {
+        // Presented resolution and pixel format, straight from the present
+        // parameters the device was created/reset with.
+        const char *fmt = g_presentFmt == 21 ? "X8R8G8B8"      /* D3DFMT_A8R8G8B8 */
+                        : g_presentFmt == 22 ? "X8R8G8B8"      /* D3DFMT_X8R8G8B8 */
+                        : g_presentFmt == 23 ? "R5G6B5"
+                        : g_presentFmt == 32 ? "A2B10G10R10"
+                        : g_presentFmt == 0  ? "?" : "other";
+        if (g_backbufW) sprintf(set, "%ux%u", g_backbufW, g_backbufH);
+        else            sprintf(set, "unknown");
+        sprintf(app, "%s", fmt);
+        StatRow(dc, &y, "Output", set, app, 0);
+    }
+    {
+        LONG w = g_presentWindowed;
+        sprintf(set, "%s", w < 0 ? "unknown" : (w ? "windowed" : "fullscreen"));
+        // Internal render size when SSAA is scaling, so the two are directly
+        // comparable: this is the "am I actually supersampling" check.
+        if (g_ssaaActive && g_ssaaCurW > 0) sprintf(app, "renders %ldx%ld", g_ssaaCurW, g_ssaaCurH);
+        else if (g_backbufW)                sprintf(app, "renders %ux%u", g_backbufW, g_backbufH);
+        else                                sprintf(app, "-");
+        StatRow(dc, &y, "Display mode", set, app, 0);
     }
     {
         LONG c = g_targetFpsX100;
@@ -598,14 +642,9 @@ static void PositionStatusPanel(void)
             have = 1;
         }
     }
-    if (have) {
-        switch (g_overlayPos) {
-        case 1:  x = br.x - STAT_W - m; y = br.y - STAT_H - m; break;  // graph TR
-        case 2:  x = br.x - STAT_W - m; y = tl.y + m;          break;  // graph BL
-        case 3:  x = br.x - STAT_W - m; y = tl.y + m;          break;  // graph BR
-        default: x = br.x - STAT_W - m; y = br.y - STAT_H - m; break;  // graph TL
-        }
-    }
+    // Top-right; the graph auto-places bottom-left, so a fresh install shows
+    // both without them overlapping. Either can then be dragged anywhere.
+    if (have) { x = br.x - STAT_W - m; y = tl.y + m; }
     SetWindowPos(g_hStatus, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
@@ -633,13 +672,17 @@ static DWORD WINAPI OverlayThread(LPVOID param)
             EnsureOverlayWindow();
             if (g_hOverlay) {
                 if (!IsWindowVisible(g_hOverlay)) ShowWindow(g_hOverlay, SW_SHOWNOACTIVATE);
-                // Positioned against the GAME's client area rather than the
-                // desktop, so it stays put in windowed mode as well. Re-asserts
-                // topmost each tick: the game reasserts its own z-order on
-                // focus changes and would otherwise cover this.
-                {
+                // Dragged position wins; otherwise auto-place bottom-left of
+                // the GAME's client area (not the desktop, so windowed mode
+                // works too). Re-asserts topmost each tick: the game
+                // reasserts its own z-order on focus changes and would
+                // otherwise cover this.
+                if (g_overlayX >= 0 && g_overlayY >= 0) {
+                    SetWindowPos(g_hOverlay, HWND_TOPMOST, g_overlayX, g_overlayY, 0, 0,
+                                 SWP_NOSIZE | SWP_NOACTIVATE);
+                } else {
                     int x = 20, y = 20;
-                    const int m = 20;      // margin from the chosen corner
+                    const int m = 20;
                     RECT rc;
                     HWND gw = g_gameHwnd;
                     POINT tl, br;
@@ -658,14 +701,9 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                             have = 1;
                         }
                     }
-                    if (have) {
-                        switch (g_overlayPos) {
-                        case 1: x = br.x - OVL_W - m; y = tl.y + m;          break; // top-right
-                        case 2: x = tl.x + m;         y = br.y - OVL_H - m;  break; // bottom-left
-                        case 3: x = br.x - OVL_W - m; y = br.y - OVL_H - m;  break; // bottom-right
-                        default: x = tl.x + m;        y = tl.y + m;          break; // top-left
-                        }
-                    }
+                    // Bottom-left: the status panel auto-places top-right, so
+                    // the two never land on each other before either is moved.
+                    if (have) { x = tl.x + m; y = br.y - OVL_H - m; }
                     SetWindowPos(g_hOverlay, HWND_TOPMOST, x, y, 0, 0,
                                  SWP_NOSIZE | SWP_NOACTIVATE);
                 }
