@@ -156,9 +156,15 @@ static void *g_depthRtMain = NULL;           // latched by identity
 // in this file than that block.)
 static UINT g_backbufW = 0, g_backbufH = 0;
 // Presentation mode and backbuffer format, captured alongside the size at
-// CreateDevice and Reset (both already had them in the present parameters -
-// they were being logged and thrown away). Status-panel rows only.
-// -1 = not seen yet, which is distinct from "windowed" (0).
+// CreateDevice and Reset. -1 = not seen yet, distinct from "windowed" (0).
+//
+// NOT SUITABLE AS A USER-FACING RESOLUTION. Tried on the status panel and
+// removed: at a 1080p fullscreen setting on a 4K display these report
+// 3840x2160 and "windowed", because the engine presents into a desktop-sized
+// backbuffer and uses a borderless window rather than exclusive fullscreen.
+// The values are what D3D was actually handed; they simply do not match what
+// the player set. Anything wanting a recognisable resolution has to derive it
+// from the engine's internal size instead.
 static volatile LONG g_presentWindowed = -1;
 static volatile LONG g_presentFmt = 0;
 static volatile LONG g_halfResLogged = 0;

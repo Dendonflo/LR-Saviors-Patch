@@ -392,7 +392,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      262           // 12 rows + header
+#define STAT_H      228           // 10 rows + header
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -518,29 +518,20 @@ static void DrawStatusPanel(HDC dc)
                                : "active");
         StatRow(dc, &y, "Built-in FXAA", set, app, off && g_fxaaSubs == 0);
     }
-    {
-        // Presented resolution and pixel format, straight from the present
-        // parameters the device was created/reset with.
-        const char *fmt = g_presentFmt == 21 ? "X8R8G8B8"      /* D3DFMT_A8R8G8B8 */
-                        : g_presentFmt == 22 ? "X8R8G8B8"      /* D3DFMT_X8R8G8B8 */
-                        : g_presentFmt == 23 ? "R5G6B5"
-                        : g_presentFmt == 32 ? "A2B10G10R10"
-                        : g_presentFmt == 0  ? "?" : "other";
-        if (g_backbufW) sprintf(set, "%ux%u", g_backbufW, g_backbufH);
-        else            sprintf(set, "unknown");
-        sprintf(app, "%s", fmt);
-        StatRow(dc, &y, "Output", set, app, 0);
-    }
-    {
-        LONG w = g_presentWindowed;
-        sprintf(set, "%s", w < 0 ? "unknown" : (w ? "windowed" : "fullscreen"));
-        // Internal render size when SSAA is scaling, so the two are directly
-        // comparable: this is the "am I actually supersampling" check.
-        if (g_ssaaActive && g_ssaaCurW > 0) sprintf(app, "renders %ldx%ld", g_ssaaCurW, g_ssaaCurH);
-        else if (g_backbufW)                sprintf(app, "renders %ux%u", g_backbufW, g_backbufH);
-        else                                sprintf(app, "-");
-        StatRow(dc, &y, "Display mode", set, app, 0);
-    }
+    // REMOVED: "Output" (resolution + format) and "Display mode"
+    // (fullscreen/windowed). Both read straight from the present parameters
+    // and both were wrong on screen - at a 1080p fullscreen setting on a 4K
+    // display they reported 3840x2160 and "windowed".
+    //
+    // That is not a bug in the readout, it is the same decoupling the SSAA
+    // work already documented: the engine presents into a desktop-sized
+    // backbuffer and lets the display clamp, and it uses a borderless window
+    // rather than exclusive fullscreen, so D3D's own numbers genuinely say
+    // 4K/windowed while the player is looking at 1080p fullscreen. Reporting
+    // the resolution a player would recognise means deriving it from the
+    // engine's internal size instead, which is a different job. Not worth it
+    // for a status row - removed rather than left showing numbers that
+    // disagree with the game's own menu.
     {
         LONG c = g_targetFpsX100;
         if (c > 0) sprintf(set, "%.2f fps", c / 100.0); else sprintf(set, "unlocked");
