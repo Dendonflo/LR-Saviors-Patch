@@ -1252,7 +1252,7 @@ static int LogAppendRequested(void)
     {
         char *slash = strrchr(path, '\\');
         if (!slash) return 0;
-        strcpy(slash + 1, "version_hook_config.ini");
+        strcpy(slash + 1, MOD_CONFIG_FILE);
     }
     h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                     NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1277,7 +1277,7 @@ static void LogLine(const char *msg)
         char path[MAX_PATH];
         GetModuleFileNameA(NULL, path, MAX_PATH);
         char *slash = strrchr(path, '\\');
-        if (slash) strcpy(slash + 1, "version_hook.log");
+        if (slash) strcpy(slash + 1, MOD_LOG_FILE);
         // "w" (truncate) is the SHIPPING default, not "a". Appending across
         // every launch is right for a developer bisecting two sessions and
         // wrong for a player: with any diagnostic armed this file grows
@@ -1309,7 +1309,7 @@ static void LogLine(const char *msg)
         g_logBytes += (LONGLONG)strlen(msg) + 1;
         if (g_logBytes > (LONGLONG)g_logMaxMB * 1048576) {
             fprintf(g_logFile, "[log] size cap of %ld MB reached - logging stops here."
-                               " Raise LogMaxMB (0 = unlimited) in version_hook_config.ini.\n",
+                               " Raise LogMaxMB (0 = unlimited) in " MOD_CONFIG_FILE ".\n",
                     g_logMaxMB);
             fflush(g_logFile);
             g_logCapped = 1;

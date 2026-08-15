@@ -17,6 +17,19 @@
  */
 #pragma once
 
+// ---- Mod identity ---------------------------------------------------------
+// Defined here because hook.h is the only header both translation units share
+// (hook.c's single-TU manifest and dllmain.c, which writes its own startup
+// log before any of that exists). Previously the filenames were four scattered
+// string literals, which is how "version_hook" - a development name that was
+// never meant to be user-facing - ended up on files players would see.
+//
+// The DLL itself CANNOT be renamed: it ships as dinput8.dll because that is
+// the proxy the game loads. The name lives in these files and in the menu.
+#define MOD_NAME        "Savior's Patch"
+#define MOD_CONFIG_FILE "SaviorsPatch.ini"
+#define MOD_LOG_FILE    "SaviorsPatch.log"
+
 // Installs the animation/skeleton prefetch hook. Safe to call once the
 // process's own main module is loaded (i.e. from a thread, not directly
 // inside DllMain's DLL_PROCESS_ATTACH).

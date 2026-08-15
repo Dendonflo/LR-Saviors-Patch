@@ -8,7 +8,7 @@ static void GetConfigPath(char *outPath, size_t outSize)
 {
     GetModuleFileNameA(NULL, outPath, (DWORD)outSize);
     char *slash = strrchr(outPath, '\\');
-    if (slash) strcpy(slash + 1, "version_hook_config.ini");
+    if (slash) strcpy(slash + 1, MOD_CONFIG_FILE);
 }
 
 // ---- Toggleable fixes (GUI checkbox only - hotkeys removed) ---------------

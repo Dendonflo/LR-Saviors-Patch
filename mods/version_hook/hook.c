@@ -31,6 +31,10 @@
  * build.cmd compiles THIS file; the parts are found relative to it.
  */
 
+// Mod identity (MOD_NAME / MOD_CONFIG_FILE / MOD_LOG_FILE). Also included by
+// dllmain.c, which is a separate TU and writes its own startup log.
+#include "hook.h"
+
 #include "hook_parts/01_config_gates.c"
 #include "hook_parts/02_interop_provider.c"
 #include "hook_parts/03_render_state.c"

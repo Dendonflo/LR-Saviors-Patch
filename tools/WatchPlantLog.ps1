@@ -1,6 +1,6 @@
 # Live watcher for the Gysahl planting instrumentation.
 #
-# Tails version_hook.log and shows ONLY the planting-relevant lines, colour
+# Tails SaviorsPatch.log and shows ONLY the planting-relevant lines, colour
 # coded, so the interesting events are readable while playing. The raw log is
 # thousands of lines of frame/monitor spam per minute; this filters it down to
 # roughly a handful of lines per planting.
@@ -10,7 +10,7 @@
 #
 # Ctrl+C to stop. Safe to start/stop at any time; it does not touch the file.
 
-$log = "C:\Program Files (x86)\Steam\steamapps\common\LIGHTNING RETURNS FINAL FANTASY XIII\version_hook.log"
+$log = "C:\Program Files (x86)\Steam\steamapps\common\LIGHTNING RETURNS FINAL FANTASY XIII\SaviorsPatch.log"
 
 Write-Host ""
 Write-Host "  Gysahl planting watcher" -ForegroundColor White

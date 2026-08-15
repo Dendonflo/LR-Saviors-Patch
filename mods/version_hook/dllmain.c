@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Lightning Returns: Final Fantasy XIII - asset streaming & stutter mod
  * Copyright (C) 2026  Dendonflo
  *
@@ -36,7 +36,7 @@ static void LogStartup(const char *msg)
     GetModuleFileNameA(NULL, path, MAX_PATH);
     char *slash = strrchr(path, '\\');
     if (slash) {
-        strcpy(slash + 1, "version_hook.log");
+        strcpy(slash + 1, MOD_LOG_FILE);
     }
     FILE *f = fopen(path, "a");
     if (f) {

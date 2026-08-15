@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyse version_hook.log stutter data, per MARKED SEGMENT.
+"""Analyse SaviorsPatch.log stutter data, per MARKED SEGMENT.
 
 Why this exists (2026-08-15): several rounds of analysis were done over
 whole log files, which include boot, title screen, save loading and
