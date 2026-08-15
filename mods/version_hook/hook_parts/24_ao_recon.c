@@ -53,6 +53,15 @@ static struct { DWORD stage; void *tex; volatile LONG count; } g_aoReads[AO_READ
 static volatile LONG g_aoReadCount = 0;
 
 static volatile LONG g_aoMsStage[16];      // shadow-tex samples in MULTI_SAMPLE, per stage
+// v22b: the first flight produced NO report - the MULTI_SAMPLE condition
+// never accumulated 120 frames, and there was no partial output to say which
+// prerequisite failed. Two additions: shadow-tex sightings counted in EVERY
+// pass (if the composite happens in DRAW_FILTER rather than the material
+// pass, this is what says so), and a timeout report from the monitor thread
+// so the recon always speaks.
+static volatile LONG g_aoTexPass[PASS_COUNT + 1];
+static volatile LONG g_aoSetTexCalls = 0;      // proves the hook is live at all
+static volatile LONG g_aoShadowPassCalls = 0;  // SetTexture calls seen inside MS_SHADOW
 static volatile LONG g_aoMsDepthSamples = 0;
 static volatile LONG g_aoLateRebinds = 0;  // shadow surf as RT0 after MULTI_SAMPLE began
 static volatile LONG g_aoFramesSampled = 0;
@@ -73,9 +82,12 @@ static void *AoResolveContainer(void *surf)
     return tex;
 }
 
-static void AoReconReport(void)
+static void AoReconReport(const char *how)
 {
     char l[224];
+    sprintf(l, "[aorecon] ---- report (%s): settex_calls=%ld ms_shadow_settex=%ld ----",
+            how, g_aoSetTexCalls, g_aoShadowPassCalls);
+    LogLine(l);
     sprintf(l, "[aorecon] MS_SHADOW rt0=%p %ldx%ld fmt=%ld container=%p (%s)",
             g_aoShadowSurf, g_aoShadowW, g_aoShadowH, g_aoShadowFmt, g_aoShadowTex,
             g_aoShadowTex ? "texture - BINDABLE" : "no container - NOT bindable, option 2 dead");
@@ -108,15 +120,47 @@ static void AoReconReport(void)
             g_aoLateRebinds ? "LIFETIME PROBLEM" : "lifetime OK",
             g_aoMsDepthSamples);
     LogLine(l);
+    {
+        // Which passes bind the shadow container at all - the question the
+        // first flight could not answer when MULTI_SAMPLE came up empty.
+        char buf[200];
+        int o = sprintf(buf, "[aorecon] shadow tex bound during:");
+        int any = 0;
+        for (int p = 0; p <= PASS_COUNT; p++)
+            if (g_aoTexPass[p]) { o += sprintf(buf + o, " pass%d=%ld", p, g_aoTexPass[p]); any = 1; }
+        if (!any) o += sprintf(buf + o, " (never bound via SetTexture in ANY pass)");
+        LogLine(buf);
+    }
     LogLine("[aorecon] recon complete - hook stays passthrough for the rest of the session");
+}
+
+// Timeout path, driven from the monitor thread (which always runs): if the
+// success condition has not fired by ~60s of session, report whatever was
+// gathered. A recon that can end a flight silent is a wasted flight.
+static void AoReconTick(void)
+{
+    static LONG ticks = 0;
+    if (g_aoReported) return;
+    if (++ticks == 120 &&
+        InterlockedCompareExchange(&g_aoReported, 1, 0) == 0)
+        AoReconReport("TIMEOUT - success condition never met");
 }
 
 static HRESULT STDMETHODCALLTYPE HookedSetTexture(
     IDirect3DDevice9 *dev, DWORD stage, IDirect3DBaseTexture9 *tex)
 {
     LONG pass = g_curPass;
+    g_aoSetTexCalls++;   // racy increment is fine for a liveness counter
+
+    // Track every pass that binds the shadow container, not just MULTI_SAMPLE.
+    if (tex && (void *)tex == g_aoShadowTex && g_aoShadowTex) {
+        LONG p = pass;
+        if (p < 0 || p > PASS_COUNT) p = PASS_COUNT;
+        InterlockedIncrement(&g_aoTexPass[p]);
+    }
 
     if (pass == PASS_MS_SHADOW) {
+        g_aoShadowPassCalls++;
         // Latch the pass's RT0 once, with descriptor and container.
         if (!g_aoShadowSurf && g_prevRt0) {
             __try {
@@ -157,7 +201,7 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
                 g_aoLastSampleFrame = fr;
                 if (InterlockedIncrement(&g_aoFramesSampled) >= 120 &&
                     InterlockedCompareExchange(&g_aoReported, 1, 0) == 0)
-                    AoReconReport();
+                    AoReconReport("SUCCESS - sampled in MULTI_SAMPLE across 120 frames");
             }
         }
         if (tex && (void *)tex == g_aoDepthTex)

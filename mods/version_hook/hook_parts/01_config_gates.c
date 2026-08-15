@@ -239,6 +239,7 @@
 #define ENABLE_AO_RECON 1
 #if ENABLE_AO_RECON
 static void InstallAoReconHook(void **vtbl);  // 24_ao_recon.c
+static void AoReconTick(void);                // timeout report, monitor thread
 #endif
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware

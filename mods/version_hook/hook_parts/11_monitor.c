@@ -133,6 +133,9 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // reliable startup. If it is ever wanted back, it belongs somewhere
         // provably late (first rendered frame, not first monitor tick).
         ApplyShadowResolution();
+#if ENABLE_AO_RECON
+        AoReconTick();
+#endif
         // Same cadence and same risk profile as ApplyShadowResolution: writes
         // an engine settings field from this thread and lets the engine's own
         // change detector reallocate. That pattern is already shipping.
