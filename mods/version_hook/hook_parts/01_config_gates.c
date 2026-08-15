@@ -198,13 +198,16 @@
 //   names its faulting site instead of "module: unknown".
 #define ENABLE_D3DX_DIAG 0
 
-// ENABLE_CRASH_LOG - vectored first-chance logger for fatal exception
-//   codes (AV, illegal instruction, stack overflow). Logs EIP, owning
-//   module and a game-address stack sweep to version_hook.log with an
-//   immediate fflush, then CONTINUE_SEARCH - purely observational, the
-//   crash proceeds unchanged. Capped at 5 records per session so a
-//   handled first-chance AV loop cannot flood the log.
-#define ENABLE_CRASH_LOG 1
+// ENABLE_CRASH_LOG - RETIRED same day (2026-08-15). Built as a crash
+//   logger before discovering the mod already HAS one (ModCrashVeh /
+//   ModCrashFilter in 19_boot_install.c, installed at boot). The one run
+//   it flew, it found the real bug in the EXISTING logger instead: the
+//   watchdog's guarded stack-scan AVs (by design, ~constant during
+//   stutters) were consuming ModCrashVeh's one-shot report, which is why
+//   the Load Game crash died silently. Fix applied to ModCrashVeh
+//   directly (own-module EIP filter + accessing address + stack sweep);
+//   the duplicate handler is gated off, kept as the record of why.
+#define ENABLE_CRASH_LOG 0
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
 //   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of

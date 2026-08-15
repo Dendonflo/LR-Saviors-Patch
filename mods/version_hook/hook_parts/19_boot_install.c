@@ -440,6 +440,31 @@ static LONG CALLBACK ModCrashVeh(EXCEPTION_POINTERS *ep)
                  || (code == 0xC0000094u)   /* integer divide by zero  */
                  || (code == 0xC0000096u);  /* privileged instruction  */
         if (!fatal) return EXCEPTION_CONTINUE_SEARCH;
+        // Our own guarded probes AV by DESIGN: the watchdog's raw stack scan
+        // (StutterWatchdogThread) sweeps the suspended main thread's stack
+        // under __try and faults whenever it walks off the mapped region.
+        // Found 2026-08-15: those benign first-chance AVs were consuming the
+        // one-shot g_crashReported below, so when the game genuinely died
+        // (the Load Game crash) this logger had already spent its single
+        // report on a probe and the log ended silently - the exact failure
+        // this handler exists to prevent. EIP inside our module -> pass
+        // through without spending the report. A real crash in our DLL is
+        // not lost: it reaches ModCrashFilter at the unhandled stage.
+        {
+            HMODULE selfMod = NULL;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCSTR)(ULONG_PTR)ModCrashVeh, &selfMod) && selfMod) {
+                DWORD eip = (DWORD)ep->ContextRecord->Eip;
+                unsigned char *mb = (unsigned char *)selfMod;
+                // SizeOfImage straight from our own in-memory PE header -
+                // avoids a psapi.lib dependency for one field.
+                DWORD sz = ((IMAGE_NT_HEADERS *)(mb + ((IMAGE_DOS_HEADER *)mb)->e_lfanew))
+                               ->OptionalHeader.SizeOfImage;
+                if (eip >= (DWORD)(ULONG_PTR)mb && eip < (DWORD)(ULONG_PTR)mb + sz)
+                    return EXCEPTION_CONTINUE_SEARCH;
+            }
+        }
         if (InterlockedCompareExchange(&g_crashReported, 1, 0) != 0)
             return EXCEPTION_CONTINUE_SEARCH;
 
@@ -459,11 +484,36 @@ static LONG CALLBACK ModCrashVeh(EXCEPTION_POINTERS *ep)
             const char *slash = strrchr(modPath, '\\');
             if (slash) name = slash + 1;
             char l[400];
-            sprintf(l, "[crash] FIRST-CHANCE code=0x%08lX addr=%p in %s+0x%lX thread=%lu",
+            sprintf(l, "[crash] FIRST-CHANCE code=0x%08lX addr=%p in %s+0x%lX thread=%lu accessing=0x%08lX",
                     (unsigned long)code, addr,
                     modPath[0] ? name : "<unknown module>",
-                    (unsigned long)off, (unsigned long)GetCurrentThreadId());
+                    (unsigned long)off, (unsigned long)GetCurrentThreadId(),
+                    ep->ExceptionRecord->NumberParameters >= 2
+                        ? (unsigned long)ep->ExceptionRecord->ExceptionInformation[1] : 0);
             LogLine(l);
+        }
+        // Raw-stack sweep for game-module return addresses - same technique
+        // and same rationale as the watchdog's scan line: when EIP is already
+        // garbage (the Load Game crash had it in unmapped heap memory), the
+        // EBP chain is useless, but the stack still holds the trail of who
+        // was executing.
+        {
+            char buf[512];
+            int o = sprintf(buf, "[crash]   stack:");
+            int n = 0;
+            __try {
+                DWORD *sp = (DWORD *)ep->ContextRecord->Esp;
+                for (int i = 0; i < 512 && n < 14; i++) {
+                    DWORD v = sp[i];
+                    if (g_mainModBase && v > (DWORD)g_mainModBase &&
+                        v < (DWORD)g_mainModBase + 0x2400000) {
+                        o += sprintf(buf + o, " %08lX",
+                                     v - (DWORD)g_mainModBase + 0x00400000);
+                        n++;
+                    }
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            LogLine(buf);
         }
         LogFlushNow();
     }
