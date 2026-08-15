@@ -213,9 +213,14 @@ static NumericSetting g_numerics[] = {
     { &g_aoDebug,       "AoDebug",       0, 1 },
     // Strength past 100 pushes the AO term below the engine's own 0.5 shadow
     // floor - deeper-than-stock creases, by user request ("very aggressive").
-    { &g_aoStrengthPct, "AoStrengthPct", 0, 200 },
-    { &g_aoIntensity100, "AoIntensity100", 50, 2000 },
-    { &g_aoRadius100,   "AoRadius100",   1, 100000 },
+    // Per-estimator slots: the unprefixed keys are SSAO's (so values tuned
+    // before HBAO existed keep meaning what they meant), AoHbao* are HBAO's.
+    { &g_aoStrengthPctE[0], "AoStrengthPct", 0, 200 },
+    { &g_aoIntensityE[0], "AoIntensity100", 50, 2000 },
+    { &g_aoRadiusE[0],  "AoRadius100",   1, 100000 },
+    { &g_aoStrengthPctE[1], "AoHbaoStrengthPct", 0, 200 },
+    { &g_aoIntensityE[1], "AoHbaoIntensity100", 50, 2000 },
+    { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
     { &g_aoProj100,     "AoProj100",     10, 1000 },
     // Bilateral blur pass (25_ssao.c): Sharp is the depth edge-stop - how
     // hard the blur refuses to smooth across depth discontinuities. 0 turns

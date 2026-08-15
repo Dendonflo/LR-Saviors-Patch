@@ -46,6 +46,8 @@
 // AoDebug       0/1      draw raw AO opaquely instead of blending -
 //                        the only sane way to tune radius/strength by eye
 // AoStrengthPct 0..200   how much of the [0.5..1] envelope AO may use
+//                        (per-estimator slot, as are Intensity and Radius:
+//                        AoHbao* keys hold HBAO's values)
 // AoRadius100   world-units radius x100 (engine units - tuned by eye)
 // AoProj100     projection scale x100 (cot(fovY/2)); wrong values show as
 //                        AO that stretches with screen position in debug view
@@ -352,14 +354,14 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     float c0[4], c1[4], c2[4];
     c0[0] = 1.0f / (float)w;
     c0[1] = 1.0f / (float)h;
-    c0[2] = (float)g_aoRadius100 / 100.0f;
-    c0[3] = (float)g_aoStrengthPct / 100.0f;
+    c0[2] = (float)g_aoRadiusE[est] / 100.0f;
+    c0[3] = (float)g_aoStrengthPctE[est] / 100.0f;
     c1[0] = ((float)g_aoProj100 / 100.0f) * ((float)h / (float)w);
     c1[1] = (float)g_aoProj100 / 100.0f;
     // Bias units differ per estimator: Alchemy multiplies by P.z inside the
     // shader (depth-proportional), HBAO compares in sin-of-elevation space.
     c1[2] = est ? 0.15f : 0.02f;
-    c1[3] = (float)g_aoIntensity100 / 100.0f;   // estimator gain, live-tunable
+    c1[3] = (float)g_aoIntensityE[est] / 100.0f;   // estimator gain, live-tunable
     c2[0] = mode;
     c2[1] = c2[2] = c2[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);

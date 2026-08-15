@@ -256,9 +256,14 @@ static volatile LONG g_aoDumpRequest;         // one-shot buffer dump (menu butt
 static volatile LONG g_aoEnable = 0;          // ini AoEnable; Graphics > Ambient Occlusion
                                               //   0=off 1=SSAO (Alchemy) 2=HBAO
 static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
-static volatile LONG g_aoStrengthPct = 100;   // ini AoStrengthPct (user: "very aggressive")
-static volatile LONG g_aoIntensity100 = 250;  // ini AoIntensity100: estimator gain x100
-static volatile LONG g_aoRadius100 = 60;      // ini AoRadius100 (0.6 units - eyeball)
+// Strength/Intensity/Radius are PER-ESTIMATOR slots ([0]=SSAO [1]=HBAO,
+// user: "HBAO looks better but needs separate saved values") - the two
+// estimators' scales don't translate, Intensity especially. Projection and
+// BlurSharp stay shared: they describe the camera and the blur, not the
+// estimator. The tuning panel re-points its sliders to the live slot.
+static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct / AoHbaoStrengthPct
+static volatile LONG g_aoIntensityE[2] = { 250, 250 };    // ini AoIntensity100 / AoHbaoIntensity100
+static volatile LONG g_aoRadiusE[2] = { 60, 60 };         // ini AoRadius100 / AoHbaoRadius100
 static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)

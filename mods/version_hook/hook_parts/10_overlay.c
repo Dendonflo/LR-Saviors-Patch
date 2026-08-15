@@ -659,19 +659,24 @@ static void PositionStatusPanel(void)
 #if ENABLE_AO_SSAO
 static HWND g_hAoTweak = NULL;
 
+// val is the ACTIVE binding; vals[] holds the per-estimator slots
+// ([0]=SSAO [1]=HBAO). The overlay thread re-points val when the estimator
+// changes, so the panel always edits the live estimator's values. Shared
+// rows (Projection, Blur Sharp) list the same pointer twice.
 static struct {
     const char *name;
     volatile LONG *val;
+    volatile LONG *vals[2];
     LONG lo, hi, step;
     HWND bar;
 } g_aoRows[] = {
-    { "Strength %",  &g_aoStrengthPct,   0,  200,  5, NULL },
-    { "Intensity",   &g_aoIntensity100, 50, 2000, 25, NULL },
-    { "Radius",      &g_aoRadius100,    10, 1500, 10, NULL },
-    { "Projection",  &g_aoProj100,      80,  250,  5, NULL },
+    { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, NULL },
+    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
+    { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
+    { "Projection",  &g_aoProj100,         { &g_aoProj100,         &g_aoProj100 },         80,  250,  5, NULL },
     // Blur depth edge-stop (0 = plain gaussian). Only meaningful with
     // AoBlur=1; the row is harmless when the blur is off.
-    { "Blur Sharp",  &g_aoBlurSharp,     0,  400, 10, NULL },
+    { "Blur Sharp",  &g_aoBlurSharp,       { &g_aoBlurSharp,       &g_aoBlurSharp },        0,  400, 10, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34
@@ -746,7 +751,8 @@ static void EnsureAoTweakWindow(void)
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
     g_hAoTweak = CreateWindowExA(
-        WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName, "SSAO Tuning",
+        WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName,
+        (g_aoEnable == 2) ? "AO Tuning - HBAO" : "AO Tuning - SSAO",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         120, 120, r.right - r.left, r.bottom - r.top,
         NULL, NULL, wc.hInstance, NULL);
@@ -825,6 +831,26 @@ static DWORD WINAPI OverlayThread(LPVOID param)
             ShowWindow(g_hOverlay, SW_HIDE);
         }
 #if ENABLE_AO_SSAO
+        {
+            // Per-estimator slider retarget: whenever the AO menu switches
+            // estimator, re-point every row at the live slot, snap the
+            // scrollbars to the slot's values, and retitle the window so
+            // the panel says which estimator it is editing.
+            static LONG lastEst = -1;
+            LONG est = (g_aoEnable == 2) ? 1 : 0;
+            if (est != lastEst) {
+                lastEst = est;
+                for (size_t i = 0; i < AO_ROWS; i++) {
+                    g_aoRows[i].val = g_aoRows[i].vals[est];
+                    if (g_aoRows[i].bar)
+                        SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
+                }
+                if (g_hAoTweak) {
+                    SetWindowTextA(g_hAoTweak, est ? "AO Tuning - HBAO" : "AO Tuning - SSAO");
+                    InvalidateRect(g_hAoTweak, NULL, TRUE);
+                }
+            }
+        }
         if (g_aoTweakOpen) {
             EnsureAoTweakWindow();
             if (g_hAoTweak && !IsWindowVisible(g_hAoTweak)) {
