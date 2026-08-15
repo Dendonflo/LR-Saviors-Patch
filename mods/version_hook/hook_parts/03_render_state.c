@@ -361,6 +361,14 @@ __declspec(noinline) int __cdecl ScreenSetRebuildAllowed_C(void)
     if (g_ssaaMode != 1 || g_ssaaScale <= 100) {
         InterlockedIncrement(&g_ssaaRebuildsAllowed);
         MsaaInvalidateSceneLatch();   // the surfaces about to be freed are latched
+#if ENABLE_AO_RECON
+        // Same invalidation, same reason, for the AO latches (shadow-buffer
+        // set + depth container). Found 2026-08-16 exactly the way the MSAA
+        // version of this bug was: SSAA toggled -> screen set rebuilt with
+        // NO device Reset -> stale latches -> AO silently off, and the raw
+        // view then bound the FREED depth texture and crashed the game.
+        AoReconReset();
+#endif
         return 1;
     }
     __try {
@@ -382,6 +390,14 @@ __declspec(noinline) int __cdecl ScreenSetRebuildAllowed_C(void)
     if (InterlockedCompareExchange(&g_ssaaRebuildPending, 0, 1) == 1) {
         InterlockedIncrement(&g_ssaaRebuildsAllowed);
         MsaaInvalidateSceneLatch();   // the surfaces about to be freed are latched
+#if ENABLE_AO_RECON
+        // Same invalidation, same reason, for the AO latches (shadow-buffer
+        // set + depth container). Found 2026-08-16 exactly the way the MSAA
+        // version of this bug was: SSAA toggled -> screen set rebuilt with
+        // NO device Reset -> stale latches -> AO silently off, and the raw
+        // view then bound the FREED depth texture and crashed the game.
+        AoReconReset();
+#endif
         return 1;                    // one rebuild, because the scale changed
     }
     InterlockedIncrement(&g_ssaaRebuildsBlocked);
