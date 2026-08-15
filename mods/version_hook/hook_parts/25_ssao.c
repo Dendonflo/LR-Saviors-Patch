@@ -145,6 +145,18 @@ static void SsaoCompile(IDirect3DDevice9 *dev)
     }
     g_ssaoCompileState = 1;
     LogLine("[ssao] pixel shader compiled and created (ps_3_0, Alchemy spiral, 12 taps)");
+    {
+        // For the record on the MIN-blend failure theory: does the device
+        // even claim BLENDOP support? (We no longer rely on it either way.)
+        D3DCAPS9 caps;
+        if (SUCCEEDED(IDirect3DDevice9_GetDeviceCaps(dev, &caps))) {
+            char l[96];
+            sprintf(l, "[ssao] caps: PrimitiveMiscCaps=0x%08lX BLENDOP=%s",
+                    (unsigned long)caps.PrimitiveMiscCaps,
+                    (caps.PrimitiveMiscCaps & D3DPMISCCAPS_BLENDOP) ? "claimed" : "ABSENT");
+            LogLine(l);
+        }
+    }
 }
 
 // Runs at the s14 bind, before the engine's consumers. dev-state discipline
@@ -195,10 +207,21 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
             // screen SHOWS it (materials multiply it in) - the tuning view.
             g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE);
         } else {
+            // MULTIPLY, not MIN (v24e). The four-band diagnostic proved the
+            // whole shader pipeline works, which left the blend as the only
+            // broken stage - and the symptom (shadows erased by a shader
+            // whose output never exceeds 1.0) is exactly what BLENDOP MIN
+            // silently falling back to ADD produces: [0.5..1] + [0.5..1]
+            // saturates white. dst*src needs no BLENDOP support at all.
+            // Cost vs MIN: AO and engine shadow STACK (0.5 floor becomes
+            // 0.25 where both are at maximum) instead of merging - visually
+            // that is deeper contact shading inside shadows, acceptable and
+            // tunable via AoStrengthPct. Alpha: dstA * srcA(=1) - sun mask
+            // still bit-exact.
             g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE);
-            g_origSetRenderState(dev, D3DRS_BLENDOP, D3DBLENDOP_MIN);
-            g_origSetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_ONE);
-            g_origSetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_ONE);
+            g_origSetRenderState(dev, D3DRS_BLENDOP, D3DBLENDOP_ADD);
+            g_origSetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
+            g_origSetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_ZERO);
         }
         g_origSetRenderState(dev, D3DRS_ZENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);
