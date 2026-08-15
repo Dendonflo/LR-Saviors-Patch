@@ -48,8 +48,13 @@ static const char *g_ssaoHlsl =
 "}\n"
 "float4 main(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR {\n"
 "    float3 P = ViewPos(uv);\n"
-"    if (P.z > 5000.0) return float4(1, 1, 1, 1);\n"   // sky/far: no AO
-"    float3 N = normalize(cross(ddy(P), ddx(P)));\n"
+"    if (P.z > 1500.0) return float4(1, 1, 1, 1);\n"   // sky/far (far plane ~2000)
+// cross(ddx, ddy), NOT (ddy, ddx): view space is x-right/y-up/z-into-screen
+// and screen v runs DOWN, so the other order points normals AWAY from the
+// camera - every dot(v,N) clamps to zero and AO is white everywhere. That
+// was v24's entire failure; depth units were correct all along (measured
+// 4..2000 world units, [aodepth] 2026-08-15).
+"    float3 N = normalize(cross(ddx(P), ddy(P)));\n"
 "    float ign = frac(52.9829189 * frac(dot(vpos, float2(0.06711056, 0.00583715))));\n"
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
 "    float occ = 0.0;\n"
