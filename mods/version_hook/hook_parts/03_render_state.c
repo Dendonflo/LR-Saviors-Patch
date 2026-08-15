@@ -210,7 +210,7 @@ static volatile LONG g_shadowBufResPct = 0;
 // background's shadow goes missing behind a partially-covered edge. That
 // predicts every observation: MSAA cannot help (the buffer is not MS),
 // SGSSAA only shrinks and averages the artifact (everything is bigger, the
-// artifact included), and ShadowBufResPct should reduce it directly.
+// artifact included), and ScreenShadowResPct should reduce it directly.
 //
 // Left as a dead flag rather than deleted: re-adding its line to g_toggles[]
 // is all it takes to run the experiment again. Not in the table today, so it

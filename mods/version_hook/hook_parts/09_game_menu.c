@@ -106,6 +106,12 @@ GAMEMENU_TOGGLE(MenuH_SimDelta,    g_simDeltaFix)
 GAMEMENU_TOGGLE(MenuH_StdD3D9,     g_forceStdD3D9)
 GAMEMENU_TOGGLE(MenuH_Overlay,     g_overlayEnabled)
 GAMEMENU_TOGGLE(MenuH_Status,      g_statusEnabled)
+// Heap-compaction deferral. Lives in Optimization, which is only reachable by
+// a user who set AdvancedMenu=1 by hand - at that point they have opted into
+// experimenting, and the tuning knobs (CompactorBudgetUs, CompactorCooldown)
+// are one file away anyway. Default OFF and unproven: see the long note at
+// g_compactorDeferEnabled in 03_render_state.c.
+GAMEMENU_TOGGLE(MenuH_Compactor,   g_compactorDeferEnabled)
 
 // Log marker. A MOMENTARY ACTION, not a toggle: it writes a line and always
 // reports itself unchecked, so the menu entry behaves like a button.
@@ -465,6 +471,8 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_StageCube", (void *)MenuH_StageCube); GameMenuFixLabel(mgr, L"Cube Textures");
         mClose(mgr, NULL);
         mAdd(mgr, NULL, "Mod_GpuSync",   (void *)MenuH_GpuSync);   GameMenuFixLabel(mgr, L"Skip GPU Fence");
+        mAdd(mgr, NULL, "Mod_Compactor", (void *)MenuH_Compactor);
+        GameMenuFixLabel(mgr, L"Defer Heap Compaction (unproven)");
         mAdd(mgr, NULL, "Mod_SimDelta",  (void *)MenuH_SimDelta);  GameMenuFixLabel(mgr, L"Sim Delta Fix");
         mAdd(mgr, NULL, "Mod_StdD3D9",   (void *)MenuH_StdD3D9);   GameMenuFixLabel(mgr, L"Force Plain D3D9 (restart)");
         mOpen(mgr, NULL, "Mod_Watchdog"); GameMenuFixLabel(mgr, L"Stutter Watchdog");
@@ -601,7 +609,7 @@ static void GameMenuAppend(void)
                 // because the content is band-limited by PCF plus the
                 // MULTI_SAMPLE interleave), and it only applies on area change
                 // or restart. A setting that does nothing visible and needs a
-                // reload is a trap in a user-facing menu. ShadowBufResPct
+                // reload is a trap in a user-facing menu. ScreenShadowResPct
                 // survives as an ini key for anyone who wants it.
 
                 at = (scalePos >= 0) ? scalePos + 1 : endPos;

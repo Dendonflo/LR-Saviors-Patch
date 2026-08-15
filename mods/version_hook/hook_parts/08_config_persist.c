@@ -36,7 +36,13 @@ static ToggleableFix g_toggles[] = {
     { &g_stagingUploadEnabled,  "SYSTEMMEM staging upload (EXPERIMENTAL)", "StagingUpload" },
     { &g_stagingSurfaceEnabled, "SYSTEMMEM staging for Surface::LockRect (EXPERIMENTAL)", "StagingSurface" },
     { &g_stagingCubeEnabled,    "SYSTEMMEM staging for CubeTexture::LockRect (EXPERIMENTAL)", "StagingCube" },
-    { &g_hdTexPushEnabled,      "Push staged texture uploads to the HD GUI mod (interop)", "HDTexPush" },
+    // HDTexPush RETIRED as a setting 2026-08-15 - now permanently on
+    // (g_hdTexPushEnabled = 1 in 02_interop_provider.c). There is no benefit
+    // to switching it off and no cost to leaving it on: with the HD GUI mod
+    // absent, g_hdTexNotify stays NULL and the push is one dead branch per
+    // staged upload. A toggle whose "off" position helps nobody is just a
+    // way for a config file to break interop silently. Old inis carrying
+    // HDTexPush=0 are ignored, which is the intended outcome.
 #if ENABLE_CLAMP_DEADLINE
     { &g_clampDeadlineEnabled,  "Clamp frame-limiter deadline (no catch-up) (EXPERIMENTAL)", "ClampDeadline" },
 #endif
@@ -172,7 +178,15 @@ static NumericSetting g_numerics[] = {
     // CutsceneFlagMask 0 = the "playing" bit is not identified yet, which
     // leaves the whole feature inert. Run once with ENABLE_CUTSCENE_DIAG and
     // read the [cutdiag] lines to find it, then set it here - no rebuild.
-    { &g_cutsceneRevert,   "CutsceneShadowRevert", 0, 1 },
+    // CutsceneShadowRevert RETIRED as a setting 2026-08-15 - now permanently
+    // on (g_cutsceneRevert = 1 in 03_render_state.c). It is a BUG FIX, not a
+    // preference: cutscenes are authored against the engine's own cascade
+    // splits, so a raised Shadow Distance breaks their shadows. Switching
+    // this off restores the bug and improves nothing. It only ever needed a
+    // key while the detection was being developed and could misfire; mode 2
+    // (named cut slots) has been confirmed correct across many cutscenes.
+    // Note it costs nothing when Shadow Distance is Standard - the neutraliser
+    // only touches percentages that are actually active.
     // 2 = named cut slots (cinematics only); 1 = raw CinemaController flag,
     // which also fires on dialogue and UI prompts. See g_cutsceneMode.
     { &g_cutsceneMode,     "CutsceneDetectMode",   1, 2 },
@@ -223,7 +237,17 @@ static NumericSetting g_numerics[] = {
     // half-res value - the same numbers meant half as much and read as though
     // 100 were "unchanged" when it was actually a 2x. A stale ShadowBufPct in
     // an old config is simply ignored rather than silently reinterpreted.
-    { &g_shadowBufResPct, "ShadowBufResPct", 0, 200 },
+    //
+    // Renamed again 2026-08-15, to ScreenShadowResPct. "ShadowBufResPct" told
+    // a reader nothing: "buffer" is an implementation detail, and the two
+    // shadow settings people actually meet are resolution and distance, so a
+    // third one named after a buffer reads as internal plumbing. The new name
+    // says which shadows it affects - the SCREEN-SPACE pass
+    // (DRAW_MULTI_SAMPLE_SHADOW, half-res by default), the contact/detail
+    // layer, not the cascade shadow maps ShadowMapRes drives. Still no GUI
+    // control: the effect is subtle and only applies on area change, which is
+    // a trap in a menu but fine for someone reading the ini.
+    { &g_shadowBufResPct, "ScreenShadowResPct", 0, 200 },
     // MSAA sample count on the scene colour pass. 0 = off, 2/4/8 = sample
     // count (this device reports all three supported for A8R8G8B8 + D24S8).
     // EXPERIMENTAL: this substitutes a render target under the engine and
