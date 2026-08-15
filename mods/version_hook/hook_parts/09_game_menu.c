@@ -189,7 +189,12 @@ GAMEMENU_VALUE(MenuH_SsShad2x,   g_shadowBufResPct, 200)
 static void GameMenuSetSplit(LONG pct)
 {
     InterlockedExchange(&g_shadowSplitNearPct, pct);
-    InterlockedExchange(&g_shadowSplitFarPct, 0);
+    // Far is NO LONGER forced to 0 here. It was, from 2026-08-11 to
+    // 2026-08-15, because the far split behaved unpredictably and there was
+    // no menu control for it - so an old ini value could sit live and
+    // invisible under a near-only menu. Now that far has its own group the
+    // two are independent settings, and silently clearing one from the
+    // other's handler would make the far menu appear to forget itself.
     SaveConfig();
     // This used to also write the run marker, because it was the cheapest
     // one-button action reachable mid-run. Retired 2026-08-15 in favour of a
@@ -216,6 +221,46 @@ static char __cdecl MenuH_Dist300(char apply)
 {
     if (apply) GameMenuSetSplit(300);
     return (char)(g_shadowSplitNearPct == 300);
+}
+
+// FAR cascade split. Scales the first of the two fields whose PRODUCT is the
+// far distance (scene+0x430, with +0x438 left alone so whatever per-area
+// meaning it carries survives) - see ApplyCascadeSplitSource.
+//
+// Exposed 2026-08-15 at the user's request, for testing. It was deliberately
+// menu-less before: the far split moved things around in ways that were hard
+// to predict, so only the near split shipped. Kept to modest steps for the
+// same reason - if it turns out to behave, the range can grow.
+//
+// Also the leading candidate for whatever draws the OTHER, longer-range
+// high-quality shadows the user has observed: those ignore the near split
+// entirely but do respond to shadow map resolution, so they are a separate
+// projection reading a separate distance - and far is the distance we know
+// about that is not near.
+static void GameMenuSetFarSplit(LONG pct)
+{
+    InterlockedExchange(&g_shadowSplitFarPct, pct);
+    SaveConfig();
+}
+static char __cdecl MenuH_FarStd(char apply)
+{
+    if (apply) GameMenuSetFarSplit(0);
+    return (char)(g_shadowSplitFarPct == 0);
+}
+static char __cdecl MenuH_Far125(char apply)
+{
+    if (apply) GameMenuSetFarSplit(125);
+    return (char)(g_shadowSplitFarPct == 125);
+}
+static char __cdecl MenuH_Far150(char apply)
+{
+    if (apply) GameMenuSetFarSplit(150);
+    return (char)(g_shadowSplitFarPct == 150);
+}
+static char __cdecl MenuH_Far200(char apply)
+{
+    if (apply) GameMenuSetFarSplit(200);
+    return (char)(g_shadowSplitFarPct == 200);
 }
 
 // Shadowing popup REPLACEMENT. Standard/Advanced wrap the vanilla handlers
@@ -534,6 +579,17 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 1, id++, L"150%",     MenuH_Dist150);
                     GameMenuInsertLeaf(sub, 2, id++, L"200%",     MenuH_Dist200);
                     GameMenuInsertLeaf(sub, 3, id++, L"300%",     MenuH_Dist300);
+                    groups++;
+                }
+
+                // Far cascade split, immediately under the near one so the
+                // pair reads as what it is: two ends of the same cascade.
+                sub = GameMenuInsertGroup(gfx, at + 1, L"Shadow Distance (Far)");
+                if (sub) {
+                    GameMenuInsertLeaf(sub, 0, id++, L"Standard", MenuH_FarStd);
+                    GameMenuInsertLeaf(sub, 1, id++, L"125%",     MenuH_Far125);
+                    GameMenuInsertLeaf(sub, 2, id++, L"150%",     MenuH_Far150);
+                    GameMenuInsertLeaf(sub, 3, id++, L"200%",     MenuH_Far200);
                     groups++;
                 }
                 // Screen-Space Shadows REMOVED from the menu 2026-08-12: the
