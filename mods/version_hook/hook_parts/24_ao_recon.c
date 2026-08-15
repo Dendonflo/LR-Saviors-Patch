@@ -135,15 +135,20 @@ static void AoReconReport(const char *how)
 }
 
 // Timeout path, driven from the monitor thread (which always runs): if the
-// success condition has not fired by ~60s of session, report whatever was
-// gathered. A recon that can end a flight silent is a wasted flight.
+// success condition has not fired, report whatever was gathered anyway.
+//
+// 20 SECONDS, not 60. The v22b flight taught the second lesson in a row
+// about this recon's reporting: the user's test sessions run ~35s
+// (launch, load, stand, quit - measured at ~70 monitor ticks), so a 60s
+// timeout is a report that never fires. Diagnostics have to fit the test
+// loop they will actually fly in.
 static void AoReconTick(void)
 {
     static LONG ticks = 0;
     if (g_aoReported) return;
-    if (++ticks == 120 &&
+    if (++ticks == 40 &&
         InterlockedCompareExchange(&g_aoReported, 1, 0) == 0)
-        AoReconReport("TIMEOUT - success condition never met");
+        AoReconReport("TIMEOUT at 20s - success condition not met by then");
 }
 
 static HRESULT STDMETHODCALLTYPE HookedSetTexture(
@@ -199,9 +204,18 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
             LONG fr = g_msFrameSeq;
             if (fr != g_aoLastSampleFrame) {
                 g_aoLastSampleFrame = fr;
-                if (InterlockedIncrement(&g_aoFramesSampled) >= 120 &&
+                LONG fs = InterlockedIncrement(&g_aoFramesSampled);
+                if (fs >= 120 &&
                     InterlockedCompareExchange(&g_aoReported, 1, 0) == 0)
                     AoReconReport("SUCCESS - sampled in MULTI_SAMPLE across 120 frames");
+                // If the timeout report already went out and sampling only
+                // began afterwards (e.g. the buffer is only consumed in some
+                // areas), say so once instead of staying silent about it.
+                else if (fs == 120 && g_aoReported) {
+                    static volatile LONG lateOnce = 0;
+                    if (InterlockedCompareExchange(&lateOnce, 1, 0) == 0)
+                        LogLine("[aorecon] LATE SUCCESS - MULTI_SAMPLE sampling began after the timeout report");
+                }
             }
         }
         if (tex && (void *)tex == g_aoDepthTex)
