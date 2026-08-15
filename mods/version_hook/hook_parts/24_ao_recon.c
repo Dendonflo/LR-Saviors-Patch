@@ -228,6 +228,66 @@ static volatile LONG g_aoTints = 0;
 // exe, 32bpp so the alpha channel survives for offline channel analysis.
 // g_aoDumpRequest declared in 01_config_gates.c (menu part 09 needs it).
 
+// v24b: the SSAO first flight drew pure white - plumbing confirmed working,
+// occlusion never found, which points straight at the depth UNITS assumption
+// (world-Z vs normalized). Stop assuming: read the depth RT and print its
+// actual value distribution. This is the whole diagnosis in one log block.
+static void AoDumpDepthStats(IDirect3DDevice9 *dev)
+{
+    IDirect3DSurface9 *sys = NULL;
+    __try {
+        if (!g_depthRtMain) { LogLine("[aodepth] no depth RT latched"); return; }
+        D3DSURFACE_DESC d;
+        if (FAILED(IDirect3DSurface9_GetDesc((IDirect3DSurface9 *)g_depthRtMain, &d)))
+            return;
+        if (FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(
+                dev, d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, NULL)) || !sys)
+            return;
+        if (FAILED(IDirect3DDevice9_GetRenderTargetData(
+                dev, (IDirect3DSurface9 *)g_depthRtMain, sys))) goto done;
+        {
+            D3DLOCKED_RECT lr;
+            if (FAILED(IDirect3DSurface9_LockRect(sys, &lr, NULL, D3DLOCK_READONLY)))
+                goto done;
+            {
+                double sum = 0.0;
+                float mn = 3.4e38f, mx = -3.4e38f;
+                LONG n = 0, b1 = 0, b10 = 0, b100 = 0, b1k = 0, b10k = 0;
+                for (UINT y = 0; y < d.Height; y += 4) {           // 1/16 sample grid
+                    const float *row = (const float *)((const unsigned char *)lr.pBits + y * lr.Pitch);
+                    for (UINT x = 0; x < d.Width; x += 4) {
+                        float v = row[x];
+                        if (v < mn) mn = v;
+                        if (v > mx) mx = v;
+                        sum += v; n++;
+                        if (v < 1.0f) b1++;
+                        else if (v < 10.0f) b10++;
+                        else if (v < 100.0f) b100++;
+                        else if (v < 1000.0f) b1k++;
+                        else b10k++;
+                    }
+                }
+                {
+                    const float *midRow = (const float *)((const unsigned char *)lr.pBits
+                                          + (d.Height / 2) * lr.Pitch);
+                    char l[256];
+                    sprintf(l, "[aodepth] %lux%lu R32F: min=%g max=%g mean=%g centre=%g",
+                            d.Width, d.Height, mn, mx, n ? sum / n : 0.0,
+                            midRow[d.Width / 2]);
+                    LogLine(l);
+                    sprintf(l, "[aodepth] value bands: <1=%ld  1-10=%ld  10-100=%ld  100-1000=%ld  >=1000=%ld  (of %ld sampled)",
+                            b1, b10, b100, b1k, b10k, n);
+                    LogLine(l);
+                    LogFlushNow();
+                }
+            }
+            IDirect3DSurface9_UnlockRect(sys);
+        }
+    done:;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (sys) IDirect3DSurface9_Release(sys);
+}
+
 static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
 {
     IDirect3DSurface9 *surf = NULL, *sys = NULL;
@@ -510,8 +570,10 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         if (stage == 14 && tex && AoIsShadowTex((void *)tex)) {
             // Dump BEFORE any of our writes, so the file always holds the
             // engine's own content.
-            if (InterlockedCompareExchange(&g_aoDumpRequest, 0, 1) == 1)
+            if (InterlockedCompareExchange(&g_aoDumpRequest, 0, 1) == 1) {
                 AoDumpBuffer(dev, tex);
+                AoDumpDepthStats(dev);
+            }
 #if ENABLE_AO_SSAO
             if (g_aoEnable)
                 SsaoApply(dev, tex);
