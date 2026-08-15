@@ -39,6 +39,10 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_SetTexture)(
     IDirect3DDevice9 *, DWORD, IDirect3DBaseTexture9 *);
 static PFN_SetTexture g_origSetTexture = NULL;
 
+#if ENABLE_AO_SSAO
+static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex);  // 25_ssao.c
+#endif
+
 // Local IID so the build does not gain a dxguid.lib dependency for one call.
 static const GUID g_aoIidTexture9 =
     { 0x85C31227, 0x3DE5, 0x4f00, { 0x9B, 0x3A, 0xF1, 0x1A, 0xC3, 0x8C, 0x18, 0xB5 } };
@@ -504,10 +508,14 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         // consumed. Runs BEFORE forwarding the bind; the content is tinted
         // either way since the texture identity does not change.
         if (stage == 14 && tex && AoIsShadowTex((void *)tex)) {
-            // Dump BEFORE tint, so the file always holds the engine's own
-            // content rather than last frame's bands.
+            // Dump BEFORE any of our writes, so the file always holds the
+            // engine's own content.
             if (InterlockedCompareExchange(&g_aoDumpRequest, 0, 1) == 1)
                 AoDumpBuffer(dev, tex);
+#if ENABLE_AO_SSAO
+            if (g_aoEnable)
+                SsaoApply(dev, tex);
+#endif
             if (g_aoTint)
                 AoTintBuffer(dev, tex);
         }

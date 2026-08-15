@@ -243,6 +243,21 @@ static void AoReconTick(void);                // timeout report, monitor thread
 static void AoDrawTick(void);                 // draw-level consumption check
 static volatile LONG g_aoTint;                // tint probe toggle (ini AoTint)
 static volatile LONG g_aoDumpRequest;         // one-shot buffer dump (menu button)
+
+// ENABLE_AO_SSAO - the actual SSAO injection (25_ssao.c), built on the recon
+//   findings. Requires ENABLE_AO_RECON (uses its RT-set tracking and the
+//   s14 hook point).
+#define ENABLE_AO_SSAO 1
+#if ENABLE_AO_SSAO
+// (SsaoApply is forward-declared in 24_ao_recon.c - d3d9 types do not exist
+// this early in the TU, but the tunables are plain LONGs and belong here so
+// the config table in 08 can see them.)
+static volatile LONG g_aoEnable = 0;          // ini AoEnable + menu toggle
+static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
+static volatile LONG g_aoStrengthPct = 70;    // ini AoStrengthPct
+static volatile LONG g_aoRadius100 = 60;      // ini AoRadius100 (0.6 units - eyeball)
+static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
+#endif
 #endif
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware

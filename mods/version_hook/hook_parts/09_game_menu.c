@@ -124,6 +124,10 @@ static char __cdecl MenuH_AoDump(char apply)
     if (apply) InterlockedExchange(&g_aoDumpRequest, 1);
     return 0;
 }
+#if ENABLE_AO_SSAO
+GAMEMENU_TOGGLE(MenuH_AoEnable, g_aoEnable)
+GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
+#endif
 #endif
 
 // Log marker. A MOMENTARY ACTION, not a toggle: it writes a line and always
@@ -491,6 +495,12 @@ static void GameMenuAppend(void)
         GameMenuFixLabel(mgr, L"AO Tint Probe (bands)");
         mAdd(mgr, NULL, "Mod_AoDump", (void *)MenuH_AoDump);
         GameMenuFixLabel(mgr, L"AO Dump Buffer (ao_buffer.bmp)");
+#if ENABLE_AO_SSAO
+        mAdd(mgr, NULL, "Mod_AoEnable", (void *)MenuH_AoEnable);
+        GameMenuFixLabel(mgr, L"SSAO (experimental)");
+        mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);
+        GameMenuFixLabel(mgr, L"SSAO Debug View (raw AO)");
+#endif
 #endif
         mAdd(mgr, NULL, "Mod_SimDelta",  (void *)MenuH_SimDelta);  GameMenuFixLabel(mgr, L"Sim Delta Fix");
         mAdd(mgr, NULL, "Mod_StdD3D9",   (void *)MenuH_StdD3D9);   GameMenuFixLabel(mgr, L"Force Plain D3D9 (restart)");

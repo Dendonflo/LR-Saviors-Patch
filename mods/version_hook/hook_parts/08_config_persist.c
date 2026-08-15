@@ -203,6 +203,17 @@ static NumericSetting g_numerics[] = {
     // read off the screen. Diagnostic-build key; gone when the gate goes.
     { &g_aoTint, "AoTint", 0, 1 },
 #endif
+#if ENABLE_AO_SSAO
+    // SSAO injection (25_ssao.c). Strength = how much of the engine's own
+    // [0.5..1] shadow envelope AO may use; Radius in engine units x100,
+    // tuned by eye in the debug view; Proj = cot(fovY/2) x100 - wrong values
+    // show as AO stretching with screen position in the debug view.
+    { &g_aoEnable,      "AoEnable",      0, 1 },
+    { &g_aoDebug,       "AoDebug",       0, 1 },
+    { &g_aoStrengthPct, "AoStrengthPct", 0, 100 },
+    { &g_aoRadius100,   "AoRadius100",   1, 100000 },
+    { &g_aoProj100,     "AoProj100",     10, 1000 },
+#endif
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },
     { &g_compactorCooldownFrames, "CompactorCooldown", 1, 60 },

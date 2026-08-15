@@ -59,3 +59,4 @@
 #include "hook_parts/22_d3dx_diag.c"
 #include "hook_parts/23_upload_gate.c"
 #include "hook_parts/24_ao_recon.c"
+#include "hook_parts/25_ssao.c"
