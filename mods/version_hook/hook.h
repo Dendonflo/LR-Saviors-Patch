@@ -27,6 +27,7 @@
 // The DLL itself CANNOT be renamed: it ships as dinput8.dll because that is
 // the proxy the game loads. The name lives in these files and in the menu.
 #define MOD_NAME        "Savior's Patch"
+#define MOD_TAGLINE     "Performance & graphics"
 #define MOD_CONFIG_FILE "SaviorsPatch.ini"
 #define MOD_LOG_FILE    "SaviorsPatch.log"
 

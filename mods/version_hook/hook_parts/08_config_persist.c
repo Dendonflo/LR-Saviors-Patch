@@ -399,10 +399,14 @@ static void SaveConfig(void)
     // not match, so comment lines are safe - and they are worth the three
     // lines: several settings here have no menu entry at all, and an ini is
     // the only place a user can discover them.
-    fprintf(f, "# Lightning Returns FFXIII - mod configuration.\n");
+    fprintf(f, "# " MOD_NAME " - " MOD_TAGLINE "\n");
+    fprintf(f, "# Lightning Returns: Final Fantasy XIII\n");
+    fprintf(f, "#\n");
     fprintf(f, "# Every setting the mod knows, with its current value.\n");
     fprintf(f, "# Most are set from the in-game menu (Graphics / Other); the rest\n");
-    fprintf(f, "# are safe to edit here. Delete this file to restore defaults.\n\n");
+    fprintf(f, "# are safe to edit here, with the game CLOSED - a running game\n");
+    fprintf(f, "# rewrites this file from memory whenever a setting changes.\n");
+    fprintf(f, "# Delete this file to restore defaults.\n\n");
     for (size_t i = 0; i < NUM_TOGGLES; i++)
         fprintf(f, "%s=%ld\n", g_toggles[i].key, *g_toggles[i].flag);
     // Numeric settings persist too. This was missing on the first attempt:

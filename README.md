@@ -1,4 +1,4 @@
-# Lightning Returns: Final Fantasy XIII — asset streaming & stutter mod
+# Savior's Patch — Performance & graphics
 
 A D3D9 mod for the Steam release of *Lightning Returns: Final Fantasy XIII*,
 built to remove the frame-time stutter the PC port suffers from while
