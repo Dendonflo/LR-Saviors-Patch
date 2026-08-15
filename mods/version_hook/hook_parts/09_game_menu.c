@@ -112,6 +112,12 @@ GAMEMENU_TOGGLE(MenuH_Status,      g_statusEnabled)
 // are one file away anyway. Default OFF and unproven: see the long note at
 // g_compactorDeferEnabled in 03_render_state.c.
 GAMEMENU_TOGGLE(MenuH_Compactor,   g_compactorDeferEnabled)
+#if ENABLE_AO_RECON
+// AO tint probe: the bands make everything look weird by design, which makes
+// on/off comparison the only readable way to judge them - so it needs a live
+// toggle. Rides the normal toggle machinery; menu rebuild = instant effect.
+GAMEMENU_TOGGLE(MenuH_AoTint,      g_aoTint)
+#endif
 
 // Log marker. A MOMENTARY ACTION, not a toggle: it writes a line and always
 // reports itself unchecked, so the menu entry behaves like a button.
@@ -473,6 +479,10 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_GpuSync",   (void *)MenuH_GpuSync);   GameMenuFixLabel(mgr, L"Skip GPU Fence");
         mAdd(mgr, NULL, "Mod_Compactor", (void *)MenuH_Compactor);
         GameMenuFixLabel(mgr, L"Defer Heap Compaction (unproven)");
+#if ENABLE_AO_RECON
+        mAdd(mgr, NULL, "Mod_AoTint", (void *)MenuH_AoTint);
+        GameMenuFixLabel(mgr, L"AO Tint Probe (bands)");
+#endif
         mAdd(mgr, NULL, "Mod_SimDelta",  (void *)MenuH_SimDelta);  GameMenuFixLabel(mgr, L"Sim Delta Fix");
         mAdd(mgr, NULL, "Mod_StdD3D9",   (void *)MenuH_StdD3D9);   GameMenuFixLabel(mgr, L"Force Plain D3D9 (restart)");
         mOpen(mgr, NULL, "Mod_Watchdog"); GameMenuFixLabel(mgr, L"Stutter Watchdog");
