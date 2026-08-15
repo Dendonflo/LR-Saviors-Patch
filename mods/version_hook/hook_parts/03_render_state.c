@@ -723,6 +723,8 @@ static volatile LONG g_ugBoth;
 static volatile LONG g_ugFastUsec;   // cumulative memcpy-path time
 static volatile LONG g_ugSlowUsec;   // cumulative D3DX-path time
 static volatile LONG g_ugSlowMaxUsec;
+static volatile LONG g_tcTotal;      // DDS textures created
+static volatile LONG g_tcNpot;       // ...of which non-power-of-two
 #endif
 
 // ---- Shadow map resolution multiplier ------------------------------------

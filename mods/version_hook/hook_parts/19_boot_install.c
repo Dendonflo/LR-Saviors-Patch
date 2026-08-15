@@ -926,6 +926,10 @@ void InstallPrefetchHook(void)
         sprintf(line, "[upload] texture-upload gate census hook: %s",
                 ugOk ? "installed" : "FAILED");
         LogLine(line);
+        int tcOk = InstallTexCreateHook();
+        sprintf(line, "[texcreate] DDS create census hook: %s",
+                tcOk ? "installed" : "FAILED");
+        LogLine(line);
     }
 #endif
 

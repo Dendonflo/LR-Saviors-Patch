@@ -162,6 +162,116 @@ __declspec(naked) void Detour_uploadGate(void)
     }
 }
 
+// ---- DDS texture-create census (v21) --------------------------------------
+// CORRECTION to the v20 attribution. The upload gate above turned out to be
+// cheap - 1458 slow uploads cost 8ms across an entire run - and the watchdog
+// scans settle where the d3dx family actually lives: every d3dx capture
+// carries 00AA2776 (the return address of the D3DXCreateTextureFromFileInMemoryEx
+// call in FUN_00aa2710) and NOT ONE carries 00AA346C (the
+// D3DXLoadSurfaceFromMemory site). The cost is whole-texture DDS decode, not
+// per-surface upload.
+//
+// FUN_00aa2710's call, from the decompile:
+//   D3DXCreateTextureFromFileInMemoryEx(device, pSrcData,
+//       D3DX_DEFAULT /*SrcDataSize*/, D3DX_DEFAULT /*Width*/,
+//       D3DX_DEFAULT /*Height*/, 1 /*MipLevels*/, 0 /*Usage*/,
+//       D3DFMT_UNKNOWN /*Format*/, 2 /*Pool=SYSTEMMEM*/,
+//       D3DX_DEFAULT /*Filter*/, D3DX_DEFAULT /*MipFilter*/, ...)
+//
+// D3DX_DEFAULT for Width/Height is documented to round the image UP TO A
+// POWER OF TWO, and D3DX_DEFAULT for Filter is TRIANGLE|DITHER - so a
+// non-power-of-two DDS would be fully resampled with an expensive filter on
+// load. That is a theory, not a finding: this census records what the DDS
+// header actually declares so it can be checked rather than assumed.
+//
+// Entry-only (FUN_00aa2710 has an SEH prologue - PUSH -1/PUSH handler/
+// MOV EAX,FS:[0] - so return hijacking is out, same rule that keeps
+// FN_A01A00 disabled). 5-byte patch, boundary and inbound refs verified in
+// ghidra_output/texcreate_safety.txt.
+//
+// DDS header: +12 dwHeight, +16 dwWidth, +28 dwMipMapCount, +84 ddspf.dwFourCC
+static void *g_trampoline_texCreate = NULL;
+static volatile LONG g_tcTotal, g_tcNpot;
+typedef struct { LONG w, h, mips, fourcc; } TcCombo;
+#define TC_COMBO_MAX 48
+static TcCombo g_tcCombos[TC_COMBO_MAX];
+static volatile LONG g_tcComboCount;
+
+__declspec(noinline) void __cdecl OnEnter_texCreate_C(DWORD ddsPtr)
+{
+    __try {
+        if (!ddsPtr) return;
+        if (*(DWORD *)ddsPtr != 0x20534444) return;   // not "DDS "
+        LONG h      = *(LONG *)(ddsPtr + 12);
+        LONG w      = *(LONG *)(ddsPtr + 16);
+        LONG mips   = *(LONG *)(ddsPtr + 28);
+        LONG fourcc = *(LONG *)(ddsPtr + 84);
+        if (w <= 0 || w > 32768 || h <= 0 || h > 32768) return;
+
+        int npot = ((w & (w - 1)) != 0) || ((h & (h - 1)) != 0);
+        InterlockedIncrement(&g_tcTotal);
+        if (npot) InterlockedIncrement(&g_tcNpot);
+
+        LONG n = g_tcComboCount;
+        if (n > TC_COMBO_MAX) n = TC_COMBO_MAX;
+        for (LONG i = 0; i < n; i++)
+            if (g_tcCombos[i].w == w && g_tcCombos[i].h == h &&
+                g_tcCombos[i].mips == mips && g_tcCombos[i].fourcc == fourcc) return;
+        if (n >= TC_COMBO_MAX) return;
+        g_tcCombos[n].w = w; g_tcCombos[n].h = h;
+        g_tcCombos[n].mips = mips; g_tcCombos[n].fourcc = fourcc;
+        g_tcComboCount = n + 1;
+        {
+            char line[192], tag[8];
+            if (fourcc > 0x20202020) { *(DWORD *)tag = (DWORD)fourcc; tag[4] = 0; }
+            else sprintf(tag, "raw%ld", fourcc);
+            // pow2_target is what D3DX_DEFAULT would round the image up to.
+            LONG pw = 1, ph = 1;
+            while (pw < w) pw <<= 1;
+            while (ph < h) ph <<= 1;
+            sprintf(line, "[texcreate] DDS %ldx%ld mips=%ld fmt=%s%s",
+                    w, h, mips, tag,
+                    npot ? "" : " (pow2)");
+            LogLine(line);
+            if (npot) {
+                sprintf(line, "[texcreate]   ^ NPOT: D3DX_DEFAULT would resample to %ldx%ld"
+                              " (%.1fx the pixels)", pw, ph,
+                        (double)(pw * ph) / (double)(w * h));
+                LogLine(line);
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// Entry-only, no return hijack (SEH prologue). At entry:
+//   [esp] = retaddr, [esp+4] = param_1 (the DDS blob)
+__declspec(naked) void Detour_texCreate(void)
+{
+    __asm {
+        push ecx
+        push edx
+        mov eax, [esp + 0x0C]   ; param_1 = pSrcData
+        push eax
+        call OnEnter_texCreate_C
+        add esp, 4
+        pop edx
+        pop ecx
+        jmp dword ptr [g_trampoline_texCreate]
+    }
+}
+
+static int InstallTexCreateHook(void)
+{
+    if (!g_mainModBase) return 0;
+    HookedFunc hf;
+    hf.name = "FUN_00aa2710";
+    hf.rva = 0x00aa2710 - 0x00400000;
+    hf.target = (void *)(g_mainModBase + hf.rva);
+    hf.patchLen = 5;   // 55 8B EC 6A FF - boundary verified
+    return InstallJmpHook(&hf, (void *)Detour_texCreate, &g_trampoline_texCreate);
+}
+
 static int InstallUploadGateHook(void)
 {
     if (!g_mainModBase) return 0;

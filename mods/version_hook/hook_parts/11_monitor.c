@@ -489,6 +489,11 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     g_ugFastUsec / 1000, g_ugSlowUsec / 1000, g_ugSlowMaxUsec);
             LogLine(line);
         }
+        if (g_tcTotal) {
+            sprintf(line, "[texcreate] DDS textures=%ld npot=%ld (%.1f%%)",
+                    g_tcTotal, g_tcNpot, 100.0 * g_tcNpot / g_tcTotal);
+            LogLine(line);
+        }
 #endif
 
         // Compactor deferral: only speaks when it actually skipped something,
