@@ -568,12 +568,13 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         // consumed. Runs BEFORE forwarding the bind; the content is tinted
         // either way since the texture identity does not change.
         if (stage == 14 && tex && AoIsShadowTex((void *)tex)) {
-            // Dump BEFORE any of our writes, so the file always holds the
-            // engine's own content.
-            if (InterlockedCompareExchange(&g_aoDumpRequest, 0, 1) == 1) {
-                AoDumpBuffer(dev, tex);
-                AoDumpDepthStats(dev);
-            }
+            // v24g: dump AFTER the injection, not before. The open question
+            // is no longer "what does the engine write" (answered by the
+            // first dump) but "what did OUR draw do to it" - NORMAL mode
+            // demonstrably renders yet shadows still vanish, which multiply
+            // blending cannot mathematically cause. The post-injection BMP
+            // is ground truth on whether the blend was honoured.
+            int wantDump = (InterlockedCompareExchange(&g_aoDumpRequest, 0, 1) == 1);
 #if ENABLE_AO_SSAO
             // Effective-mode logging (v24f). The entire v24..v24e loop was
             // spent chasing a "broken blend" that was actually the DEBUG
@@ -598,6 +599,10 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
 #endif
             if (g_aoTint)
                 AoTintBuffer(dev, tex);
+            if (wantDump) {
+                AoDumpBuffer(dev, tex);
+                AoDumpDepthStats(dev);
+            }
         }
         if (g_aoReported) return g_origSetTexture(dev, stage, tex);
         if (tex && AoIsShadowTex((void *)tex)) {
