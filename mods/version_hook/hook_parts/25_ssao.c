@@ -210,7 +210,11 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
         if (g_aoDebug) {
             // Opaque replace: the raw AO term fills the buffer so the whole
             // screen SHOWS it (materials multiply it in) - the tuning view.
+            // Colour channels only: replacing ALPHA wipes the world
+            // sun-shadow mask, which is a diagnostic contaminating the very
+            // thing being diagnosed.
             g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE);
+            g_origSetRenderState(dev, D3DRS_COLORWRITEENABLE, 0x07);
         } else {
             // MULTIPLY, not MIN (v24e). The four-band diagnostic proved the
             // whole shader pipeline works, which left the blend as the only
@@ -227,6 +231,18 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
             g_origSetRenderState(dev, D3DRS_BLENDOP, D3DBLENDOP_ADD);
             g_origSetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
             g_origSetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_ZERO);
+            // THE v24-series bug, found by the post-injection dump (alpha
+            // measured 255 at every pixel while RGB multiplied correctly):
+            // the ENGINE runs with SEPARATEALPHABLENDENABLE on and its own
+            // alpha factors, so our draw multiplied RGB with our factors and
+            // REPLACED alpha with theirs - wiping the world sun-shadow mask,
+            // which is exactly the "SSAO removes shadows" every flight
+            // reported. Pin the alpha path to dst (ZERO/ONE): the mask is
+            // preserved bit-exact no matter what the engine left enabled.
+            g_origSetRenderState(dev, D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+            g_origSetRenderState(dev, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+            g_origSetRenderState(dev, D3DRS_SRCBLENDALPHA, D3DBLEND_ZERO);
+            g_origSetRenderState(dev, D3DRS_DESTBLENDALPHA, D3DBLEND_ONE);
         }
         g_origSetRenderState(dev, D3DRS_ZENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);

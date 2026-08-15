@@ -387,6 +387,13 @@ static void AoTintBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
         g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE);
         g_origSetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_ZERO);
         g_origSetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);
+        // Same separate-alpha pin as the SSAO pass (see 25_ssao.c): the
+        // engine leaves SEPARATEALPHABLENDENABLE on with its own factors,
+        // and an inherited alpha-replace wipes the world sun-shadow mask.
+        g_origSetRenderState(dev, D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+        g_origSetRenderState(dev, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+        g_origSetRenderState(dev, D3DRS_SRCBLENDALPHA, D3DBLEND_ZERO);
+        g_origSetRenderState(dev, D3DRS_DESTBLENDALPHA, D3DBLEND_ONE);
         g_origSetRenderState(dev, D3DRS_ZENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_CULLMODE, D3DCULL_NONE);
