@@ -63,6 +63,15 @@ static volatile LONG g_aoTexPass[PASS_COUNT + 1];
 static volatile LONG g_aoSetTexCalls = 0;      // proves the hook is live at all
 static volatile LONG g_aoShadowPassCalls = 0;  // SetTexture calls seen inside MS_SHADOW
 static volatile LONG g_aoMsDepthSamples = 0;
+// v22e: draw-level consumption. The v22d flight showed the shadow buffer is
+// only ever BOUND inside its own pass (stage 1 being the last state as the
+// pass ends) - and D3D9 sampler bindings persist across passes, so material
+// draws can consume it with zero SetTexture traffic. These count draws in
+// PASS_MS that execute WITH the shadow texture live on a sampler.
+static volatile LONG g_aoStageMask = 0;        // bit N = shadow tex bound at stage N
+static volatile LONG g_aoMsDrawStage[16];      // draws in PASS_MS per live stage
+static volatile LONG g_aoMsDrawFrames = 0;     // frames with at least one such draw
+static LONG g_aoLastDrawFrame = -1;
 static volatile LONG g_aoLateRebinds = 0;  // shadow surf as RT0 after MULTI_SAMPLE began
 static volatile LONG g_aoFramesSampled = 0;
 static LONG g_aoLastSampleFrame = -1;
@@ -121,6 +130,17 @@ static void AoReconReport(const char *how)
             g_aoMsDepthSamples);
     LogLine(l);
     {
+        // Draw-level consumption - the line that actually decides option 2.
+        char buf[200];
+        int o = sprintf(buf, "[aorecon] PASS_MS draws with shadow tex live:");
+        int any = 0;
+        for (int s = 0; s < 16; s++)
+            if (g_aoMsDrawStage[s]) { o += sprintf(buf + o, " s%d=%ld", s, g_aoMsDrawStage[s]); any = 1; }
+        if (!any) o += sprintf(buf + o, " none");
+        o += sprintf(buf + o, "  frames=%ld", g_aoMsDrawFrames);
+        LogLine(buf);
+    }
+    {
         // Which passes bind the shadow container at all - the question the
         // first flight could not answer when MULTI_SAMPLE came up empty.
         char buf[200];
@@ -132,6 +152,26 @@ static void AoReconReport(const char *how)
         LogLine(buf);
     }
     LogLine("[aorecon] recon complete - hook stays passthrough for the rest of the session");
+}
+
+// Called from HookedDrawIndexedPrimitive (15_msaa.c). Counts material-pass
+// draws that execute with the shadow texture live on a sampler - the
+// question binds cannot answer. Success = 120 frames with such draws.
+static void AoDrawTick(void)
+{
+    LONG mask = g_aoStageMask;
+    if (!mask || g_curPass != PASS_MS) return;
+    for (int s = 0; s < 16; s++)
+        if (mask & (1L << s)) InterlockedIncrement(&g_aoMsDrawStage[s]);
+    {
+        LONG fr = g_msFrameSeq;
+        if (fr != g_aoLastDrawFrame) {
+            g_aoLastDrawFrame = fr;
+            if (InterlockedIncrement(&g_aoMsDrawFrames) >= 120 &&
+                InterlockedCompareExchange(&g_aoReported, 1, 0) == 0)
+                AoReconReport("SUCCESS - material draws execute with the shadow tex bound");
+        }
+    }
 }
 
 // Timeout path, driven from the monitor thread (which always runs): if the
@@ -163,6 +203,14 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         LONG p = pass;
         if (p < 0 || p > PASS_COUNT) p = PASS_COUNT;
         InterlockedIncrement(&g_aoTexPass[p]);
+    }
+    // Maintain the live per-stage mask for the draw-level check. Bindings
+    // persist across passes, which is the entire point.
+    if (g_aoShadowTex && stage < 16) {
+        if ((void *)tex == g_aoShadowTex)
+            InterlockedOr(&g_aoStageMask, 1L << stage);
+        else if (g_aoStageMask & (1L << stage))
+            InterlockedAnd(&g_aoStageMask, ~(1L << stage));
     }
 
     if (pass == PASS_MS_SHADOW) {

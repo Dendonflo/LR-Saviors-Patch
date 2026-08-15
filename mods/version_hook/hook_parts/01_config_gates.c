@@ -240,6 +240,7 @@
 #if ENABLE_AO_RECON
 static void InstallAoReconHook(void **vtbl);  // 24_ao_recon.c
 static void AoReconTick(void);                // timeout report, monitor thread
+static void AoDrawTick(void);                 // draw-level consumption check
 #endif
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware

@@ -884,6 +884,13 @@ static HRESULT STDMETHODCALLTYPE HookedDrawIndexedPrimitive(
     UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
 {
     HRESULT hr;
+#if ENABLE_AO_RECON
+    // Draw-level consumption check (24_ao_recon.c). Bind-level counting gave
+    // a false NEVER: D3D9 sampler state persists across passes, so a texture
+    // bound at the end of MS_SHADOW is sampled by every material draw without
+    // any SetTexture call in the material pass. Only draws can answer it.
+    AoDrawTick();
+#endif
     if (SsaaMultiDraw(This, 1, Type, BaseVertexIndex, MinVertexIndex,
                       NumVertices, StartIndex, PrimitiveCount, &hr)) {
         MsaaNoteDraw(This, hr, PrimitiveCount);
