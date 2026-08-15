@@ -796,7 +796,14 @@ static volatile LONG g_forceImmediatePresentEnabled = 0;
 // Opt-in, default OFF. Overwrites the engine's own frame-pacing target.
 // See ApplyFramerateUnlock() for the decompiled limiter and the risks.
 static volatile LONG g_unlockFramerateEnabled = 1;
-static volatile LONG g_shaderThrottleEnabled = 1;
+// Default OFF - and it genuinely is now. The v23 postmortem in
+// 07_timing_watchdog.c always SAID "g_shaderThrottleEnabled starts at 0",
+// but this definition still said 1, so every fresh config saved
+// ShaderThrottle=1 and the corrupting budget cap silently re-armed on
+// every launch since. Found 2026-08-15: Lightning rendering fully black
+// near Ruffian, [shaderbudget] ENGAGED x50 in the same session's log.
+// Keep this 0 unless deliberately isolating the shader queue.
+static volatile LONG g_shaderThrottleEnabled = 0;
 // Default ON - confirmed engaging (bytes prefetched) but never shown to
 // measurably help; runtime-toggleable for benchmark isolation like
 // everything else, not because it's suspected of causing a problem.

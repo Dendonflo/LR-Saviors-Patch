@@ -332,6 +332,20 @@ static void LoadConfig(void)
     // even running) before the player reached gameplay. The capture looked
     // valid and was completely worthless. Always start disarmed.
     g_logFrameTimes = 0;
+    // ShaderThrottle is the v23 experiment: capping the shader-compile
+    // budget extends how long a shader stays pending, and a pending shader
+    // RENDERS BLACK (07_timing_watchdog.c, the DISABLED block above
+    // OnEnter_aa7850_C). Its code default is 0 for that reason - but a
+    // stale ini kept re-arming it every launch, and it took until
+    // 2026-08-15 (Lightning turning fully black near Ruffian, ~10s of
+    // shader-queue churn in the same window) to notice, because the ini
+    // line looks like every other harmless toggle. Loud line, not a
+    // silent reset: the toggle stays usable for isolation testing, so a
+    // deliberate 1 must survive - the user just has to be able to SEE it.
+    if (g_shaderThrottleEnabled)
+        LogLine("[config] WARNING: ShaderThrottle=1 - the v23 budget cap is armed."
+                " Known to make objects render BLACK while their shaders wait"
+                " (player model included). Set ShaderThrottle=0 unless isolating.");
     // 1024 and BOUNDS-CHECKED. This was char[300] and simply ran off the end
     // as options accumulated: the line is now ~700 chars, so every launch
     // smashed the stack here and the process died on return from this
