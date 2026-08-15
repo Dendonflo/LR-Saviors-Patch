@@ -58,3 +58,4 @@
 #include "hook_parts/21_cutscene_shadow.c"
 #include "hook_parts/22_d3dx_diag.c"
 #include "hook_parts/23_upload_gate.c"
+#include "hook_parts/24_ao_recon.c"

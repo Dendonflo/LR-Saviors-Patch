@@ -1754,6 +1754,9 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
         vtbl[slotRst] = (void *)HookedDeviceReset;
         VirtualProtect(&vtbl[slotRst], sizeof(void *), oldProtect, &oldProtect);
     }
+#if ENABLE_AO_RECON
+    InstallAoReconHook(vtbl);
+#endif
     LogLine("[rt] render-target inventory probe installed (CreateRenderTarget/CreateDepthStencilSurface/SetRenderTarget)");
 
     // GPU vendor, for the alpha-to-coverage backdoor (AMD and NVIDIA spell it

@@ -229,6 +229,18 @@
 //   should not pay that to re-derive a settled number.
 #define ENABLE_UPLOAD_GATE 0
 
+// ENABLE_AO_RECON - ambient-occlusion injection recon (24_ao_recon.c),
+//   2026-08-15. Measures whether the MS_SHADOW screen-shadow buffer is a
+//   bindable texture that material shaders sample during MULTI_SAMPLE, and
+//   whether it survives untouched until then - the plumbing prerequisites
+//   for injecting SSAO into it ("option 2"). One SetTexture hook, the
+//   ultra-hot method this project has otherwise deliberately never hooked;
+//   diagnostic builds only, OFF for any release.
+#define ENABLE_AO_RECON 1
+#if ENABLE_AO_RECON
+static void InstallAoReconHook(void **vtbl);  // 24_ao_recon.c
+#endif
+
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
 //   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of
 //   CinemaController fields whenever any of them changes, so the field/bit
