@@ -69,6 +69,9 @@ static ToggleableFix g_toggles[] = {
 #if ENABLE_PASS_PROBE
     { &g_logPassRts,            "Log render targets per draw pass (resolution probe)", "LogPassRts" },
 #endif
+    // Not in the GUI: it is a log-volume switch, not a graphics setting, and
+    // a player has no reason to meet it. Ini-only, default off.
+    { &g_logMonitor,            "Per-window monitor telemetry to the log", "LogMonitor" },
 #if ENABLE_SHADER_DIAG
     { &g_dumpShaders,           "Dump pixel shaders to shaders\\ (FXAA hunt)", "DumpShaders" },
 #endif

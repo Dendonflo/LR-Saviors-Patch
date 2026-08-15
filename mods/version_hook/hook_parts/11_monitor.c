@@ -85,6 +85,14 @@ static void ReportAndApplyTimerResolution(void)
 static void DebugMenuApply(void);   /* 20_debug_menu.c, included after this part */
 #endif
 
+// Release gate for the monitor thread's periodic telemetry - see the long
+// note at the top of the reporting section. Writes only; every counter reset
+// and every g_live* value the overlay/status panel depends on still happens.
+static void MonLog(const char *msg)
+{
+    if (g_logMonitor) LogLine(msg);
+}
+
 static DWORD WINAPI MonitorThread(LPVOID param)
 {
     (void)param;
@@ -255,6 +263,22 @@ static DWORD WINAPI MonitorThread(LPVOID param)
 #endif
         char line[256];
 
+        // RELEASE GATE (2026-08-15). Everything this thread reports is
+        // telemetry: per-window frame percentiles, per-function timings,
+        // thread and allocator censuses, ~40 lines a second. Invaluable
+        // while investigating, pure disk churn in a shipped build - and it
+        // was the reason a playthrough once produced a multi-GB log.
+        //
+        // MonLog() gates only the WRITING. Every computation above and
+        // below it still runs, because the periodic block also resets the
+        // windowed counters and feeds g_liveP50 / g_liveP99 / g_liveOver16
+        // / g_liveFrames / g_liveWorst, which the frametime overlay and the
+        // status panel read. Skipping the block instead of the log line
+        // would freeze both of those - they are user features, not
+        // diagnostics.
+        //
+        // LogMonitor=1 in the ini restores the full stream, no rebuild.
+
         // Frame time first, so every window in the log opens with the number
         // that actually matters.
         if (!g_mainThreadHandle && g_mainThreadId) {
@@ -263,7 +287,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                 FALSE, (DWORD)g_mainThreadId);
             sprintf(line, "[watchdog] main thread tid=%ld handle=%s",
                     g_mainThreadId, g_mainThreadHandle ? "OK" : "FAILED");
-            LogLine(line);
+            MonLog(line);
         }
 
         // Bulk-load detection: sustained high read volume = loading screen,
@@ -280,7 +304,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                 g_bulkLoadActive = 1;
                 sprintf(line, "[probe] bulk load detected (%lldKB this window) - throttles BYPASSED",
                         delta / 1024);
-                LogLine(line);
+                MonLog(line);
             } else if (g_bulkLoadActive && quietStreak >= 2) {
                 g_bulkLoadActive = 0;
                 LogLine("[probe] bulk load ended - throttles re-engaged");
@@ -297,14 +321,14 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                 LONG kbMain = InterlockedExchange(&g_uploadKBMain, 0);
                 sprintf(line, "[probe] tex churn: created=%ld destroyed=%ld (cum %ld/%ld) | uploaded=%ldKB (mainthread=%ldKB) this window",
                         dC, dD, cNow, dNow, kb, kbMain);
-                LogLine(line);
+                MonLog(line);
             }
         }
 
         LONG clamped = InterlockedExchange(&g_deadlineClampCount, 0);
         if (clamped > 0) {
             sprintf(line, "[probe] frame-limiter deadline clamped %ld time(s) this window (aftershock prevented)", clamped);
-            LogLine(line);
+            MonLog(line);
         }
 
         LONG maxFrame = InterlockedExchange(&g_maxFrameUsec, 0);
@@ -317,14 +341,14 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         sprintf(line, "[monitor] FRAME: frames=%ld avg_usec=%.1f WORST_usec=%ld | readpace=%ld mainCS=%ldus/%ld mainWFSO=%ldus",
                 frames, frames > 0 ? (double)frameSum / (double)frames : 0.0, maxFrame,
                 paceDelay, csWait, csWaitN, wfsoWait);
-        LogLine(line);
+        MonLog(line);
 
         LONG rateLimited = InterlockedExchange(&g_stutterRateLimited, 0);
         if (rateLimited > 0) {
             sprintf(line, "[watchdog] %ld slow frame(s) this window had NO capture attempt - "
                           "rate limit (%d/sec) saturated, records/stall totals are an UNDERCOUNT here",
                     rateLimited, STUTTER_MAX_CAPTURES_PER_SEC);
-            LogLine(line);
+            MonLog(line);
         }
 
         // Frame-time distribution for this window. Percentiles come straight
@@ -364,7 +388,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                 sprintf(line, "[frametime] n=%ld p50=%ld p90=%ld p99=%ld | thr=%ldus over=%ld (%.1f%%) over1.2x=%ld over2x=%ld | %02d:%02d:%02d",
                         total, p50, p90, p99, thr, n60, total ? n60*100.0/total : 0.0, n50, n30,
                         ft.wHour, ft.wMinute, ft.wSecond);
-                LogLine(line);
+                MonLog(line);
                 g_liveP50 = p50; g_liveP99 = p99; g_liveOver16 = n60;
                 g_liveFrames = total; g_liveWorst = maxFrame;
             }
@@ -389,7 +413,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                 g_ldrCumLoads += loads;
                 sprintf(line, "[loader] loads=%ld nested=%ld cum=%ld | total=%ldus worst=%ldus | bind=%ldus/%ld decrypt=%ldus/%ld | offthread=%ld",
                         loads, nested, g_ldrCumLoads, lus, worst, bus, bn, dus, dn, off);
-                LogLine(line);
+                MonLog(line);
             }
         }
 #endif
@@ -459,7 +483,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             LONG maxUsec = InterlockedExchange(&hf->maxUsec, 0);
             sprintf(line, "[monitor] %s: calls_in_window=%ld avg_duration_usec=%.2f max_duration_usec=%ld total_calls=%ld",
                     hf->name, windowCount, avgUsec, maxUsec, hf->callCount);
-            LogLine(line);
+            MonLog(line);
         }
 
 #if ENABLE_D3DX_DIAG
@@ -472,7 +496,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             if (dsum | dmax) {
                 sprintf(line, "[d3dx] %s: window_usec=%ld max_usec=%ld total_calls=%ld slow_calls=%ld",
                         df->name, dsum, dmax, df->calls, df->slowCalls);
-                LogLine(line);
+                MonLog(line);
             }
         }
 #endif
@@ -487,12 +511,12 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     g_ugTotal, g_ugFast, 100.0 * g_ugFast / g_ugTotal,
                     g_ugNpot, g_ugFmt, g_ugBoth,
                     g_ugFastUsec / 1000, g_ugSlowUsec / 1000, g_ugSlowMaxUsec);
-            LogLine(line);
+            MonLog(line);
         }
         if (g_tcTotal) {
             sprintf(line, "[texcreate] DDS textures=%ld npot=%ld (%.1f%%)",
                     g_tcTotal, g_tcNpot, 100.0 * g_tcNpot / g_tcTotal);
-            LogLine(line);
+            MonLog(line);
         }
 #endif
 
@@ -503,7 +527,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             if (csk) {
                 sprintf(line, "[compactor] deferred %ld passes this window (budget %ldus/frame, cooldown %ld frames)",
                         csk, g_compactorBudgetUs, g_compactorCooldownFrames);
-                LogLine(line);
+                MonLog(line);
             }
         }
 
@@ -521,7 +545,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         double totalUsec = (g_cyclesPerUsec > 0.0) ? (double)wWindowSum / g_cyclesPerUsec : 0.0;
         sprintf(line, "[monitor] WaitForSingleObject: calls_in_window=%ld total_blocked_usec=%.1f total_calls=%ld",
                 wWindowCount, totalUsec, wCount);
-        LogLine(line);
+        MonLog(line);
 
         // Per-thread windowed breakdown - which thread(s) the blocking
         // time above actually belongs to.
@@ -540,7 +564,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                 : 0.0;
             sprintf(line, "[monitor]   thread %ld: calls_in_window=%ld avg_blocked_usec=%.2f",
                     slot->threadId, tWindowCount, avgUsec);
-            LogLine(line);
+            MonLog(line);
         }
 
         LogD3DWindow();
@@ -550,7 +574,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         g_prevDispatchCount = dispatchTotal;
         sprintf(line, "[monitor] LoaderDispatch: processed_in_window=%ld total=%ld",
                 dispatchWindow, dispatchTotal);
-        LogLine(line);
+        MonLog(line);
 
         LONG pfAllocTotal = g_prefetchedAllocCount;
         LONGLONG pfByteTotal = g_prefetchedByteCount;
@@ -560,7 +584,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         g_prevPrefetchedByteCount = pfByteTotal;
         sprintf(line, "[monitor] InDispatchAllocs: allocs_in_window=%ld bytes_in_window=%lld total_allocs=%ld total_bytes=%lld",
                 pfAllocWindow, pfByteWindow, pfAllocTotal, pfByteTotal);
-        LogLine(line);
+        MonLog(line);
 
         // Sync vs overlapped ReadFile split - if this ever shows overlapped
         // calls in real numbers, per-call duration stops meaning "blocked
@@ -568,7 +592,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // GetOverlappedResult/WaitForSingleObject instead.
         LONG syncTotal = g_readFileSyncCount, ovlTotal = g_readFileOverlappedCount;
         sprintf(line, "[monitor] ReadFile mode: sync_total=%ld overlapped_total=%ld", syncTotal, ovlTotal);
-        LogLine(line);
+        MonLog(line);
 
         // Distinct compiled shaders vs total compiles vs repeats - answers
         // directly whether reproducible stutters are the SAME shader
@@ -578,12 +602,12 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // detail; this is the running aggregate.
         sprintf(line, "[monitor] ShaderCompiles: total=%ld distinct=%ld repeats=%ld",
                 g_shaderCompileTotal, g_shaderIdCount, g_shaderCompileRepeats);
-        LogLine(line);
+        MonLog(line);
 
         sprintf(line, "[monitor] ShaderBudget: min_seen=%ld max_seen=%ld engaged_total=%ld",
                 g_shaderBudgetMinSeen == 0x7FFFFFFF ? -1 : g_shaderBudgetMinSeen,
                 g_shaderBudgetMaxSeen, g_shaderBudgetEngagedCount);
-        LogLine(line);
+        MonLog(line);
 
         for (int b = 0; b < 2; b++) {
             LONG c = InterlockedExchange(&g_allocDurCount[b], 0);
@@ -592,7 +616,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             if (c <= 0) continue;
             sprintf(line, "[monitor] AllocatorDuration[%s]: calls=%ld avg_usec=%.2f max_usec=%ld",
                     b == 0 ? "MAIN" : "other", c, (double)s / (double)c, mx);
-            LogLine(line);
+            MonLog(line);
         }
 
         // ---- v6: full allocation census, per thread ----------------------
@@ -638,7 +662,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     slot->threadId, name,
                     (slot->threadId == g_mainThreadId) ? ",MAIN" : "",
                     detail);
-            LogLine(line);
+            MonLog(line);
         }
         int coff = 0;
         char ctotals[256];
@@ -646,7 +670,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             coff += sprintf(ctotals + coff, " %s=%ld/%lldB", g_allocSrcNames[s], srcCount[s], srcBytes[s]);
         }
         sprintf(line, "[monitor] AllocCensus:%s", ctotals);
-        LogLine(line);
+        MonLog(line);
 
 #if ENABLE_ALLOCATOR_WARM
         // Unconditional, unlike most of these - so it has to be gated rather
@@ -663,7 +687,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         g_prevWarmDone = wdTotal;
         g_prevWarmBytes = wbTotal;
         g_prevWarmDropped = wdropTotal;
-        LogLine(line);
+        MonLog(line);
 #endif
 
         // Distinct concrete allocator implementations behind the named-heap
@@ -681,7 +705,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     (unsigned int)g_allocImpls[i].allocFn,
                     (unsigned int)g_allocImpls[i].exampleHeap,
                     (unsigned int)((unsigned char *)g_allocImpls[i].allocFn - (unsigned char *)GetModuleHandleA(NULL)));
-            LogLine(line);
+            MonLog(line);
         }
     }
 }

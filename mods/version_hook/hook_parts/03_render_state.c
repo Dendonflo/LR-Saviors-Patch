@@ -4,6 +4,10 @@
 // file and need these, so the state lives here. See the draw-pass inventory
 // block for what it is for.
 static volatile LONG g_logPassRts;
+// Per-window monitor telemetry (frame percentiles, per-function timings,
+// thread/allocator censuses). Default OFF for release: ~40 lines a second is
+// diagnostic gold and shipping dead weight. See MonLog in 11_monitor.c.
+static volatile LONG g_logMonitor;
 // Tentative def: g_toggles[] sits earlier than the shader-dump block.
 static volatile LONG g_dumpShaders;
 // Tentative defs: g_numerics[] and the Present hooks both sit earlier in this

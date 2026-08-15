@@ -152,12 +152,11 @@
 #define ENABLE_SHADER_DIAG    0
 #define ENABLE_SURFACE_DIAG   0
 #define ENABLE_CUTOUT_AA      0
-#define ENABLE_PASS_PROBE     1   // re-armed 2026-08-13: [ssaa-probe] blit
-                                  // shapes for the 720p SsaaOutputRes bug -
-                                  // suspicion is the engine passes explicit
-                                  // rects on scaling copies, so the NULL-rect
-                                  // -only reroute never fires when scene !=
-                                  // backbuffer. Return to 0 when confirmed.
+// RETIRED 2026-08-15 (release cleanup). Its question was answered - the
+// SsaaOutputRes path is confirmed working - and it was the single largest
+// producer of log volume in this project's history. Nothing in a release
+// build should be paying for a per-SetRenderTarget pointer scan.
+#define ENABLE_PASS_PROBE     0
 #define ENABLE_FRAMETIME_DUMP 0
 #define ENABLE_SHADOWS_OFF    0
 #define ENABLE_SCALING_MODE   0
@@ -178,7 +177,13 @@
 //   which fix ships: the memoised binder table, the decrypt fast-path, or
 //   both. Costs three rare paired hooks; loads happen on first encounter of
 //   each class only.
-#define ENABLE_LOADER_DIAG 1
+//   RETIRED 2026-08-15 (release cleanup), question answered. The four-zone
+//   run measured cause 3 at ONE capture in 23 minutes of gameplay (0.3%)
+//   while being 10.5% of loading stutters: it is a loading-screen
+//   phenomenon and does not occur in play. Costs three paired hooks on the
+//   class-load path for a number we now have. See
+//   RUN_2026-08-15_FOUR_ZONES.md.
+#define ENABLE_LOADER_DIAG 0
 
 // ENABLE_D3DX_DIAG - d3dx9 call attribution (22_d3dx_diag.c), 2026-08-15.
 //   After the compactor mitigation, d3dx9_43 texture work is the largest
@@ -215,7 +220,14 @@
 //   source, and the fallback is D3DXLoadSurfaceFromMemory (~18% of watchdog
 //   captures). Entry-only detour, arguments only, nothing written back -
 //   deliberately NOT the IAT-wrapper approach that crashed Load Game.
-#define ENABLE_UPLOAD_GATE 1
+//   RETIRED 2026-08-15 (release cleanup), question answered. The census
+//   priced the slow path at 8ms across a whole run (1458 non-power-of-two
+//   uploads, 2 format mismatches) - not a stutter source - and the d3dx
+//   family it was built to explain turned out to be DDS decode during
+//   LOADING, which is 0% of gameplay captures. Both hooks sit on the
+//   texture-upload path, which runs ~17,000 times per run; a release build
+//   should not pay that to re-derive a settled number.
+#define ENABLE_UPLOAD_GATE 0
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
 //   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of
