@@ -241,6 +241,7 @@
 static void InstallAoReconHook(void **vtbl);  // 24_ao_recon.c
 static void AoReconTick(void);                // timeout report, monitor thread
 static void AoDrawTick(void);                 // draw-level consumption check
+static void AoReconReset(void);               // clear latches on device Reset
 static volatile LONG g_aoTint;                // tint probe toggle (ini AoTint)
 static volatile LONG g_aoDumpRequest;         // one-shot buffer dump (menu button)
 

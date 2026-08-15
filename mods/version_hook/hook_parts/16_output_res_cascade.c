@@ -1435,6 +1435,15 @@ static HRESULT STDMETHODCALLTYPE HookedDeviceReset(
         LogLine(l);
     }
     ClearShadowSurfaces();   // recorded addresses are meaningless across a Reset
+#if ENABLE_AO_RECON
+    // Same rule for the AO latches: Reset destroys and recreates every
+    // render target, so the shadow-buffer set and depth container are dead
+    // pointers afterwards - and stale latches never match the new objects,
+    // which left SSAO silently OFF for the rest of the session (user-found,
+    // 2026-08-16: any resolution change or focus-elevation broke it). The
+    // latches rebuild automatically on the first MS_SHADOW pass after Reset.
+    AoReconReset();
+#endif
     return g_origReset(This, pPP);
 }
 

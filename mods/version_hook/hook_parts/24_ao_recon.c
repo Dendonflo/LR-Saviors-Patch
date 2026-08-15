@@ -98,6 +98,26 @@ static volatile LONG g_aoFramesSampled = 0;
 static LONG g_aoLastSampleFrame = -1;
 static volatile LONG g_aoReported = 0;
 
+// Device Reset destroys every render target and recreates them as NEW
+// objects, so every latched identity here is a dead pointer afterwards.
+// Called from HookedDeviceReset; everything re-latches on the first
+// MS_SHADOW pass of the new device. Counters and the one-shot report are
+// deliberately left alone - they describe the session, not the device.
+static void AoReconReset(void)
+{
+    for (int i = 0; i < AO_RT_MAX; i++) {
+        g_aoRts[i].surf = NULL;
+        g_aoRts[i].tex = NULL;
+    }
+    g_aoRtCount = 0;
+    g_aoLastRtIdx = -1;
+    g_aoShadowSurf = NULL;
+    g_aoShadowTex = NULL;
+    g_aoDepthTex = NULL;
+    g_aoStageMask = 0;
+    LogLine("[aorecon] device Reset - AO latches cleared, will re-latch");
+}
+
 // A texture counts as "the shadow buffer" if it is the container of ANY
 // render target the ping-pong touched.
 static int AoIsShadowTex(void *tex)
