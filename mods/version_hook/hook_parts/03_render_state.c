@@ -720,6 +720,9 @@ static volatile LONG g_ugFast;
 static volatile LONG g_ugNpot;
 static volatile LONG g_ugFmt;
 static volatile LONG g_ugBoth;
+static volatile LONG g_ugFastUsec;   // cumulative memcpy-path time
+static volatile LONG g_ugSlowUsec;   // cumulative D3DX-path time
+static volatile LONG g_ugSlowMaxUsec;
 #endif
 
 // ---- Shadow map resolution multiplier ------------------------------------

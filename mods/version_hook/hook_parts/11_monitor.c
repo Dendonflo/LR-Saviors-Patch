@@ -482,9 +482,11 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // number is the whole-session split between the free memcpy path and
         // the D3DX conversion path.
         if (g_ugTotal) {
-            sprintf(line, "[upload] total=%ld fast_memcpy=%ld (%.1f%%) | SLOW: npot=%ld format=%ld both=%ld",
+            sprintf(line, "[upload] total=%ld fast_memcpy=%ld (%.1f%%) | SLOW: npot=%ld format=%ld both=%ld"
+                          " | time: fast=%ldms slow=%ldms slow_max=%ldus",
                     g_ugTotal, g_ugFast, 100.0 * g_ugFast / g_ugTotal,
-                    g_ugNpot, g_ugFmt, g_ugBoth);
+                    g_ugNpot, g_ugFmt, g_ugBoth,
+                    g_ugFastUsec / 1000, g_ugSlowUsec / 1000, g_ugSlowMaxUsec);
             LogLine(line);
         }
 #endif

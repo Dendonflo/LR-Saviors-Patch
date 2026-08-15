@@ -897,6 +897,9 @@ void InstallPrefetchHook(void)
     // no SEH, no inbound refs into the stolen bytes.
     ok[FN_B46C20] = InstallJmpHook(&g_funcs[FN_B46C20], (void *)Detour_b46c20, &g_trampoline_b46c20);
 
+    // FN_AA3250 is installed separately by InstallUploadGateHook (below), so
+    // it reports its own line rather than joining this one.
+    ok[FN_AA3250] = 0;
     sprintf(line, "Hooks installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d b46c20=%d",
             ok[0], ok[1], ok[2], ok[3], ok[4], ok[5], ok[6], ok[7], ok[8]);
     LogLine(line);

@@ -65,7 +65,11 @@ static void CalibrateTsc(void)
 // (clean 6-byte cut), no SEH, no inbound refs into the stolen bytes, only
 // two callers (00b47ad4, 00b47b1b), both direct CALLs.
 #define FN_B46C20  8
-#define NUM_FNS    9
+// v20b: FUN_00aa3250, the texture-upload path. Timed (not just counted) so
+// the slow D3DX branch can be priced against the memcpy branch - see
+// 23_upload_gate.c. Prologue verified in ghidra_output/upload_gate.txt.
+#define FN_AA3250  9
+#define NUM_FNS    10
 
 typedef struct {
     const char *name;
@@ -88,6 +92,7 @@ static HookedFunc g_funcs[NUM_FNS] = {
     { "FUN_00a41570", NULL, 0x00a41570 - 0x00400000, 6, 0, 0, 0 },
     { "FUN_00aa7850", NULL, 0x00aa7850 - 0x00400000, 6, 0, 0, 0 },
     { "FUN_00b46c20", NULL, 0x00b46c20 - 0x00400000, 6, 0, 0, 0 },
+    { "FUN_00aa3250", NULL, 0x00aa3250 - 0x00400000, 6, 0, 0, 0 },
 };
 
 static void *g_trampoline_aacf10 = NULL;
@@ -104,6 +109,12 @@ static void *g_trampoline_b46c20 = NULL;
 typedef struct {
     void *trueRetAddr;
     unsigned __int64 entryTsc;
+    // Classification decided at ENTRY and read back at return. Lives on the
+    // per-thread stack rather than in a global because texture uploads run
+    // on the loader thread as well as the main one, so a global flag would
+    // be corrupted by interleaving. Only FN_AA3250 uses it (0 = fast memcpy
+    // path, 1 = D3DX conversion path).
+    LONG tag;
 } RetFrame;
 typedef struct {
     int top;
@@ -136,8 +147,22 @@ static int OnEnterBookkeeping(void *trueRetAddr, int fnIdx)
     }
     ts->frames[ts->top].trueRetAddr = trueRetAddr;
     ts->frames[ts->top].entryTsc = __rdtsc();
+    ts->frames[ts->top].tag = 0;
     ts->top++;
     return 1;
+}
+
+// Same, plus a classification carried through to the return. Used by the
+// texture-upload census so a call's duration can be charged to the path it
+// actually took.
+static int OnEnterBookkeepingTagged(void *trueRetAddr, int fnIdx, LONG tag)
+{
+    int r = OnEnterBookkeeping(trueRetAddr, fnIdx);
+    if (r) {
+        ThreadStack *ts = GetThreadStack(fnIdx);
+        if (ts && ts->top > 0) ts->frames[ts->top - 1].tag = tag;
+    }
+    return r;
 }
 
 // Structurally only ever called for a call that OnEnterBookkeeping
@@ -176,6 +201,16 @@ static void *OnReturnBookkeeping(int fnIdx)
             if (usec > g_compactorBudgetUs)
                 g_compactorCooldown = g_compactorCooldownFrames;
         }
+#if ENABLE_UPLOAD_GATE
+        // Charge this upload's wall time to the path it took. Counts alone
+        // could not say whether the slow path is worth attacking - 1658
+        // slow uploads a run is only meaningful next to what they cost.
+        if (fnIdx == FN_AA3250) {
+            if (f.tag) { InterlockedExchangeAdd(&g_ugSlowUsec, usec);
+                         if (usec > g_ugSlowMaxUsec) g_ugSlowMaxUsec = usec; }
+            else       { InterlockedExchangeAdd(&g_ugFastUsec, usec); }
+        }
+#endif
     }
 
     return f.trueRetAddr;
