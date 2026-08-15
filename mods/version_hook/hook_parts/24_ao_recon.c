@@ -137,18 +137,19 @@ static void AoReconReport(const char *how)
 // Timeout path, driven from the monitor thread (which always runs): if the
 // success condition has not fired, report whatever was gathered anyway.
 //
-// 20 SECONDS, not 60. The v22b flight taught the second lesson in a row
-// about this recon's reporting: the user's test sessions run ~35s
-// (launch, load, stand, quit - measured at ~70 monitor ticks), so a 60s
-// timeout is a report that never fires. Diagnostics have to fit the test
-// loop they will actually fly in.
+// 60 seconds, by the user's explicit call ("keep the timeout at 60, I'll
+// stand around") - a longer observation window beats a faster report, and
+// they adjust the test to fit rather than the other way around. The v22b
+// lesson still stands in general: the FIRST flight of this recon died to a
+// 60s timeout in a ~35s session, so the timeout length is now a deliberate
+// choice, not an accident.
 static void AoReconTick(void)
 {
     static LONG ticks = 0;
     if (g_aoReported) return;
-    if (++ticks == 40 &&
+    if (++ticks == 120 &&
         InterlockedCompareExchange(&g_aoReported, 1, 0) == 0)
-        AoReconReport("TIMEOUT at 20s - success condition not met by then");
+        AoReconReport("TIMEOUT at 60s - success condition not met by then");
 }
 
 static HRESULT STDMETHODCALLTYPE HookedSetTexture(
