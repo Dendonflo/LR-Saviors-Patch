@@ -168,17 +168,31 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
     if (pass == PASS_MS_SHADOW) {
         g_aoShadowPassCalls++;
         // Latch the pass's RT0 once, with descriptor and container.
-        if (!g_aoShadowSurf && g_prevRt0) {
+        //
+        // v22d: NOT via g_prevRt0. The v22c flight reported rt0=00000000
+        // after 24,706 SetTexture calls inside the pass - because the
+        // "updated on every slot-0 bind, unconditionally" tracker lives
+        // inside #if ENABLE_SURFACE_DIAG, which is 0 in this build. Its
+        // comment was written from inside that gate. Ask the device
+        // directly instead, through g_origGetRenderTarget - the REAL
+        // vtable entry, deliberately bypassing HookedGetRenderTarget,
+        // whose whole job is to lie to the engine while MSAA substitution
+        // is active. One COM call for the whole session.
+        if (!g_aoShadowSurf && g_origGetRenderTarget) {
+            IDirect3DSurface9 *s = NULL;
             __try {
-                D3DSURFACE_DESC d;
-                if (SUCCEEDED(IDirect3DSurface9_GetDesc((IDirect3DSurface9 *)g_prevRt0, &d))) {
-                    g_aoShadowW = (LONG)d.Width;
-                    g_aoShadowH = (LONG)d.Height;
-                    g_aoShadowFmt = (LONG)d.Format;
+                if (SUCCEEDED(g_origGetRenderTarget(dev, 0, &s)) && s) {
+                    D3DSURFACE_DESC d;
+                    if (SUCCEEDED(IDirect3DSurface9_GetDesc(s, &d))) {
+                        g_aoShadowW = (LONG)d.Width;
+                        g_aoShadowH = (LONG)d.Height;
+                        g_aoShadowFmt = (LONG)d.Format;
+                    }
+                    g_aoShadowTex = AoResolveContainer(s);
+                    g_aoShadowSurf = (void *)s;   // identity only
+                    IDirect3DSurface9_Release(s); // GetRenderTarget AddRefs
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
-            g_aoShadowTex = AoResolveContainer(g_prevRt0);
-            g_aoShadowSurf = g_prevRt0;   // latch LAST so the fields above are set once
         }
         if (!g_aoDepthTex && g_depthRtMain)
             g_aoDepthTex = AoResolveContainer(g_depthRtMain);
@@ -221,10 +235,24 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         }
         if (tex && (void *)tex == g_aoDepthTex)
             InterlockedIncrement(&g_aoMsDepthSamples);
-    } else if (pass > PASS_MS && g_aoShadowSurf && g_prevRt0 == g_aoShadowSurf) {
-        // The shadow buffer being re-targeted after the material pass began
-        // would mean our injected content gets overwritten - lifetime check 3.
-        InterlockedIncrement(&g_aoLateRebinds);
+    } else if (pass > PASS_MS && g_aoShadowSurf) {
+        // Lifetime check 3: the shadow buffer re-targeted after the material
+        // pass began would mean injected content gets overwritten. Also
+        // rebuilt off g_prevRt0 in v22d - polled at pass CHANGES only (one
+        // real GetRenderTarget per pass transition, not per SetTexture).
+        static LONG lastPolledPass = -1;
+        if (pass != lastPolledPass) {
+            lastPolledPass = pass;
+            IDirect3DSurface9 *s = NULL;
+            __try {
+                if (g_origGetRenderTarget &&
+                    SUCCEEDED(g_origGetRenderTarget(dev, 0, &s)) && s) {
+                    if ((void *)s == g_aoShadowSurf)
+                        InterlockedIncrement(&g_aoLateRebinds);
+                    IDirect3DSurface9_Release(s);
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
     }
 
     return g_origSetTexture(dev, stage, tex);
