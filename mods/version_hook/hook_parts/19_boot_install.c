@@ -917,6 +917,14 @@ void InstallPrefetchHook(void)
 #if ENABLE_CRASH_LOG
     InstallCrashLogVeh();
 #endif
+#if ENABLE_UPLOAD_GATE
+    {
+        int ugOk = InstallUploadGateHook();
+        sprintf(line, "[upload] texture-upload gate census hook: %s",
+                ugOk ? "installed" : "FAILED");
+        LogLine(line);
+    }
+#endif
 
     int raiseOk = InstallRaiseExceptionHook();
     sprintf(line, "RaiseException IAT hook installed: %d", raiseOk);

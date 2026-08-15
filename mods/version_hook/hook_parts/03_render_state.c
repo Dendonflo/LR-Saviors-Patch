@@ -711,6 +711,17 @@ static D3dxFn g_d3dxFns[DX_COUNT] = {
 };
 #endif
 
+// Texture-upload census counters (23_upload_gate.c). Tentative definitions:
+// the monitor in part 11 prints them and compiles before part 23 defines the
+// rest of the machinery. Same pattern as g_fxaaSubs / g_msSubstitutions.
+#if ENABLE_UPLOAD_GATE
+static volatile LONG g_ugTotal;
+static volatile LONG g_ugFast;
+static volatile LONG g_ugNpot;
+static volatile LONG g_ugFmt;
+static volatile LONG g_ugBoth;
+#endif
+
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
 // 4K the game allocates a 2048x4096 R32F atlas (two cascades stacked) plus

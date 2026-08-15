@@ -80,9 +80,29 @@ D3DX_WRAP(DX_LoadSurfaceFromMemory, D3DXLoadSurfaceFromMemory, 10,
 D3DX_WRAP(DX_LoadVolumeFromMemory, D3DXLoadVolumeFromMemory, 11,
           (DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5, DWORD a6, DWORD a7, DWORD a8, DWORD a9, DWORD a10, DWORD a11),
           (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11))
-D3DX_WRAP(DX_CreateTextureFromFileInMemoryEx, D3DXCreateTextureFromFileInMemoryEx, 14,
-          (DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5, DWORD a6, DWORD a7, DWORD a8, DWORD a9, DWORD a10, DWORD a11, DWORD a12, DWORD a13, DWORD a14),
-          (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14))
+// CRASH ROOT CAUSE, found 2026-08-15 from the game's own call site
+// (ghidra_output/d3dx_callers.txt, FUN_00aa2710):
+//
+//   D3DXCreateTextureFromFileInMemoryEx
+//     (DAT_0510e944, param_1, 0xffffffff, 0xffffffff, 0xffffffff, 1, 0, 0,
+//      2, 0xffffffff, 0xffffffff, 0, 0, 0, &local_38);
+//
+// That is FIFTEEN arguments (pDevice, pSrcData, SrcDataSize, Width, Height,
+// MipLevels, Usage, Format, Pool, Filter, MipFilter, ColorKey, pSrcInfo,
+// pPalette, ppTexture). This wrapper declared FOURTEEN. __stdcall is
+// callee-cleans, so the wrapper popped 56 bytes where the real function
+// pops 60: every call left the stack 4 bytes off, and the caller returned
+// into garbage - exactly the "EIP in unmapped memory" signature of the two
+// Load Game crashes. Load Game is simply where the save-thumbnail decoder
+// makes the first call to it.
+//
+// Fixed here for the record. ENABLE_D3DX_DIAG stays 0 regardless: the
+// question these wrappers existed to answer was settled statically
+// (FUN_00aa3250's gate, see 23_upload_gate.c), so there is no reason to
+// put IAT wrappers back on the hot path.
+D3DX_WRAP(DX_CreateTextureFromFileInMemoryEx, D3DXCreateTextureFromFileInMemoryEx, 15,
+          (DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5, DWORD a6, DWORD a7, DWORD a8, DWORD a9, DWORD a10, DWORD a11, DWORD a12, DWORD a13, DWORD a14, DWORD a15),
+          (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15))
 
 #endif // ENABLE_D3DX_DIAG (wrappers)
 

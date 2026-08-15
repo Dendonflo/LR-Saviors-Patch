@@ -477,6 +477,18 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         }
 #endif
 
+#if ENABLE_UPLOAD_GATE
+        // Texture-upload census. Cumulative, not windowed: the interesting
+        // number is the whole-session split between the free memcpy path and
+        // the D3DX conversion path.
+        if (g_ugTotal) {
+            sprintf(line, "[upload] total=%ld fast_memcpy=%ld (%.1f%%) | SLOW: npot=%ld format=%ld both=%ld",
+                    g_ugTotal, g_ugFast, 100.0 * g_ugFast / g_ugTotal,
+                    g_ugNpot, g_ugFmt, g_ugBoth);
+            LogLine(line);
+        }
+#endif
+
         // Compactor deferral: only speaks when it actually skipped something,
         // so a silent log means the gate never engaged.
         {

@@ -209,6 +209,14 @@
 //   the duplicate handler is gated off, kept as the record of why.
 #define ENABLE_CRASH_LOG 0
 
+// ENABLE_UPLOAD_GATE - texture-upload fast/slow census (23_upload_gate.c),
+//   2026-08-15. FUN_00aa3250 already has a memcpy fast path; it is skipped
+//   when the texture is non-power-of-two OR its format differs from the
+//   source, and the fallback is D3DXLoadSurfaceFromMemory (~18% of watchdog
+//   captures). Entry-only detour, arguments only, nothing written back -
+//   deliberately NOT the IAT-wrapper approach that crashed Load Game.
+#define ENABLE_UPLOAD_GATE 1
+
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
 //   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of
 //   CinemaController fields whenever any of them changes, so the field/bit
