@@ -840,9 +840,15 @@ void InstallPrefetchHook(void)
     // same way as FN_A41570 (standard prologue, no SEH, no external inbound
     // refs into the patched bytes).
     ok[FN_AA7850] = InstallJmpHook(&g_funcs[FN_AA7850], (void *)Detour_aa7850, &g_trampoline_aa7850);
+    // FUN_00b46c20 (v18): heap compactor, promoted to the dominant remaining
+    // stutter source by the 2026-08-15 Wild Lands / Dead Dunes run (108/222
+    // watchdog records, the whole Ruffian-entry storm). Safety survey in
+    // ghidra_output/defrag_hook.txt: standard prologue, clean 6-byte cut,
+    // no SEH, no inbound refs into the stolen bytes.
+    ok[FN_B46C20] = InstallJmpHook(&g_funcs[FN_B46C20], (void *)Detour_b46c20, &g_trampoline_b46c20);
 
-    sprintf(line, "Hooks installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d",
-            ok[0], ok[1], ok[2], ok[3], ok[4], ok[5], ok[6], ok[7]);
+    sprintf(line, "Hooks installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d b46c20=%d",
+            ok[0], ok[1], ok[2], ok[3], ok[4], ok[5], ok[6], ok[7], ok[8]);
     LogLine(line);
 
     int csOk = InstallCriticalSectionHook();

@@ -52,7 +52,20 @@ static void CalibrateTsc(void)
 // spike during stutters (one slow item), or does call count spike (a large
 // backlog all becoming eligible at once)?
 #define FN_AA7850  7
-#define NUM_FNS    8
+// v18 (2026-08-15): FUN_00b46c20 - the heap compactor. The Wild Lands /
+// Dead Dunes run settled its rank empirically: 108 of 222 watchdog records
+// share the identical chain memmove <- FUN_00b46c20 <- FUN_00b47ac0
+// (vtable wrapper, ret 00B47AD9) <- FUN_00a01a00+0x14A (main-thread job
+// dispatcher) - the COMPACTION_MANAGER interval stage. Background rate is
+// ~1 capture / 30-60s everywhere, spiking to 13-in-2s and ~27-in-9s at the
+// Ruffian entry NPC storm, each capture a 21-22ms frame with reads=0 -
+// pure in-memory block moves, not I/O, and NOT the class loader (its
+// [loader] line stayed loads=0 through the entire stretch). Safety survey
+// in ghidra_output/defrag_hook.txt: standard 55 8B EC 83 EC 30 prologue
+// (clean 6-byte cut), no SEH, no inbound refs into the stolen bytes, only
+// two callers (00b47ad4, 00b47b1b), both direct CALLs.
+#define FN_B46C20  8
+#define NUM_FNS    9
 
 typedef struct {
     const char *name;
@@ -74,6 +87,7 @@ static HookedFunc g_funcs[NUM_FNS] = {
     { "FUN_00a015b0", NULL, 0x00a015b0 - 0x00400000, 5, 0, 0, 0 },
     { "FUN_00a41570", NULL, 0x00a41570 - 0x00400000, 6, 0, 0, 0 },
     { "FUN_00aa7850", NULL, 0x00aa7850 - 0x00400000, 6, 0, 0, 0 },
+    { "FUN_00b46c20", NULL, 0x00b46c20 - 0x00400000, 6, 0, 0, 0 },
 };
 
 static void *g_trampoline_aacf10 = NULL;
@@ -84,6 +98,7 @@ static void *g_trampoline_a01a00 = NULL;
 static void *g_trampoline_a015b0 = NULL;
 static void *g_trampoline_a41570 = NULL;
 static void *g_trampoline_aa7850 = NULL;
+static void *g_trampoline_b46c20 = NULL;
 
 #define STACK_DEPTH 16
 typedef struct {
@@ -787,6 +802,25 @@ __declspec(naked) void OnReturn_aa7850(void)
     }
 }
 
+// Heap compactor (FN_B46C20). Plain timing, no argument tampering: the
+// parameter its wrapper pushes ([this+0x4c]) is a block-list node pointer,
+// not a numeric budget, so there is nothing safe to cap here - and the
+// shader-queue budget experiment (v23, block above) already demonstrated
+// what "throttle first, understand the constraint later" costs. Measure
+// per-call duration and per-window call count first; whether the right
+// lever is slicing, deferral, or leaving it alone comes out of that data.
+__declspec(noinline) int __cdecl OnEnter_b46c20_C(void *r) { return OnEnterBookkeeping(r, FN_B46C20); }
+__declspec(noinline) void *__cdecl OnReturn_b46c20_C(void) { return OnReturnBookkeeping(FN_B46C20); }
+__declspec(naked) void OnReturn_b46c20(void)
+{
+    __asm {
+        pushfd
+        call OnReturn_b46c20_C
+        popfd
+        jmp eax
+    }
+}
+
 // Entry detours. Preserve ECX/EDX around our own C call regardless of each
 // target's exact calling convention - costs nothing, removes any risk of
 // corrupting a live fastcall/thiscall argument register. Return-address
@@ -990,6 +1024,25 @@ __declspec(naked) void Detour_aa7850(void)
         pop edx
         pop ecx
         jmp dword ptr [g_trampoline_aa7850]
+    }
+}
+
+__declspec(naked) void Detour_b46c20(void)
+{
+    __asm {
+        push ecx
+        push edx
+        mov eax, [esp + 8]
+        push eax
+        call OnEnter_b46c20_C
+        add esp, 4
+        test eax, eax
+        jz skip_b46c20
+        mov dword ptr [esp + 8], offset OnReturn_b46c20
+    skip_b46c20:
+        pop edx
+        pop ecx
+        jmp dword ptr [g_trampoline_b46c20]
     }
 }
 
