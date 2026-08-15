@@ -575,6 +575,24 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
                 AoDumpDepthStats(dev);
             }
 #if ENABLE_AO_SSAO
+            // Effective-mode logging (v24f). The entire v24..v24e loop was
+            // spent chasing a "broken blend" that was actually the DEBUG
+            // view running: the menu toggles persist to the ini instantly,
+            // so a debug toggle flipped during one test armed every later
+            // launch, and the debug replace erases engine shadows BY DESIGN
+            // - which reads exactly like broken SSAO. The log now states
+            // the effective mode on every change, so a session documents
+            // which branch actually rendered.
+            {
+                static LONG lastMode = -1;
+                LONG mode = !g_aoEnable ? 0 : (g_aoDebug ? 2 : 1);
+                if (mode != lastMode) {
+                    lastMode = mode;
+                    LogLine(mode == 0 ? "[ssao] mode: OFF"
+                          : mode == 1 ? "[ssao] mode: NORMAL (multiply into shadow term)"
+                                      : "[ssao] mode: DEBUG (4-band diagnostic replaces shadows)");
+                }
+            }
             if (g_aoEnable)
                 SsaoApply(dev, tex);
 #endif

@@ -54,7 +54,12 @@ static const char *g_ssaoHlsl =
 // and screen v runs DOWN, so the other order points normals AWAY from the
 // camera - every dot(v,N) clamps to zero and AO is white everywhere.
 // (Depth units were correct all along: measured 4..2000 world units.)
-"    float3 N = normalize(cross(ddx(P), ddy(P)));\n"
+// NaN guard (v24f): on flat-depth regions (sky, surfaces parallel to a
+// derivative axis) cross() is ~zero and normalize(0) is NaN; NaN written to
+// the shadow term renders geometry BLACK (user-observed in every flight).
+"    float3 g = cross(ddx(P), ddy(P));\n"
+"    float gl = length(g);\n"
+"    float3 N = (gl > 1e-6) ? g / gl : float3(0, 0, -1);\n"
 "    float ign = frac(52.9829189 * frac(dot(vpos, float2(0.06711056, 0.00583715))));\n"
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
 "    float occ = 0.0;\n"
