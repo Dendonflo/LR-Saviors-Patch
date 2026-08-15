@@ -252,11 +252,13 @@ static volatile LONG g_aoDumpRequest;         // one-shot buffer dump (menu butt
 // (SsaoApply is forward-declared in 24_ao_recon.c - d3d9 types do not exist
 // this early in the TU, but the tunables are plain LONGs and belong here so
 // the config table in 08 can see them.)
-static volatile LONG g_aoEnable = 0;          // ini AoEnable + menu toggle
+static volatile LONG g_aoEnable = 0;          // ini AoEnable; Graphics > Ambient Occlusion
 static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
-static volatile LONG g_aoStrengthPct = 70;    // ini AoStrengthPct
+static volatile LONG g_aoStrengthPct = 100;   // ini AoStrengthPct (user: "very aggressive")
+static volatile LONG g_aoIntensity100 = 250;  // ini AoIntensity100: estimator gain x100
 static volatile LONG g_aoRadius100 = 60;      // ini AoRadius100 (0.6 units - eyeball)
 static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
+static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 #endif
 #endif
 

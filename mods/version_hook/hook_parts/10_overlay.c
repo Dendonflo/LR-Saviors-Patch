@@ -649,6 +649,124 @@ static void PositionStatusPanel(void)
 // PeekMessage pump rather than SetTimer: the overlay window is created on
 // THIS thread, so this loop is what dispatches its WM_PAINT. Same 250ms
 // cadence as the old timer.
+// ---- SSAO tuning window (v25, user request: live tweaking) ---------------
+// A small captioned tool window with one scrollbar per SSAO tunable. Values
+// take effect the NEXT FRAME (the shader reads the volatile LONGs every
+// draw), so dragging a slider tunes the effect live. SCROLLBAR controls
+// rather than comctl32 trackbars: user32-only, nothing new linked.
+// Opened/closed from Dev Tools > SSAO Tuning Panel; the window's own close
+// button clears the same flag, so the checkbox stays honest.
+#if ENABLE_AO_SSAO
+static HWND g_hAoTweak = NULL;
+
+static struct {
+    const char *name;
+    volatile LONG *val;
+    LONG lo, hi, step;
+    HWND bar;
+} g_aoRows[] = {
+    { "Strength %",  &g_aoStrengthPct,   0,  100,  5, NULL },
+    { "Intensity",   &g_aoIntensity100, 50,  800, 10, NULL },
+    { "Radius",      &g_aoRadius100,    10,  500, 10, NULL },
+    { "Projection",  &g_aoProj100,      80,  250,  5, NULL },
+};
+#define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
+#define AOTW_ROW_H   34
+#define AOTW_LABEL_W 120
+#define AOTW_BAR_W   230
+#define AOTW_VAL_W   50
+
+static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_HSCROLL: {
+        HWND bar = (HWND)lp;
+        for (size_t i = 0; i < AO_ROWS; i++) {
+            if (g_aoRows[i].bar != bar) continue;
+            LONG v = *g_aoRows[i].val;
+            int code = LOWORD(wp);
+            if (code == SB_THUMBTRACK || code == SB_THUMBPOSITION) v = (LONG)HIWORD(wp);
+            else if (code == SB_LINELEFT)  v -= g_aoRows[i].step;
+            else if (code == SB_LINERIGHT) v += g_aoRows[i].step;
+            else if (code == SB_PAGELEFT)  v -= g_aoRows[i].step * 4;
+            else if (code == SB_PAGERIGHT) v += g_aoRows[i].step * 4;
+            else if (code == SB_ENDSCROLL) { SaveConfig(); return 0; }
+            if (v < g_aoRows[i].lo) v = g_aoRows[i].lo;
+            if (v > g_aoRows[i].hi) v = g_aoRows[i].hi;
+            InterlockedExchange(g_aoRows[i].val, v);
+            SetScrollPos(bar, SB_CTL, (int)v, TRUE);
+            InvalidateRect(h, NULL, TRUE);
+            return 0;
+        }
+        return 0;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        HFONT f = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+        HFONT old = (HFONT)SelectObject(dc, f);
+        SetBkMode(dc, TRANSPARENT);
+        char t[64];
+        for (size_t i = 0; i < AO_ROWS; i++) {
+            int y = 10 + (int)i * AOTW_ROW_H;
+            TextOutA(dc, 10, y + 4, g_aoRows[i].name, (int)strlen(g_aoRows[i].name));
+            sprintf(t, "%ld", *g_aoRows[i].val);
+            TextOutA(dc, 10 + AOTW_LABEL_W + AOTW_BAR_W + 8, y + 4, t, (int)strlen(t));
+        }
+        SelectObject(dc, old);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    case WM_CLOSE:
+        // Hide, don't destroy: reopening keeps positions, and the menu
+        // checkbox mirrors this flag so it unticks itself.
+        InterlockedExchange(&g_aoTweakOpen, 0);
+        ShowWindow(h, SW_HIDE);
+        return 0;
+    }
+    return DefWindowProcA(h, msg, wp, lp);
+}
+
+static void EnsureAoTweakWindow(void)
+{
+    if (g_hAoTweak) return;
+    WNDCLASSA wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = AoTweakProc;
+    wc.hInstance = GetModuleHandleA(NULL);
+    wc.lpszClassName = "LRSaviorAoTweak";
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    RegisterClassA(&wc);
+    int cw = 10 + AOTW_LABEL_W + AOTW_BAR_W + 8 + AOTW_VAL_W + 10;
+    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H;
+    RECT r = { 0, 0, cw, ch };
+    AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
+    g_hAoTweak = CreateWindowExA(
+        WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName, "SSAO Tuning",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        120, 120, r.right - r.left, r.bottom - r.top,
+        NULL, NULL, wc.hInstance, NULL);
+    if (!g_hAoTweak) return;
+    for (size_t i = 0; i < AO_ROWS; i++) {
+        int y = 10 + (int)i * AOTW_ROW_H;
+        g_aoRows[i].bar = CreateWindowExA(
+            0, "SCROLLBAR", NULL, WS_CHILD | WS_VISIBLE | SBS_HORZ,
+            10 + AOTW_LABEL_W, y, AOTW_BAR_W, 18,
+            g_hAoTweak, NULL, wc.hInstance, NULL);
+        SCROLLINFO si;
+        memset(&si, 0, sizeof(si));
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_RANGE | SIF_POS | SIF_PAGE;
+        si.nMin = (int)g_aoRows[i].lo;
+        si.nMax = (int)g_aoRows[i].hi;
+        si.nPos = (int)*g_aoRows[i].val;
+        si.nPage = 1;
+        SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
+    }
+}
+#endif // ENABLE_AO_SSAO
+
 static DWORD WINAPI OverlayThread(LPVOID param)
 {
     (void)param;
@@ -703,6 +821,22 @@ static DWORD WINAPI OverlayThread(LPVOID param)
         } else if (g_hOverlay && IsWindowVisible(g_hOverlay)) {
             ShowWindow(g_hOverlay, SW_HIDE);
         }
+#if ENABLE_AO_SSAO
+        if (g_aoTweakOpen) {
+            EnsureAoTweakWindow();
+            if (g_hAoTweak && !IsWindowVisible(g_hAoTweak)) {
+                // Refresh scrollbar positions from the (possibly ini-edited)
+                // values before showing, then activate: unlike the overlay,
+                // this window WANTS focus - it is a control surface.
+                for (size_t i = 0; i < AO_ROWS; i++)
+                    if (g_aoRows[i].bar)
+                        SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
+                ShowWindow(g_hAoTweak, SW_SHOW);
+            }
+        } else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
+            ShowWindow(g_hAoTweak, SW_HIDE);
+        }
+#endif
         if (g_statusEnabled) {
             EnsureStatusWindow();
             if (g_hStatus) {

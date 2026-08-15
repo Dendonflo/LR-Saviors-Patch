@@ -125,8 +125,15 @@ static char __cdecl MenuH_AoDump(char apply)
     return 0;
 }
 #if ENABLE_AO_SSAO
-GAMEMENU_TOGGLE(MenuH_AoEnable, g_aoEnable)
+// Graphics > Ambient Occlusion: Off / SSAO as a radio pair, the shape every
+// other graphics group uses. "HBAO" joins as a third value when the
+// estimator swap exists - g_aoEnable=2 is reserved for it.
+GAMEMENU_VALUE(MenuH_AoOff,  g_aoEnable, 0)
+GAMEMENU_VALUE(MenuH_AoSsao, g_aoEnable, 1)
 GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
+// Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
+// not a button: the checkbox mirrors the window's own close box.
+GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
 #endif
 #endif
 
@@ -475,7 +482,9 @@ static void GameMenuAppend(void)
     //       After the vanilla build the manager is back at bar level, so
     //       these append after Control / Debug exactly like a vanilla group.
     if (g_advancedMenu) {
-        mOpen(mgr, NULL, "Mod_Optimization"); GameMenuFixLabel(mgr, L"Optimization");
+        mOpen(mgr, NULL, "Mod_Optimization"); GameMenuFixLabel(mgr, L"Dev Tools");   // renamed from "Optimization"
+        // 2026-08-16: it holds diagnostics and experiments, not user
+        // options, and the old name suggested settings worth touching.
         mBegin(mgr, NULL);
         mAdd(mgr, NULL, "Mod_Discard",   (void *)MenuH_Discard);   GameMenuFixLabel(mgr, L"DISCARD Lock Fix");
         mAdd(mgr, NULL, "Mod_ShaderThr", (void *)MenuH_ShaderThr); GameMenuFixLabel(mgr, L"Shader Queue Throttle");
@@ -496,8 +505,8 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoDump", (void *)MenuH_AoDump);
         GameMenuFixLabel(mgr, L"AO Dump Buffer (ao_buffer.bmp)");
 #if ENABLE_AO_SSAO
-        mAdd(mgr, NULL, "Mod_AoEnable", (void *)MenuH_AoEnable);
-        GameMenuFixLabel(mgr, L"SSAO (experimental)");
+        mAdd(mgr, NULL, "Mod_AoTweak", (void *)MenuH_AoTweak);
+        GameMenuFixLabel(mgr, L"SSAO Tuning Panel");
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);
         GameMenuFixLabel(mgr, L"SSAO Debug View (raw AO)");
 #endif
@@ -667,6 +676,14 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 1, id++, L"Off", MenuH_FxaaOff);
                     groups++;
                 }
+#if ENABLE_AO_SSAO
+                sub = GameMenuInsertGroup(gfx, at + 3, L"Ambient Occlusion");
+                if (sub) {
+                    GameMenuInsertLeaf(sub, 0, id++, L"Off",  MenuH_AoOff);
+                    GameMenuInsertLeaf(sub, 1, id++, L"SSAO", MenuH_AoSsao);
+                    groups++;
+                }
+#endif
 
                 at = (presPos >= 0) ? presPos + 1 : endPos;
                 sub = GameMenuInsertGroup(gfx, at, L"VSync");

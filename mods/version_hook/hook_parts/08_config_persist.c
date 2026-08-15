@@ -211,6 +211,7 @@ static NumericSetting g_numerics[] = {
     { &g_aoEnable,      "AoEnable",      0, 1 },
     { &g_aoDebug,       "AoDebug",       0, 1 },
     { &g_aoStrengthPct, "AoStrengthPct", 0, 100 },
+    { &g_aoIntensity100, "AoIntensity100", 50, 800 },
     { &g_aoRadius100,   "AoRadius100",   1, 100000 },
     { &g_aoProj100,     "AoProj100",     10, 1000 },
 #endif

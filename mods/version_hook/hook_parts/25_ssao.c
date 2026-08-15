@@ -262,7 +262,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
             c1[0] = ((float)g_aoProj100 / 100.0f) * ((float)d.Height / (float)d.Width);
             c1[1] = (float)g_aoProj100 / 100.0f;
             c1[2] = 0.02f;    // depth-proportional bias (self-occlusion guard)
-            c1[3] = 1.6f;     // estimator intensity, folded with strength
+            c1[3] = (float)g_aoIntensity100 / 100.0f;   // estimator gain, live-tunable
             float c2[4];
             c2[0] = g_aoDebug ? 1.0f : 0.0f;
             c2[1] = c2[2] = c2[3] = 0.0f;
