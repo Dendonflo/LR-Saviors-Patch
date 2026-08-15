@@ -714,6 +714,15 @@ __declspec(naked) void OnReturn_a41570(void)
 // thread-only, non-reentrant, once-per-frame call, but the path exists),
 // the budget is left untouched rather than risk a save with no matching
 // restore.
+// [STALE ATTRIBUTION - see PROGRESS.md "CORRECTION: ShaderThrottle is NOT
+// harmful". The v23 black-geometry regression described below persisted
+// with this throttle fully OFF; the real cause was the DISCARD fix's
+// pointer-only key. The throttle was exonerated and its default restored
+// to ON. This block already misled twice - once when a stale summary line
+// was quoted as status, and again 2026-08-15 when it was read as the
+// explanation for a transient blackout. The mechanism reasoning below
+// (pending shader -> black object) is kept as the v23-era theory, not as
+// established fact.]
 // DISABLED (v23 result): capping this budget causes severe visual
 // corruption - distant geometry and even the player character render
 // black/transparent, worse at lower resolution, worse the longer the

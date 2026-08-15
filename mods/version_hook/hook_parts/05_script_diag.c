@@ -796,14 +796,18 @@ static volatile LONG g_forceImmediatePresentEnabled = 0;
 // Opt-in, default OFF. Overwrites the engine's own frame-pacing target.
 // See ApplyFramerateUnlock() for the decompiled limiter and the risks.
 static volatile LONG g_unlockFramerateEnabled = 1;
-// Default OFF - and it genuinely is now. The v23 postmortem in
-// 07_timing_watchdog.c always SAID "g_shaderThrottleEnabled starts at 0",
-// but this definition still said 1, so every fresh config saved
-// ShaderThrottle=1 and the corrupting budget cap silently re-armed on
-// every launch since. Found 2026-08-15: Lightning rendering fully black
-// near Ruffian, [shaderbudget] ENGAGED x50 in the same session's log.
-// Keep this 0 unless deliberately isolating the shader queue.
-static volatile LONG g_shaderThrottleEnabled = 0;
+// Default ON, deliberately, and the 07_timing_watchdog.c comment saying
+// "starts at 0" is STALE HISTORY - do not act on it (2026-08-15: acted on
+// it, briefly flipped this to 0, walked it back within the hour). The
+// throttle was blamed for the v23 black-geometry regression, then
+// exonerated: corruption persisted with it fully OFF and the real cause
+// was the DISCARD fix's pointer-only key (PROGRESS.md "CORRECTION:
+// ShaderThrottle is NOT harmful"). The user runs 1 on purpose. Whether an
+// ENGAGED cap can still cause brief TRANSIENT blackouts (2026-08-15:
+// Lightning fully black for a few frames near Ruffian while the queue
+// churned) is a separate, open question - A/B via the panel toggle, not
+// by editing this default.
+static volatile LONG g_shaderThrottleEnabled = 1;
 // Default ON - confirmed engaging (bytes prefetched) but never shown to
 // measurably help; runtime-toggleable for benchmark isolation like
 // everything else, not because it's suspected of causing a problem.
