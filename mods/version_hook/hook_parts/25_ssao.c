@@ -1,4 +1,4 @@
-// ---- SSAO injection (v24) -------------------------------------------------
+﻿// ---- SSAO injection (v24) -------------------------------------------------
 // The payoff of the AO recon (24_ao_recon.c). Everything here rests on what
 // those six flights established:
 //
@@ -75,10 +75,15 @@ static const char *g_ssaoHlsl =
 "        occ += max(0.0, dot(v, N) - cParam1.z * P.z)\n"
 "             / (dot(v, v) + 0.01);\n"
 "    }\n"
-"    float ao = saturate(1.0 - cParam1.w * occ / 12.0);\n"
-"    ao = 1.0 - cParam0.w * (1.0 - ao);\n"             // strength envelope
-"    if (zRaw > 1500.0) ao = 1.0;\n"                   // sky/far (far ~2000)
+"    float aoBase = saturate(1.0 - cParam1.w * occ / 12.0);\n"
+"    if (zRaw > 1500.0) aoBase = 1.0;\n"               // sky/far (far ~2000)
+// Strength deliberately UNsaturated: >100% pushes the term below the
+// engine's 0.5 floor for deeper-than-stock creases (output clamps at 0).
+"    float ao = 1.0 - cParam0.w * (1.0 - aoBase);\n"
 "    float term = 0.5 + 0.5 * ao;\n"                   // map into [0.5..1]
+// Mode 3: RAW view - the estimator's own output as full-range grey, drawn
+// over the finished frame: no albedo, no shadow term, no [0.5..1] mapping.
+"    if (cParam2.x > 2.5) return float4(aoBase, aoBase, aoBase, 1.0);\n"
 // Debug = one screen, four vertical bands, each a pipeline stage:
 //   [0-25%]  depth stripes: a grey cycle per 20 world units. FLAT GREY here
 //            means the depth sample itself is broken (bind or sampler).
@@ -166,12 +171,16 @@ static void SsaoCompile(IDirect3DDevice9 *dev)
 
 // Runs at the s14 bind, before the engine's consumers. dev-state discipline
 // identical to the tint probe: D3DSBT_ALL block plus hand-restored RT0.
-static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
+// raw != 0: draw the estimator's output straight onto the CURRENT render
+// target (the backbuffer at DRAW_MENU time) - the true-raw debug view the
+// in-buffer debug mode cannot provide, since that one is always seen
+// through the materials' albedo multiply.
+static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw)
 {
-    static LONG lastFrame = -1;
+    static LONG lastFrame = -1, lastRawFrame = -1;
     LONG fr = g_msFrameSeq;
-    if (fr == lastFrame) return;
-    lastFrame = fr;
+    if (raw) { if (fr == lastRawFrame) return; lastRawFrame = fr; }
+    else     { if (fr == lastFrame)    return; lastFrame = fr; }
 
     if (g_ssaoCompileState == 0) SsaoCompile(dev);
     if (g_ssaoCompileState != 1) return;
@@ -181,12 +190,20 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
     IDirect3DStateBlock9 *sb = NULL;
     __try {
         D3DSURFACE_DESC d;
-        if (FAILED(IDirect3DTexture9_GetSurfaceLevel(
-                (IDirect3DTexture9 *)tex, 0, &surf)) || !surf) goto done;
-        if (FAILED(IDirect3DSurface9_GetDesc(surf, &d))) goto done;
-        if (FAILED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb)) || !sb) goto done;
-        if (FAILED(g_origGetRenderTarget(dev, 0, &oldRt)) || !oldRt) goto done;
-        if (FAILED(g_origSetRT(dev, 0, surf))) goto done;
+        if (raw) {
+            // Current RT0 (the backbuffer during DRAW_MENU) - no retarget,
+            // no oldRt to restore.
+            if (FAILED(g_origGetRenderTarget(dev, 0, &surf)) || !surf) goto done;
+            if (FAILED(IDirect3DSurface9_GetDesc(surf, &d))) goto done;
+            if (FAILED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb)) || !sb) goto done;
+        } else {
+            if (FAILED(IDirect3DTexture9_GetSurfaceLevel(
+                    (IDirect3DTexture9 *)tex, 0, &surf)) || !surf) goto done;
+            if (FAILED(IDirect3DSurface9_GetDesc(surf, &d))) goto done;
+            if (FAILED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb)) || !sb) goto done;
+            if (FAILED(g_origGetRenderTarget(dev, 0, &oldRt)) || !oldRt) goto done;
+            if (FAILED(g_origSetRT(dev, 0, surf))) goto done;
+        }
 
         {
             D3DVIEWPORT9 vp;
@@ -207,7 +224,11 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
         IDirect3DDevice9_SetPixelShader(dev, g_ssaoPs);
         IDirect3DDevice9_SetFVF(dev, D3DFVF_XYZRHW | D3DFVF_TEX1);
 
-        if (g_aoDebug) {
+        if (raw) {
+            // Opaque overwrite; the UI draws after this and stays readable.
+            g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE);
+            g_origSetRenderState(dev, D3DRS_COLORWRITEENABLE, 0x0F);
+        } else if (g_aoDebug) {
             // Opaque replace: the raw AO term fills the buffer so the whole
             // screen SHOWS it (materials multiply it in) - the tuning view.
             // Colour channels only: replacing ALPHA wipes the world
@@ -264,7 +285,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
             c1[2] = 0.02f;    // depth-proportional bias (self-occlusion guard)
             c1[3] = (float)g_aoIntensity100 / 100.0f;   // estimator gain, live-tunable
             float c2[4];
-            c2[0] = g_aoDebug ? 1.0f : 0.0f;
+            c2[0] = raw ? 3.0f : (g_aoDebug ? 1.0f : 0.0f);
             c2[1] = c2[2] = c2[3] = 0.0f;
             HRESULT h0 = IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
             HRESULT h1 = IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);

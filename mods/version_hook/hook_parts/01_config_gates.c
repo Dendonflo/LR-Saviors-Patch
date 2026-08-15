@@ -259,6 +259,7 @@ static volatile LONG g_aoIntensity100 = 250;  // ini AoIntensity100: estimator g
 static volatile LONG g_aoRadius100 = 60;      // ini AoRadius100 (0.6 units - eyeball)
 static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
+static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 #endif
 #endif
 

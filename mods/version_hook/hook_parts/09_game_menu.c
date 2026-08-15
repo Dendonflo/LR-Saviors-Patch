@@ -134,6 +134,9 @@ GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
 // Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
 // not a button: the checkbox mirrors the window's own close box.
 GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
+// True-raw AO painted over the finished frame (start of the UI pass) - the
+// in-buffer debug view is always seen through albedo; this one is not.
+GAMEMENU_TOGGLE(MenuH_AoRaw,    g_aoRawView)
 #endif
 #endif
 
@@ -507,8 +510,10 @@ static void GameMenuAppend(void)
 #if ENABLE_AO_SSAO
         mAdd(mgr, NULL, "Mod_AoTweak", (void *)MenuH_AoTweak);
         GameMenuFixLabel(mgr, L"SSAO Tuning Panel");
+        mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
+        GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);
-        GameMenuFixLabel(mgr, L"SSAO Debug View (raw AO)");
+        GameMenuFixLabel(mgr, L"SSAO Pipeline Bands (diagnostic)");
 #endif
 #endif
         mAdd(mgr, NULL, "Mod_SimDelta",  (void *)MenuH_SimDelta);  GameMenuFixLabel(mgr, L"Sim Delta Fix");

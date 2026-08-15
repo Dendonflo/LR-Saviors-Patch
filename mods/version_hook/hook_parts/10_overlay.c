@@ -1,4 +1,4 @@
-// ---- Control panel (separate Win32 window, not a D3D9 overlay) ------------
+﻿// ---- Control panel (separate Win32 window, not a D3D9 overlay) ------------
 // A D3D9-rendered overlay (ImGui or similar, drawn via the already-hooked
 // Present) was considered and rejected for this: it would need its own
 // input capture wired through the game's own message loop, a font/vertex
@@ -665,9 +665,9 @@ static struct {
     LONG lo, hi, step;
     HWND bar;
 } g_aoRows[] = {
-    { "Strength %",  &g_aoStrengthPct,   0,  100,  5, NULL },
-    { "Intensity",   &g_aoIntensity100, 50,  800, 10, NULL },
-    { "Radius",      &g_aoRadius100,    10,  500, 10, NULL },
+    { "Strength %",  &g_aoStrengthPct,   0,  200,  5, NULL },
+    { "Intensity",   &g_aoIntensity100, 50, 2000, 25, NULL },
+    { "Radius",      &g_aoRadius100,    10, 1500, 10, NULL },
     { "Projection",  &g_aoProj100,      80,  250,  5, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))

@@ -210,8 +210,10 @@ static NumericSetting g_numerics[] = {
     // show as AO stretching with screen position in the debug view.
     { &g_aoEnable,      "AoEnable",      0, 1 },
     { &g_aoDebug,       "AoDebug",       0, 1 },
-    { &g_aoStrengthPct, "AoStrengthPct", 0, 100 },
-    { &g_aoIntensity100, "AoIntensity100", 50, 800 },
+    // Strength past 100 pushes the AO term below the engine's own 0.5 shadow
+    // floor - deeper-than-stock creases, by user request ("very aggressive").
+    { &g_aoStrengthPct, "AoStrengthPct", 0, 200 },
+    { &g_aoIntensity100, "AoIntensity100", 50, 2000 },
     { &g_aoRadius100,   "AoRadius100",   1, 100000 },
     { &g_aoProj100,     "AoProj100",     10, 1000 },
 #endif

@@ -40,7 +40,7 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_SetTexture)(
 static PFN_SetTexture g_origSetTexture = NULL;
 
 #if ENABLE_AO_SSAO
-static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex);  // 25_ssao.c
+static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw);  // 25_ssao.c
 #endif
 
 // Local IID so the build does not gain a dxguid.lib dependency for one call.
@@ -602,7 +602,7 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
                 }
             }
             if (g_aoEnable)
-                SsaoApply(dev, tex);
+                SsaoApply(dev, tex, 0);
 #endif
             if (g_aoTint)
                 AoTintBuffer(dev, tex);
@@ -633,6 +633,12 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         }
         if (tex && (void *)tex == g_aoDepthTex)
             InterlockedIncrement(&g_aoMsDepthSamples);
+    } else if (pass == PASS_MENU && g_aoRawView && g_aoEnable) {
+#if ENABLE_AO_SSAO
+        // True-raw AO over the finished frame, at the start of the UI pass
+        // so menus stay readable on top.
+        SsaoApply(dev, NULL, 1);
+#endif
     } else if (pass > PASS_MS && g_aoShadowSurf) {
         // Lifetime check 3: the shadow buffer re-targeted after the material
         // pass began would mean injected content gets overwritten. Also
