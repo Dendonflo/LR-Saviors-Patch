@@ -196,6 +196,105 @@ static void AoReconReport(const char *how)
     LogLine("[aorecon] recon complete - hook stays passthrough for the rest of the session");
 }
 
+// ---- Tint probe (v23) -----------------------------------------------------
+// The recon confirmed the plumbing: the pass's final output is a FULL-RES
+// A8R8G8B8 texture, bound once per frame at stage 14, sampled by ~119
+// material draws per frame, never touched after its pass. What binds/draws
+// cannot say is the SEMANTICS: what does darkening this buffer darken?
+// ARGB means it may carry several lighting terms across channels.
+//
+// One run answers it visually. Once per frame, right as the engine binds the
+// buffer at s14, draw five vertical multiply bands into it:
+//   [ 0-20%]  all channels x0.35   - does darkening darken ambient or sun?
+//   [20-40%]  R x0.2               - what does the R channel carry?
+//   [40-60%]  G x0.2
+//   [60-80%]  B x0.2
+//   [80-100%] untouched            - reference
+// The user reads the screen like a legend. Fixed-function quads (XYZRHW +
+// DIFFUSE, ZERO/SRCCOLOR blend = dst*src), no shaders involved; a state
+// block wraps the whole thing. AoTint=0 in the ini disarms without rebuild.
+// g_aoTint declared in 01_config_gates.c (the config table in 08 needs it).
+static volatile LONG g_aoTints = 0;
+
+static void AoTintBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
+{
+    static LONG lastFrame = -1;
+    LONG fr = g_msFrameSeq;
+    if (fr == lastFrame) return;
+    lastFrame = fr;
+
+    IDirect3DSurface9 *surf = NULL, *oldRt = NULL;
+    IDirect3DStateBlock9 *sb = NULL;
+    __try {
+        if (FAILED(IDirect3DTexture9_GetSurfaceLevel(
+                (IDirect3DTexture9 *)tex, 0, &surf)) || !surf) goto done;
+        // State block FIRST: if anything below fails, Apply still restores.
+        // D3DSBT_ALL covers every state touched here except the render
+        // target, which state blocks never record - restored by hand.
+        if (FAILED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb)) || !sb)
+            goto done;
+        if (FAILED(g_origGetRenderTarget(dev, 0, &oldRt)) || !oldRt) goto done;
+        if (FAILED(g_origSetRT(dev, 0, surf))) goto done;
+
+        D3DSURFACE_DESC d;
+        if (FAILED(IDirect3DSurface9_GetDesc(surf, &d))) goto done;
+        {
+            D3DVIEWPORT9 vp;
+            vp.X = 0; vp.Y = 0;
+            vp.Width = d.Width; vp.Height = d.Height;
+            vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
+            g_origSetViewport(dev, &vp);
+        }
+
+        IDirect3DDevice9_SetPixelShader(dev, NULL);
+        IDirect3DDevice9_SetVertexShader(dev, NULL);
+        IDirect3DDevice9_SetFVF(dev, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+        g_origSetTexture(dev, 0, NULL);
+        g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE);
+        g_origSetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_ZERO);
+        g_origSetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);
+        g_origSetRenderState(dev, D3DRS_ZENABLE, FALSE);
+        g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);
+        g_origSetRenderState(dev, D3DRS_CULLMODE, D3DCULL_NONE);
+        g_origSetRenderState(dev, D3DRS_ALPHATESTENABLE, FALSE);
+        g_origSetRenderState(dev, D3DRS_FOGENABLE, FALSE);
+        g_origSetRenderState(dev, D3DRS_STENCILENABLE, FALSE);
+        g_origSetRenderState(dev, D3DRS_SCISSORTESTENABLE, FALSE);
+        g_origSetRenderState(dev, D3DRS_COLORWRITEENABLE, 0x0F);
+        IDirect3DDevice9_SetTextureStageState(dev, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        IDirect3DDevice9_SetTextureStageState(dev, 0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+        IDirect3DDevice9_SetTextureStageState(dev, 0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        IDirect3DDevice9_SetTextureStageState(dev, 0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+        IDirect3DDevice9_SetTextureStageState(dev, 1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+
+        {
+            // Multiply colours, ARGB: grey 0.35, then R/G/B each cut to 0.2
+            // with the other channels left at 1.0.
+            static const DWORD bandColour[4] =
+                { 0xFF595959, 0xFF33FFFF, 0xFFFF33FF, 0xFFFFFF33 };
+            struct { float x, y, z, w; DWORD c; } v[4];
+            float wBand = (float)d.Width / 5.0f;
+            for (int b = 0; b < 4; b++) {
+                float x0 = wBand * b, x1 = wBand * (b + 1);
+                for (int k = 0; k < 4; k++) {
+                    v[k].x = (k & 1) ? x1 : x0;
+                    v[k].y = (k & 2) ? (float)d.Height : 0.0f;
+                    v[k].z = 0.0f; v[k].w = 1.0f;
+                    v[k].c = bandColour[b];
+                }
+                IDirect3DDevice9_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(v[0]));
+            }
+        }
+        InterlockedIncrement(&g_aoTints);
+        if (g_aoTints == 1)
+            LogLine("[aotint] engaged: bands L->R = x0.35 all / R x0.2 / G x0.2 / B x0.2 / untouched");
+    done:;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (oldRt) { g_origSetRT(dev, 0, oldRt); IDirect3DSurface9_Release(oldRt); }
+    if (sb) { IDirect3DStateBlock9_Apply(sb); IDirect3DStateBlock9_Release(sb); }
+    if (surf) IDirect3DSurface9_Release(surf);
+}
+
 // Called from HookedDrawIndexedPrimitive (15_msaa.c). Counts material-pass
 // draws that execute with the shadow texture live on a sampler - the
 // question binds cannot answer. Success = 120 frames with such draws.
@@ -329,7 +428,14 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
                 g_aoReadCount = n + 1;
             }
         }
-    } else if (pass == PASS_MS && !g_aoReported) {
+    } else if (pass == PASS_MS) {
+        // Tint probe: fire exactly at the once-per-frame s14 bind of the
+        // final buffer - it is complete at this moment and about to be
+        // consumed. Runs BEFORE forwarding the bind; the content is tinted
+        // either way since the texture identity does not change.
+        if (g_aoTint && stage == 14 && tex && AoIsShadowTex((void *)tex))
+            AoTintBuffer(dev, tex);
+        if (g_aoReported) return g_origSetTexture(dev, stage, tex);
         if (tex && AoIsShadowTex((void *)tex)) {
             InterlockedIncrement(&g_aoMsStage[stage & 15]);
             LONG fr = g_msFrameSeq;

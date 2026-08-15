@@ -241,6 +241,7 @@
 static void InstallAoReconHook(void **vtbl);  // 24_ao_recon.c
 static void AoReconTick(void);                // timeout report, monitor thread
 static void AoDrawTick(void);                 // draw-level consumption check
+static volatile LONG g_aoTint;                // tint probe toggle (ini AoTint)
 #endif
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware

@@ -197,6 +197,12 @@ static NumericSetting g_numerics[] = {
     // the per-frame compaction allowance AND the single-pass size that
     // counts as a storm. EXPERIMENTAL - ini-only until a Ruffian A/B run
     // says the fragmentation risk doesn't bite.
+#if ENABLE_AO_RECON
+    // Tint probe for the AO investigation (24_ao_recon.c): paints multiply
+    // bands into the screen-shadow composite so its channel semantics can be
+    // read off the screen. Diagnostic-build key; gone when the gate goes.
+    { &g_aoTint, "AoTint", 0, 1 },
+#endif
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },
     { &g_compactorCooldownFrames, "CompactorCooldown", 1, 60 },
