@@ -352,8 +352,18 @@ static DWORD WINAPI MonitorThread(LPVOID param)
                     if (usec_hi > thr * 6 / 5) n50 += hist[b];
                     if (usec_hi > thr * 2) n30 += hist[b];
                 }
-                sprintf(line, "[frametime] n=%ld p50=%ld p90=%ld p99=%ld | thr=%ldus over=%ld (%.1f%%) over1.2x=%ld over2x=%ld",
-                        total, p50, p90, p99, thr, n60, total ? n60*100.0/total : 0.0, n50, n30);
+                // Wall clock APPENDED, not prefixed: this is the only line
+                // emitted on a fixed cadence for the whole session, so
+                // stamping it is what turns an otherwise position-ordered log
+                // into a timeline - "the bad stretch was 14 minutes in" is
+                // answerable, and [stutter] records inherit the time of the
+                // window they sit between. Appending keeps every existing
+                // `^\[frametime\]` grep working unchanged.
+                SYSTEMTIME ft;
+                GetLocalTime(&ft);
+                sprintf(line, "[frametime] n=%ld p50=%ld p90=%ld p99=%ld | thr=%ldus over=%ld (%.1f%%) over1.2x=%ld over2x=%ld | %02d:%02d:%02d",
+                        total, p50, p90, p99, thr, n60, total ? n60*100.0/total : 0.0, n50, n30,
+                        ft.wHour, ft.wMinute, ft.wSecond);
                 LogLine(line);
                 g_liveP50 = p50; g_liveP99 = p99; g_liveOver16 = n60;
                 g_liveFrames = total; g_liveWorst = maxFrame;

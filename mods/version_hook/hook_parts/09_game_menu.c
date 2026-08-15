@@ -156,6 +156,27 @@ static void GameMenuSetSplit(LONG pct)
     InterlockedExchange(&g_shadowSplitNearPct, pct);
     InterlockedExchange(&g_shadowSplitFarPct, 0);
     SaveConfig();
+    // Doubles as the run marker for diagnostic captures. Nothing else in the
+    // log carries a wall-clock reference - [frametime] and [stutter] records
+    // are ordered by file position only - so a capture that starts partway
+    // into a session had no way to say WHERE it started. Toggling shadow
+    // distance is a one-button action reachable from the pause menu mid-run,
+    // which makes it the cheapest available "mark here" the player can press.
+    // Cost is one line per toggle, so it stays on in shipping builds.
+    //
+    // NOT NowUsec(): that is a LONG of microseconds, so it wraps at ~35
+    // minutes - fine for the short deltas it exists for, useless as a
+    // run-length reference. GetTickCount is milliseconds and wall clock is
+    // what the player can actually correlate against "I was in area X".
+    {
+        SYSTEMTIME st;
+        char l[160];
+        GetLocalTime(&st);
+        sprintf(l, "[mark] shadow distance -> %ld%%  (%02d:%02d:%02d  up=%.1fs  frame=%ld)",
+                pct, st.wHour, st.wMinute, st.wSecond,
+                GetTickCount() / 1000.0, g_frameSeq);
+        LogLine(l);
+    }
 }
 static char __cdecl MenuH_DistStd(char apply)
 {
