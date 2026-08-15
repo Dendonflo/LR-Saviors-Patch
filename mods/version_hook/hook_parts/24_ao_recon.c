@@ -1,4 +1,4 @@
-// ---- AO injection recon (v22 diagnostic) ----------------------------------
+﻿// ---- AO injection recon (v22 diagnostic) ----------------------------------
 // Question being answered (2026-08-15): can ambient occlusion be injected by
 // piggybacking the engine's own screen-space shadow buffer?
 //
@@ -43,10 +43,27 @@ static PFN_SetTexture g_origSetTexture = NULL;
 static const GUID g_aoIidTexture9 =
     { 0x85C31227, 0x3DE5, 0x4f00, { 0x9B, 0x3A, 0xF1, 0x1A, 0xC3, 0x8C, 0x18, 0xB5 } };
 
-static void *g_aoShadowSurf = NULL;    // MS_SHADOW RT0 surface (identity)
+static void *g_aoShadowSurf = NULL;    // FIRST MS_SHADOW RT0 (kept for report continuity)
 static void *g_aoShadowTex  = NULL;    // its container texture
 static LONG  g_aoShadowW, g_aoShadowH, g_aoShadowFmt;
 static void *g_aoDepthTex   = NULL;    // container of the linear-depth RT
+
+// v22f: the pass PING-PONGS - it samples its own container at two stages
+// while rendering, which requires at least two buffers alternating as RT0.
+// Latching only the first meant every downstream check ran against what is
+// probably an INTERMEDIATE, not the final output (consistent with the pass
+// handler publishing its result handle from the settings object, not from
+// RT0-at-entry). Track the full set of RT0s the pass uses, and which one is
+// LAST each frame - that one is the output the engine publishes.
+#define AO_RT_MAX 4
+static struct {
+    void *surf, *tex;
+    LONG w, h, fmt;
+    volatile LONG lastCount;   // frames where this was the final RT0 of the pass
+} g_aoRts[AO_RT_MAX];
+static volatile LONG g_aoRtCount = 0;
+static LONG g_aoLastRtIdx = -1;        // RT0 index seen most recently in-pass
+static LONG g_aoLastRtFrame = -1;
 
 #define AO_READ_MAX 12
 static struct { DWORD stage; void *tex; volatile LONG count; } g_aoReads[AO_READ_MAX];
@@ -77,6 +94,18 @@ static volatile LONG g_aoFramesSampled = 0;
 static LONG g_aoLastSampleFrame = -1;
 static volatile LONG g_aoReported = 0;
 
+// A texture counts as "the shadow buffer" if it is the container of ANY
+// render target the ping-pong touched.
+static int AoIsShadowTex(void *tex)
+{
+    if (!tex) return 0;
+    LONG n = g_aoRtCount;
+    if (n > AO_RT_MAX) n = AO_RT_MAX;
+    for (LONG i = 0; i < n; i++)
+        if (g_aoRts[i].tex == tex) return 1;
+    return 0;
+}
+
 static void *AoResolveContainer(void *surf)
 {
     void *tex = NULL;
@@ -101,6 +130,19 @@ static void AoReconReport(const char *how)
             g_aoShadowSurf, g_aoShadowW, g_aoShadowH, g_aoShadowFmt, g_aoShadowTex,
             g_aoShadowTex ? "texture - BINDABLE" : "no container - NOT bindable, option 2 dead");
     LogLine(l);
+    {
+        // The full ping-pong set. The one with the dominant lastCount is the
+        // pass's true OUTPUT - the injection target if the approach works.
+        LONG n = g_aoRtCount;
+        if (n > AO_RT_MAX) n = AO_RT_MAX;
+        for (LONG i = 0; i < n; i++) {
+            sprintf(l, "[aorecon] pass RT[%ld]: surf=%p %ldx%ld fmt=%ld container=%p last_of_pass=%ld frames%s",
+                    i, g_aoRts[i].surf, g_aoRts[i].w, g_aoRts[i].h, g_aoRts[i].fmt,
+                    g_aoRts[i].tex, g_aoRts[i].lastCount,
+                    g_aoRts[i].tex ? "" : "  (NO container)");
+            LogLine(l);
+        }
+    }
     sprintf(l, "[aorecon] depth prepass rt=%p container=%p (%s)",
             g_depthRtMain, g_aoDepthTex,
             g_aoDepthTex ? "texture - usable as SSAO input" : "no container - SSAO input problem");
@@ -199,15 +241,15 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
     g_aoSetTexCalls++;   // racy increment is fine for a liveness counter
 
     // Track every pass that binds the shadow container, not just MULTI_SAMPLE.
-    if (tex && (void *)tex == g_aoShadowTex && g_aoShadowTex) {
+    if (tex && AoIsShadowTex((void *)tex)) {
         LONG p = pass;
         if (p < 0 || p > PASS_COUNT) p = PASS_COUNT;
         InterlockedIncrement(&g_aoTexPass[p]);
     }
     // Maintain the live per-stage mask for the draw-level check. Bindings
     // persist across passes, which is the entire point.
-    if (g_aoShadowTex && stage < 16) {
-        if ((void *)tex == g_aoShadowTex)
+    if (g_aoRtCount && stage < 16) {
+        if (AoIsShadowTex((void *)tex))
             InterlockedOr(&g_aoStageMask, 1L << stage);
         else if (g_aoStageMask & (1L << stage))
             InterlockedAnd(&g_aoStageMask, ~(1L << stage));
@@ -226,18 +268,44 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         // vtable entry, deliberately bypassing HookedGetRenderTarget,
         // whose whole job is to lie to the engine while MSAA substitution
         // is active. One COM call for the whole session.
-        if (!g_aoShadowSurf && g_origGetRenderTarget) {
+        // Poll RT0 on every SetTexture inside the pass (~380/s - trivial) and
+        // maintain the SET of targets the ping-pong touches, plus which one
+        // was last each frame.
+        if (g_origGetRenderTarget) {
             IDirect3DSurface9 *s = NULL;
             __try {
                 if (SUCCEEDED(g_origGetRenderTarget(dev, 0, &s)) && s) {
-                    D3DSURFACE_DESC d;
-                    if (SUCCEEDED(IDirect3DSurface9_GetDesc(s, &d))) {
-                        g_aoShadowW = (LONG)d.Width;
-                        g_aoShadowH = (LONG)d.Height;
-                        g_aoShadowFmt = (LONG)d.Format;
+                    LONG n = g_aoRtCount, i;
+                    if (n > AO_RT_MAX) n = AO_RT_MAX;
+                    for (i = 0; i < n; i++)
+                        if (g_aoRts[i].surf == (void *)s) break;
+                    if (i == n && n < AO_RT_MAX) {
+                        D3DSURFACE_DESC d;
+                        if (SUCCEEDED(IDirect3DSurface9_GetDesc(s, &d))) {
+                            g_aoRts[n].w = (LONG)d.Width;
+                            g_aoRts[n].h = (LONG)d.Height;
+                            g_aoRts[n].fmt = (LONG)d.Format;
+                        }
+                        g_aoRts[n].tex = AoResolveContainer(s);
+                        g_aoRts[n].surf = (void *)s;
+                        g_aoRtCount = n + 1;
+                        if (!g_aoShadowSurf) {   // report-continuity fields
+                            g_aoShadowSurf = (void *)s;
+                            g_aoShadowTex = g_aoRts[n].tex;
+                            g_aoShadowW = g_aoRts[n].w;
+                            g_aoShadowH = g_aoRts[n].h;
+                            g_aoShadowFmt = g_aoRts[n].fmt;
+                        }
                     }
-                    g_aoShadowTex = AoResolveContainer(s);
-                    g_aoShadowSurf = (void *)s;   // identity only
+                    if (i < AO_RT_MAX) {
+                        // "Last RT0 of the pass this frame" - credited when the
+                        // frame moves on (next frame's first poll).
+                        LONG fr = g_msFrameSeq;
+                        if (fr != g_aoLastRtFrame && g_aoLastRtIdx >= 0)
+                            InterlockedIncrement(&g_aoRts[g_aoLastRtIdx].lastCount);
+                        g_aoLastRtFrame = fr;
+                        g_aoLastRtIdx = i;
+                    }
                     IDirect3DSurface9_Release(s); // GetRenderTarget AddRefs
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -262,7 +330,7 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
             }
         }
     } else if (pass == PASS_MS && !g_aoReported) {
-        if (tex && (void *)tex == g_aoShadowTex) {
+        if (tex && AoIsShadowTex((void *)tex)) {
             InterlockedIncrement(&g_aoMsStage[stage & 15]);
             LONG fr = g_msFrameSeq;
             if (fr != g_aoLastSampleFrame) {
