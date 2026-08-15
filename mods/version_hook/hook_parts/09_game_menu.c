@@ -117,6 +117,13 @@ GAMEMENU_TOGGLE(MenuH_Compactor,   g_compactorDeferEnabled)
 // on/off comparison the only readable way to judge them - so it needs a live
 // toggle. Rides the normal toggle machinery; menu rebuild = instant effect.
 GAMEMENU_TOGGLE(MenuH_AoTint,      g_aoTint)
+// Momentary button (same shape as Mark Log): writes the untinted composite
+// to ao_buffer.bmp for offline channel analysis.
+static char __cdecl MenuH_AoDump(char apply)
+{
+    if (apply) InterlockedExchange(&g_aoDumpRequest, 1);
+    return 0;
+}
 #endif
 
 // Log marker. A MOMENTARY ACTION, not a toggle: it writes a line and always
@@ -482,6 +489,8 @@ static void GameMenuAppend(void)
 #if ENABLE_AO_RECON
         mAdd(mgr, NULL, "Mod_AoTint", (void *)MenuH_AoTint);
         GameMenuFixLabel(mgr, L"AO Tint Probe (bands)");
+        mAdd(mgr, NULL, "Mod_AoDump", (void *)MenuH_AoDump);
+        GameMenuFixLabel(mgr, L"AO Dump Buffer (ao_buffer.bmp)");
 #endif
         mAdd(mgr, NULL, "Mod_SimDelta",  (void *)MenuH_SimDelta);  GameMenuFixLabel(mgr, L"Sim Delta Fix");
         mAdd(mgr, NULL, "Mod_StdD3D9",   (void *)MenuH_StdD3D9);   GameMenuFixLabel(mgr, L"Force Plain D3D9 (restart)");

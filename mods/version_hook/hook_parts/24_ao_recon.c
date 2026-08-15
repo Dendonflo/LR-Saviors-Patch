@@ -216,6 +216,76 @@ static void AoReconReport(const char *how)
 // g_aoTint declared in 01_config_gates.c (the config table in 08 needs it).
 static volatile LONG g_aoTints = 0;
 
+// ---- Buffer dump (v23b) ---------------------------------------------------
+// The tint probe's verbal readings ("darker around everything, some elements
+// more than others") are exactly the kind of observation that should be read
+// off the actual pixels instead of through descriptions of a moving screen.
+// One menu click writes the UNTINTED composite to ao_buffer.bmp next to the
+// exe, 32bpp so the alpha channel survives for offline channel analysis.
+// g_aoDumpRequest declared in 01_config_gates.c (menu part 09 needs it).
+
+static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
+{
+    IDirect3DSurface9 *surf = NULL, *sys = NULL;
+    FILE *f = NULL;
+    __try {
+        D3DSURFACE_DESC d;
+        if (FAILED(IDirect3DTexture9_GetSurfaceLevel(
+                (IDirect3DTexture9 *)tex, 0, &surf)) || !surf) goto done;
+        if (FAILED(IDirect3DSurface9_GetDesc(surf, &d))) goto done;
+        if (FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(
+                dev, d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, NULL)) || !sys)
+            goto done;
+        if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, surf, sys))) goto done;
+        {
+            D3DLOCKED_RECT lr;
+            if (FAILED(IDirect3DSurface9_LockRect(sys, &lr, NULL, D3DLOCK_READONLY)))
+                goto done;
+            {
+                char path[MAX_PATH];
+                GetModuleFileNameA(NULL, path, MAX_PATH);
+                char *slash = strrchr(path, '\\');
+                if (slash) strcpy(slash + 1, "ao_buffer.bmp");
+                f = fopen(path, "wb");
+                if (f) {
+                    // 32bpp BMP, BI_RGB, rows bottom-up.
+                    DWORD rowBytes = d.Width * 4;
+                    DWORD imgBytes = rowBytes * d.Height;
+                    BITMAPFILEHEADER fh;
+                    BITMAPINFOHEADER ih;
+                    memset(&fh, 0, sizeof(fh));
+                    memset(&ih, 0, sizeof(ih));
+                    fh.bfType = 0x4D42;
+                    fh.bfOffBits = sizeof(fh) + sizeof(ih);
+                    fh.bfSize = fh.bfOffBits + imgBytes;
+                    ih.biSize = sizeof(ih);
+                    ih.biWidth = (LONG)d.Width;
+                    ih.biHeight = (LONG)d.Height;   // positive = bottom-up
+                    ih.biPlanes = 1;
+                    ih.biBitCount = 32;
+                    fwrite(&fh, sizeof(fh), 1, f);
+                    fwrite(&ih, sizeof(ih), 1, f);
+                    for (LONG y = (LONG)d.Height - 1; y >= 0; y--)
+                        fwrite((unsigned char *)lr.pBits + y * lr.Pitch, rowBytes, 1, f);
+                    fclose(f); f = NULL;
+                    {
+                        char l[224];
+                        sprintf(l, "[aodump] wrote %s (%lux%lu fmt=%d)",
+                                path, d.Width, d.Height, (int)d.Format);
+                        LogLine(l);
+                        LogFlushNow();
+                    }
+                }
+            }
+            IDirect3DSurface9_UnlockRect(sys);
+        }
+    done:;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (f) fclose(f);
+    if (sys) IDirect3DSurface9_Release(sys);
+    if (surf) IDirect3DSurface9_Release(surf);
+}
+
 static void AoTintBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
 {
     static LONG lastFrame = -1;
@@ -433,8 +503,14 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         // final buffer - it is complete at this moment and about to be
         // consumed. Runs BEFORE forwarding the bind; the content is tinted
         // either way since the texture identity does not change.
-        if (g_aoTint && stage == 14 && tex && AoIsShadowTex((void *)tex))
-            AoTintBuffer(dev, tex);
+        if (stage == 14 && tex && AoIsShadowTex((void *)tex)) {
+            // Dump BEFORE tint, so the file always holds the engine's own
+            // content rather than last frame's bands.
+            if (InterlockedCompareExchange(&g_aoDumpRequest, 0, 1) == 1)
+                AoDumpBuffer(dev, tex);
+            if (g_aoTint)
+                AoTintBuffer(dev, tex);
+        }
         if (g_aoReported) return g_origSetTexture(dev, stage, tex);
         if (tex && AoIsShadowTex((void *)tex)) {
             InterlockedIncrement(&g_aoMsStage[stage & 15]);
