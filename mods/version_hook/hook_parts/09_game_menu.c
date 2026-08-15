@@ -186,15 +186,22 @@ GAMEMENU_VALUE(MenuH_SsShad2x,   g_shadowBufResPct, 200)
 // stays at engine default always (user's call 2026-08-11: far is too
 // finnicky). Applying any preset also zeroes the far percentage so a value
 // hand-set in an older ini cannot silently stay live under the menu.
-static void GameMenuSetSplit(LONG pct)
+// ONE control, both splits. The far split tested well at 200% (2026-08-15),
+// which also explains the old 300% glitching: that was the NEAR split pushed
+// to 300 with far left at its stock distance, so the near cascade was being
+// stretched to cover ground the technique could not hold on its own. Moving
+// both together keeps the cascade proportioned.
+//
+// Pairs are near/far: 150/125, 200/150, 300/200. The label shows the near
+// percentage only - two numbers in a menu entry would invite tuning the ratio,
+// which is exactly what this collapses.
+//
+// The separate far entries (MenuH_Far*) and the FarPct ini key both still
+// work for hand-tuning; only the menu group is gone.
+static void GameMenuSetSplit(LONG nearPct, LONG farPct)
 {
-    InterlockedExchange(&g_shadowSplitNearPct, pct);
-    // Far is NO LONGER forced to 0 here. It was, from 2026-08-11 to
-    // 2026-08-15, because the far split behaved unpredictably and there was
-    // no menu control for it - so an old ini value could sit live and
-    // invisible under a near-only menu. Now that far has its own group the
-    // two are independent settings, and silently clearing one from the
-    // other's handler would make the far menu appear to forget itself.
+    InterlockedExchange(&g_shadowSplitNearPct, nearPct);
+    InterlockedExchange(&g_shadowSplitFarPct, farPct);
     SaveConfig();
     // This used to also write the run marker, because it was the cheapest
     // one-button action reachable mid-run. Retired 2026-08-15 in favour of a
@@ -204,22 +211,22 @@ static void GameMenuSetSplit(LONG pct)
 }
 static char __cdecl MenuH_DistStd(char apply)
 {
-    if (apply) GameMenuSetSplit(0);
+    if (apply) GameMenuSetSplit(0, 0);
     return (char)(g_shadowSplitNearPct == 0);
 }
 static char __cdecl MenuH_Dist150(char apply)
 {
-    if (apply) GameMenuSetSplit(150);
+    if (apply) GameMenuSetSplit(150, 125);
     return (char)(g_shadowSplitNearPct == 150);
 }
 static char __cdecl MenuH_Dist200(char apply)
 {
-    if (apply) GameMenuSetSplit(200);
+    if (apply) GameMenuSetSplit(200, 150);
     return (char)(g_shadowSplitNearPct == 200);
 }
 static char __cdecl MenuH_Dist300(char apply)
 {
-    if (apply) GameMenuSetSplit(300);
+    if (apply) GameMenuSetSplit(300, 200);
     return (char)(g_shadowSplitNearPct == 300);
 }
 
@@ -582,16 +589,12 @@ static void GameMenuAppend(void)
                     groups++;
                 }
 
-                // Far cascade split, immediately under the near one so the
-                // pair reads as what it is: two ends of the same cascade.
-                sub = GameMenuInsertGroup(gfx, at + 1, L"Shadow Distance (Far)");
-                if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Standard", MenuH_FarStd);
-                    GameMenuInsertLeaf(sub, 1, id++, L"125%",     MenuH_Far125);
-                    GameMenuInsertLeaf(sub, 2, id++, L"150%",     MenuH_Far150);
-                    GameMenuInsertLeaf(sub, 3, id++, L"200%",     MenuH_Far200);
-                    groups++;
-                }
+                // The separate "Shadow Distance (Far)" group existed for one
+                // afternoon (2026-08-15). Far tested well at 200%, so the two
+                // splits are now driven together from the group above and the
+                // standalone far group is retired - the MenuH_Far* handlers
+                // are kept, and the FarPct ini key still works, for anyone
+                // wanting to tune the ratio by hand.
                 // Screen-Space Shadows REMOVED from the menu 2026-08-12: the
                 // effect is too subtle to perceive (verified during the
                 // ShadowBufPct work - 200% was indistinguishable from stock
