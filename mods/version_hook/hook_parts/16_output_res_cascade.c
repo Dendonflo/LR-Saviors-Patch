@@ -1194,6 +1194,45 @@ static void LogRtChange(void *pRT)
 // both are excluded. The band is deliberately wide because the user reports
 // cascade distances differing by location - the engine computes these
 // per-scene, and a multiplier preserves that instead of pinning it.
+// ---- PARKED (2026-08-15): shadow shimmer, and why this is the lever -------
+// User report: shadows "shimmer when looked at an angle... lots of shadow
+// detail at an angle almost looks like aliasing". Parked at their request -
+// documented here rather than in a notes file because this function is where
+// any fix would go, and whoever reads it next needs to know that.
+//
+// There are TWO distinct phenomena behind that description and they need
+// opposite fixes. Which one it is has not been established:
+//
+//   TEMPORAL crawl (edges swim while the camera moves, stable when still).
+//   Cause: the cascade projection is recomputed each frame with sub-texel
+//   offsets, so the whole depth map slides under the geometry. Standard fix
+//   is texel snapping, and THIS FUNCTION is the place: D3D9 row-vector
+//   convention puts the projection's translation at elements 12 (X) and 13
+//   (Y), so rounding those to whole shadow-map texels
+//     texel   = 2.0f / shadowMapRes          (clip space spans -1..1)
+//     m[12]   = roundf(m[12] / texel) * texel
+//   stabilises it. Two hard requirements, both learned here already:
+//     - the SAMPLING side must get the identical adjustment, or shadows
+//       drift with the camera (the documented step-2 failure). Compute the
+//       offset from the ORIGINAL matrix so MaybePropagateCascade can derive
+//       exactly the same value.
+//     - snapping only fully works if the cascade EXTENT is stable frame to
+//       frame. The engine computes extents per-scene, so this holds within
+//       an area but should be verified before trusting the result.
+//   Note the gate below returns early unless g_nearCascadePct is set, so a
+//   stabilisation option needs its own gate - it must work at Standard too.
+//
+//   SPATIAL aliasing (grainy/jagged at grazing angles, present when still).
+//   Cause: perspective aliasing - at a grazing angle one shadow texel covers
+//   many screen pixels. NOT fixable here; the projection is not the problem.
+//   The lever is the shadow sampling shader (wider or better PCF), reachable
+//   the same way the FXAA passthrough was.
+//
+// Resolution does not fix either one on its own: raising ShadowMapRes scales
+// every cascade equally (confirmed - at 8192 the tracked surfaces are
+// 8192x16384 plus 8192x8192 twice), so near and far keep the same relative
+// texel density and far stays proportionally soft. Rebalancing THAT would
+// need per-cascade resolution, which no known field provides.
 static volatile LONG g_cascadeRewrites = 0;
 static volatile LONG g_cascadeLogged = 0;
 #define CASCADE_BAND_LO 0.04f
