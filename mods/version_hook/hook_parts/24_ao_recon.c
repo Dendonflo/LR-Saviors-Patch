@@ -115,6 +115,15 @@ static void AoReconReset(void)
     g_aoShadowTex = NULL;
     g_aoDepthTex = NULL;
     g_aoStageMask = 0;
+#if ENABLE_AO_SSAO
+    // The blur RT pair is D3DPOOL_DEFAULT: alive across a Reset it BLOCKS
+    // the Reset outright (same rule as the MSAA surfaces), and across an
+    // SSAA screen-set rebuild it is merely the wrong size. Both call paths
+    // of this function run before the old surfaces are freed / Reset is
+    // forwarded, so releasing here is always safe; recreated lazily at the
+    // composite's new size on the next SsaoApply.
+    SsaoReleaseRts();
+#endif
     LogLine("[aorecon] device Reset - AO latches cleared, will re-latch");
 }
 

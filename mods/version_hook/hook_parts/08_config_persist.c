@@ -216,6 +216,12 @@ static NumericSetting g_numerics[] = {
     { &g_aoIntensity100, "AoIntensity100", 50, 2000 },
     { &g_aoRadius100,   "AoRadius100",   1, 100000 },
     { &g_aoProj100,     "AoProj100",     10, 1000 },
+    // Bilateral blur pass (25_ssao.c): Sharp is the depth edge-stop - how
+    // hard the blur refuses to smooth across depth discontinuities. 0 turns
+    // the edge-stop off (plain gaussian, expect haloes); high values keep
+    // edges crisp at the cost of residual grain along them.
+    { &g_aoBlur,        "AoBlur",        0, 1 },
+    { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
 #endif
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },

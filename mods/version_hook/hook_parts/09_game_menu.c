@@ -131,6 +131,9 @@ static char __cdecl MenuH_AoDump(char apply)
 GAMEMENU_VALUE(MenuH_AoOff,  g_aoEnable, 0)
 GAMEMENU_VALUE(MenuH_AoSsao, g_aoEnable, 1)
 GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
+// Bilateral blur A/B lever: default ON (it IS the noise cure), the toggle
+// exists so raw-vs-blurred can be compared live while tuning.
+GAMEMENU_TOGGLE(MenuH_AoBlur,   g_aoBlur)
 // Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
 // not a button: the checkbox mirrors the window's own close box.
 GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
@@ -510,6 +513,8 @@ static void GameMenuAppend(void)
 #if ENABLE_AO_SSAO
         mAdd(mgr, NULL, "Mod_AoTweak", (void *)MenuH_AoTweak);
         GameMenuFixLabel(mgr, L"SSAO Tuning Panel");
+        mAdd(mgr, NULL, "Mod_AoBlur", (void *)MenuH_AoBlur);
+        GameMenuFixLabel(mgr, L"AO Blur (bilateral)");
         mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
         GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);

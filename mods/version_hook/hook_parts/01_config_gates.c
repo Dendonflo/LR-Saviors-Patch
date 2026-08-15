@@ -254,6 +254,7 @@ static volatile LONG g_aoDumpRequest;         // one-shot buffer dump (menu butt
 // this early in the TU, but the tunables are plain LONGs and belong here so
 // the config table in 08 can see them.)
 static volatile LONG g_aoEnable = 0;          // ini AoEnable; Graphics > Ambient Occlusion
+                                              //   0=off 1=SSAO (Alchemy) 2=HBAO
 static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
 static volatile LONG g_aoStrengthPct = 100;   // ini AoStrengthPct (user: "very aggressive")
 static volatile LONG g_aoIntensity100 = 250;  // ini AoIntensity100: estimator gain x100
@@ -261,6 +262,10 @@ static volatile LONG g_aoRadius100 = 60;      // ini AoRadius100 (0.6 units - ey
 static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
+static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
+static volatile LONG g_aoBlurSharp = 40;      // ini AoBlurSharp: blur depth edge-stop
+static void SsaoReleaseRts(void);             // 25_ssao.c - the blur RT pair is
+                                              //   D3DPOOL_DEFAULT; AoReconReset calls this
 #endif
 #endif
 

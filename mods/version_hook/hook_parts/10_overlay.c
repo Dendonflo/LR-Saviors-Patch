@@ -669,6 +669,9 @@ static struct {
     { "Intensity",   &g_aoIntensity100, 50, 2000, 25, NULL },
     { "Radius",      &g_aoRadius100,    10, 1500, 10, NULL },
     { "Projection",  &g_aoProj100,      80,  250,  5, NULL },
+    // Blur depth edge-stop (0 = plain gaussian). Only meaningful with
+    // AoBlur=1; the row is harmless when the blur is off.
+    { "Blur Sharp",  &g_aoBlurSharp,     0,  400, 10, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34
