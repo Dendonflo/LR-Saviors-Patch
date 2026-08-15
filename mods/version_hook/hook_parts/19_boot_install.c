@@ -859,6 +859,12 @@ void InstallPrefetchHook(void)
     sprintf(line, "WaitForSingleObject IAT hook installed: %d", wfsoOk);
     LogLine(line);
 
+#if ENABLE_D3DX_DIAG
+    int d3dxOk = InstallD3dxDiagHooks();
+    sprintf(line, "[d3dx] IAT timing hooks installed: %d of 9", d3dxOk);
+    LogLine(line);
+#endif
+
     int raiseOk = InstallRaiseExceptionHook();
     sprintf(line, "RaiseException IAT hook installed: %d", raiseOk);
     LogLine(line);

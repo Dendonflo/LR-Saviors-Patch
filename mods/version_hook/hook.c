@@ -52,3 +52,4 @@
 #include "hook_parts/19_boot_install.c"
 #include "hook_parts/20_debug_menu.c"
 #include "hook_parts/21_cutscene_shadow.c"
+#include "hook_parts/22_d3dx_diag.c"

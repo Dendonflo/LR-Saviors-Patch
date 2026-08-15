@@ -462,6 +462,21 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             LogLine(line);
         }
 
+#if ENABLE_D3DX_DIAG
+        // D3DX attribution: one line per function that was actually called
+        // this window - silent for the untouched imports.
+        for (int dxi = 0; dxi < DX_COUNT; dxi++) {
+            D3dxFn *df = &g_d3dxFns[dxi];
+            LONG dsum = InterlockedExchange(&df->sumUsec, 0);
+            LONG dmax = InterlockedExchange(&df->maxUsec, 0);
+            if (dsum | dmax) {
+                sprintf(line, "[d3dx] %s: window_usec=%ld max_usec=%ld total_calls=%ld slow_calls=%ld",
+                        df->name, dsum, dmax, df->calls, df->slowCalls);
+                LogLine(line);
+            }
+        }
+#endif
+
         // Compactor deferral: only speaks when it actually skipped something,
         // so a silent log means the gate never engaged.
         {

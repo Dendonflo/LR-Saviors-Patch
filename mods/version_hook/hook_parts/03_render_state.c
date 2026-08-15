@@ -678,6 +678,39 @@ static volatile LONG g_compactorCooldown;    // frames left to skip
 // and driver waits - different families, different levers.
 static volatile LONG g_compactorCooldownFrames = 4;
 
+// ---- D3DX call attribution state (v19, 22_d3dx_diag.c) -------------------
+// Declared here rather than in part 22 because the monitor (part 11) prints
+// the per-window line and compiles first in the TU. All logic lives in 22.
+#if ENABLE_D3DX_DIAG
+typedef struct {
+    const char *name;
+    void *real;
+    volatile LONG calls;
+    volatile LONG slowCalls;       // > 1ms
+    volatile LONG sumUsec;         // windowed - monitor resets
+    volatile LONG maxUsec;         // windowed - monitor resets
+} D3dxFn;
+
+enum {
+    DX_CompileShaderFromFileA, DX_GetShaderConstantTable, DX_DebugMute,
+    DX_CompileShader, DX_GetPixelShaderProfile, DX_GetVertexShaderProfile,
+    DX_LoadSurfaceFromMemory, DX_LoadVolumeFromMemory,
+    DX_CreateTextureFromFileInMemoryEx, DX_COUNT
+};
+
+static D3dxFn g_d3dxFns[DX_COUNT] = {
+    { "D3DXCompileShaderFromFileA" },
+    { "D3DXGetShaderConstantTable" },
+    { "D3DXDebugMute" },
+    { "D3DXCompileShader" },
+    { "D3DXGetPixelShaderProfile" },
+    { "D3DXGetVertexShaderProfile" },
+    { "D3DXLoadSurfaceFromMemory" },
+    { "D3DXLoadVolumeFromMemory" },
+    { "D3DXCreateTextureFromMemEx" },   // shortened for log width
+};
+#endif
+
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
 // 4K the game allocates a 2048x4096 R32F atlas (two cascades stacked) plus

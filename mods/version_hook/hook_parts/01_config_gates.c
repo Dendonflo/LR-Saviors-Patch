@@ -180,6 +180,14 @@
 //   each class only.
 #define ENABLE_LOADER_DIAG 1
 
+// ENABLE_D3DX_DIAG - d3dx9 call attribution (22_d3dx_diag.c), 2026-08-15.
+//   After the compactor mitigation, d3dx9_43 texture work is the largest
+//   untraced family in the watchdog census (~15% of captures). IAT-wraps
+//   the exe's nine D3DX imports with per-call timing, a monitor line, and
+//   capped per-call logs above 1ms carrying the CALLER address - answers
+//   which D3DX call it is, which engine site makes it, and on which thread.
+#define ENABLE_D3DX_DIAG 1
+
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
 //   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of
 //   CinemaController fields whenever any of them changes, so the field/bit
