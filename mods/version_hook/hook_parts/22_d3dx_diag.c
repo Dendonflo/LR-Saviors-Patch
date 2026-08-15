@@ -84,6 +84,74 @@ D3DX_WRAP(DX_CreateTextureFromFileInMemoryEx, D3DXCreateTextureFromFileInMemoryE
           (DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5, DWORD a6, DWORD a7, DWORD a8, DWORD a9, DWORD a10, DWORD a11, DWORD a12, DWORD a13, DWORD a14),
           (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14))
 
+#endif // ENABLE_D3DX_DIAG (wrappers)
+
+// ---- Crash logger (ENABLE_CRASH_LOG) -------------------------------------
+// Lives in this part only because it was born from the same incident; it
+// has no dependency on the D3DX machinery and stays on when that is off.
+#if ENABLE_CRASH_LOG
+static volatile LONG g_crashLogged = 0;
+
+static LONG WINAPI CrashLogVeh(EXCEPTION_POINTERS *ep)
+{
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    // Fatal-shaped codes only: AV, illegal instruction, stack overflow,
+    // privileged instruction. Everything else (game-internal SEH, OS
+    // housekeeping like 0x406D1388 thread naming) passes through silently.
+    if (code == 0xC0000005 || code == 0xC000001D ||
+        code == 0xC00000FD || code == 0xC0000096) {
+        if (InterlockedIncrement(&g_crashLogged) <= 5) {
+            char line[320];
+            DWORD eip = (DWORD)ep->ContextRecord->Eip;
+            char name[MAX_PATH]; name[0] = '?'; name[1] = 0;
+            HMODULE mod = NULL;
+            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCSTR)(ULONG_PTR)eip, &mod);
+            if (mod) GetModuleFileNameA(mod, name, sizeof(name));
+            sprintf(line, "[crash] code=0x%08lX EIP=0x%08lX module=%s tid=%lu accessing=0x%08lX",
+                    code, eip, mod ? name : "(unmapped memory)",
+                    GetCurrentThreadId(),
+                    ep->ExceptionRecord->NumberParameters >= 2
+                        ? (DWORD)ep->ExceptionRecord->ExceptionInformation[1] : 0);
+            LogLine(line);
+            // Sweep the raw stack for game-module addresses - same technique
+            // as the watchdog's scan line, and for the same reason: the EBP
+            // chain is useless when EIP is already garbage.
+            {
+                char buf[512];
+                int o = sprintf(buf, "[crash]   stack:");
+                int n = 0;
+                __try {
+                    DWORD *sp = (DWORD *)ep->ContextRecord->Esp;
+                    for (int i = 0; i < 512 && n < 14; i++) {
+                        DWORD v = sp[i];
+                        if (g_mainModBase && v > (DWORD)g_mainModBase &&
+                            v < (DWORD)g_mainModBase + 0x2400000) {
+                            o += sprintf(buf + o, " %08lX",
+                                         v - (DWORD)g_mainModBase + 0x00400000);
+                            n++;
+                        }
+                    }
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                LogLine(buf);
+            }
+            // The process is probably about to die - buffered lines must
+            // reach the disk NOW or the whole record was pointless.
+            if (g_logFile) fflush(g_logFile);
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void InstallCrashLogVeh(void)
+{
+    AddVectoredExceptionHandler(1, CrashLogVeh);
+    LogLine("[crash] logger installed (first-chance, observational)");
+}
+#endif // ENABLE_CRASH_LOG
+
+#if ENABLE_D3DX_DIAG
 static int InstallD3dxDiagHooks(void)
 {
     static const char *importNames[DX_COUNT] = {

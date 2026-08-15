@@ -864,6 +864,9 @@ void InstallPrefetchHook(void)
     sprintf(line, "[d3dx] IAT timing hooks installed: %d of 9", d3dxOk);
     LogLine(line);
 #endif
+#if ENABLE_CRASH_LOG
+    InstallCrashLogVeh();
+#endif
 
     int raiseOk = InstallRaiseExceptionHook();
     sprintf(line, "RaiseException IAT hook installed: %d", raiseOk);

@@ -186,7 +186,25 @@
 //   the exe's nine D3DX imports with per-call timing, a monitor line, and
 //   capped per-call logs above 1ms carrying the CALLER address - answers
 //   which D3DX call it is, which engine site makes it, and on which thread.
-#define ENABLE_D3DX_DIAG 1
+//   SUSPENDED 2026-08-15, same day it shipped: two access-violation
+//   crashes at the title screen's Load Game option (Windows Event Log
+//   10:58:56 / 10:59:17, EIP in unmapped heap memory both times) right
+//   after this diagnostic deployed. The wrappers logged 1000+ clean calls
+//   at the title screen, but Load Game is where the save-thumbnail
+//   decoder would make the FIRST D3DXCreateTextureFromFileInMemoryEx
+//   call, and an arity/convention slip there produces exactly the
+//   observed jump-into-garbage. OFF pending the bisect run; the crash
+//   logger below (ENABLE_CRASH_LOG) ships in its place so a repeat
+//   names its faulting site instead of "module: unknown".
+#define ENABLE_D3DX_DIAG 0
+
+// ENABLE_CRASH_LOG - vectored first-chance logger for fatal exception
+//   codes (AV, illegal instruction, stack overflow). Logs EIP, owning
+//   module and a game-address stack sweep to version_hook.log with an
+//   immediate fflush, then CONTINUE_SEARCH - purely observational, the
+//   crash proceeds unchanged. Capped at 5 records per session so a
+//   handled first-chance AV loop cannot flood the log.
+#define ENABLE_CRASH_LOG 1
 
 // ENABLE_CUTSCENE_DIAG - one-run correlation aid for the cutscene-aware
 //   shadow-distance revert (21_cutscene_shadow.c). Logs a small window of
@@ -362,6 +380,9 @@ static volatile LONG g_deferPerFrame = 12;
 static void DrainStagedUploads(void);
 static void ApplyCascadeSplitSource(void);   // per-frame; see the split-source block
 static void CutsceneDetectTick(void);        // per-frame; see 21_cutscene_shadow.c
+#if ENABLE_CRASH_LOG
+static void InstallCrashLogVeh(void);        // 22_d3dx_diag.c (crash logger half)
+#endif
 // Texture pool: when a poolable texture's game-visible refcount reaches
 // zero, keep the underlying D3D object alive instead of letting it be
 // destroyed, and hand it back out on a later CreateTexture call with
