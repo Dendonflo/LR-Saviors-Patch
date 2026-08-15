@@ -165,6 +165,7 @@ static NumericSetting g_numerics[] = {
     // says the fragmentation risk doesn't bite.
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },
+    { &g_compactorCooldownFrames, "CompactorCooldown", 1, 60 },
 #if ENABLE_CASCADE_HUNT
     // Near-cascade extent multiplier, percent. 0/100 = untouched,
     // 200 = twice the ground covered by the sharp cascade.

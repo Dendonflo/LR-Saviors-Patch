@@ -467,8 +467,8 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         {
             LONG csk = InterlockedExchange(&g_compactorSkips, 0);
             if (csk) {
-                sprintf(line, "[compactor] deferred %ld passes this window (budget %ldus/frame, cooldown %d frames)",
-                        csk, g_compactorBudgetUs, COMPACTOR_COOLDOWN_FRAMES);
+                sprintf(line, "[compactor] deferred %ld passes this window (budget %ldus/frame, cooldown %ld frames)",
+                        csk, g_compactorBudgetUs, g_compactorCooldownFrames);
                 LogLine(line);
             }
         }

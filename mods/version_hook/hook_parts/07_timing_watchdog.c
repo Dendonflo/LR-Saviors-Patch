@@ -174,7 +174,7 @@ static void *OnReturnBookkeeping(int fnIdx)
         if (fnIdx == FN_B46C20 && g_compactorDeferEnabled) {
             g_compactorFrameUs += usec;
             if (usec > g_compactorBudgetUs)
-                g_compactorCooldown = COMPACTOR_COOLDOWN_FRAMES;
+                g_compactorCooldown = g_compactorCooldownFrames;
         }
     }
 

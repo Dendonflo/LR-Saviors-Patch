@@ -666,7 +666,13 @@ static volatile LONG g_compactorSkips;       // window counter, monitor resets
 static volatile LONG g_compactorFrameUs;     // spent this frame
 static volatile LONG g_compactorSeq;         // frame the accumulator belongs to
 static volatile LONG g_compactorCooldown;    // frames left to skip
-#define COMPACTOR_COOLDOWN_FRAMES 4
+// Configurable since the first Ruffian A/B (2026-08-15): at 4, the gate
+// erased the 30ms+ heavy tail (17 -> 6 captures, none of the survivors
+// compactor-related) but the storm still runs one ballooned pass per
+// cooldown expiry - ~12/s, the surviving 20-25ms class. The cooldown
+// divides that rate directly; raising it trades longer fragmentation
+// windows for fewer hitches. 4 was safe; probing upward.
+static volatile LONG g_compactorCooldownFrames = 8;
 
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
