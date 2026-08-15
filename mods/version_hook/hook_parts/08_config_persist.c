@@ -65,7 +65,22 @@ static ToggleableFix g_toggles[] = {
 #if ENABLE_SHADOWS_OFF
     { &g_shadowsOff,            "Skip shadow RENDER (diagnostic - keeps the pass alive)", "ShadowsOff" },
 #endif
-    { &g_gpuSyncSkip,           "Skip per-frame GPU fence (EXPERIMENTAL - may tear)", "GpuSyncSkip" },
+    // Label corrected 2026-08-15: this ships ON and has since it was
+    // confirmed (39% faster, the 9-frame square wave gone, user-verified,
+    // no visual issues) - "EXPERIMENTAL" on a default-on setting was a
+    // contradiction, and "may tear" was wrong outright: it removes a CPU/GPU
+    // serialising fence, it does not change presentation. Tearing is
+    // ForceImmediatePresent's business, not this one.
+    //
+    // SAFETY COUPLING, do not break: the fence guaranteed the GPU had
+    // finished with a buffer before the CPU touched it again, and this
+    // engine locks textures without DISCARD/NOOVERWRITE (the whole reason
+    // DiscardFix and the Staging* family exist). Those redirect the unsafe
+    // locks into SYSTEMMEM staging, which is the plausible reason skipping
+    // the fence produces no artifacts. GpuSyncSkip=1 with the staging
+    // toggles OFF is the untested combination where corruption is expected
+    // first - LoadConfig logs a line if it ever loads that way.
+    { &g_gpuSyncSkip,           "Skip per-frame GPU fence (needs Staging* on)", "GpuSyncSkip" },
 #if ENABLE_PASS_PROBE
     { &g_logPassRts,            "Log render targets per draw pass (resolution probe)", "LogPassRts" },
 #endif
@@ -78,7 +93,9 @@ static ToggleableFix g_toggles[] = {
 #if ENABLE_SURFACE_DIAG
     { &g_msaaDebugClear,        "MSAA diagnostic: paint MS surface magenta", "MsaaDebugClear" },
 #endif
-    { &g_forceImmediatePresentEnabled, "Force IMMEDIATE present / no vsync (EXPERIMENTAL)", "ForceImmediatePresent" },
+    // Ships ON as of 2026-08-15 - see the declaration in 05_script_diag.c.
+    // Tears without VRR; Graphics > Vsync > On is the one-click revert.
+    { &g_forceImmediatePresentEnabled, "Force IMMEDIATE present / no vsync (tears without FreeSync/G-Sync)", "ForceImmediatePresent" },
     { &g_unlockFramerateEnabled,  "Unlock 59.94fps frame limiter (EXPERIMENTAL)", "UnlockFramerate" },
     { &g_simDeltaFix,          "Unquantise sim delta (fixes 60fps interact + stamina)", "SimDeltaFix" },
     // Cutout AA: three attempts, all dead ends, all retired together.
@@ -343,6 +360,19 @@ static void LoadConfig(void)
     // even running) before the player reached gameplay. The capture looked
     // valid and was completely worthless. Always start disarmed.
     g_logFrameTimes = 0;
+    // The GpuSyncSkip / Staging* coupling, stated once at load rather than
+    // left implicit in a comment. Not a warning about a known bug - no
+    // corruption has ever been observed - but this is the combination
+    // FEATURES.md identifies as where it would appear first, and a user who
+    // reaches it by editing the ini deserves to see that in their log
+    // instead of us reconstructing it from a bug report later.
+    if (g_gpuSyncSkip && !(g_stagingUploadEnabled && g_stagingSurfaceEnabled
+                           && g_stagingCubeEnabled))
+        LogLine("[config] NOTE: GpuSyncSkip=1 with one or more Staging* toggles OFF."
+                " The per-frame GPU fence is what made this engine's un-DISCARDed"
+                " locks safe; the staging redirects replace that protection."
+                " This combination is untested - if you see texture corruption,"
+                " turn Staging* back on or GpuSyncSkip off.");
     // 1024 and BOUNDS-CHECKED. This was char[300] and simply ran off the end
     // as options accumulated: the line is now ~700 chars, so every launch
     // smashed the stack here and the process died on return from this

@@ -785,14 +785,29 @@ static LONG CALLBACK PlantWatchVeh(PEXCEPTION_POINTERS ep)
 
 static volatile LONG g_deadlineClampCount = 0;
 static void __cdecl ClampAc3040Deadline(void *pacer);
-// Opt-in, default OFF. Rewrites PresentationInterval to IMMEDIATE at the
-// game's own IDirect3D9::CreateDevice call. See the injection site
-// (HookedIDirect3D9CreateDevice) for the full reasoning and risk - this
-// targets the 60Hz-multiple frame-time clustering traced to the swap chain
-// requesting D3DPRESENT_INTERVAL_DEFAULT (== ONE, i.e. vsync) while
-// Windowed, but can desync any engine timing that assumes a fixed-cadence
-// Present.
-static volatile LONG g_forceImmediatePresentEnabled = 0;
+// DEFAULT ON as of 2026-08-15 (was opt-in). Rewrites PresentationInterval to
+// IMMEDIATE at the game's own IDirect3D9::CreateDevice call. See the
+// injection site (HookedIDirect3D9CreateDevice) for the full mechanism.
+//
+// The game never asks for vsync explicitly - it requests
+// D3DPRESENT_INTERVAL_DEFAULT, which the D3D9 spec defines as identical to
+// INTERVAL_ONE, and being Windowed means DWM paces it (which is also why the
+// driver-level "vsync off" toggle does nothing here). The cost is
+// quantisation: every gameplay stutter this project measured sits at
+// 21-23ms, i.e. "missed the 16.7ms budget by a few ms", and under a 60Hz
+// compositor there is no 21ms frame - it waits a full extra interval and
+// becomes 33.3ms. The median frame is already 16.5-17.0ms, right on the
+// deadline. See RUN_2026-08-15_FOUR_ZONES.md.
+//
+// The tradeoff, and it is real: without VRR (FreeSync/G-Sync) this tears.
+// Shipped on anyway by the user's call - the frame-pacing win applies to
+// everyone, tearing only bothers some, and Graphics > Vsync > On restores
+// the vanilla behaviour in one click. Worth stating in the mod description
+// rather than leaving users to find it.
+//
+// Residual risk, unchanged: this can desync any engine timing that assumes a
+// fixed-cadence Present.
+static volatile LONG g_forceImmediatePresentEnabled = 1;
 // Opt-in, default OFF. Overwrites the engine's own frame-pacing target.
 // See ApplyFramerateUnlock() for the decompiled limiter and the risks.
 static volatile LONG g_unlockFramerateEnabled = 1;

@@ -664,6 +664,28 @@ static char g_cutsceneName[24];
 // Risk being tested: sustained deferral during heavy churn could let
 // fragmentation grow until some allocation fails in a way the engine
 // handles badly. Default OFF until a Ruffian A/B says otherwise.
+// DEFAULT OFF, and staying that way pending better evidence (2026-08-15
+// defaults review). Not rejected - UNPROVEN, which is a different thing:
+//
+//   - The first Ruffian A/B looked convincing (30ms+ captures 17 -> 6, none
+//     of the survivors compactor-related).
+//   - But the improvement did NOT reverse when the user later ran with
+//     CompactorDefer=0. Whatever produced it was not this.
+//   - The compactor's own workload halved (16k -> 10k calls/run, worst pass
+//     9.5ms -> 5.7ms) when the user moved their save point, removing two
+//     teleports' worth of heap churn from before the run. That is the
+//     likelier cause of the gains, and it left nothing for the deferral to
+//     defer on the short route.
+//   - Day-to-day variance was large enough (user: "results have been
+//     changing wildly today", suspected AMD driver behaviour) that no
+//     single A/B on this hardware settles it.
+//
+// It does demonstrably cap severity when it engages - the four-zone run had
+// it deferring 330 passes/min by Yuusnaan with the worst compactor capture
+// still 23.3ms - but capping severity that never manifested is not evidence
+// of benefit. Shipping a setting that defers engine housekeeping on that
+// basis is not justified; CompactorDefer=1 remains one ini line away for
+// anyone testing it.
 static volatile LONG g_compactorDeferEnabled = 0;
 static volatile LONG g_compactorBudgetUs = 2000;
 static volatile LONG g_compactorSkips;       // window counter, monitor resets
