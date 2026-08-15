@@ -46,14 +46,14 @@ static const char *g_ssaoHlsl =
 "    float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);\n"
 "    return float3(ndc.x * z / cParam1.x, ndc.y * z / cParam1.y, z);\n"
 "}\n"
+"float4 cParam2 : register(c2);\n"   // x=debug mode (0/1), yzw unused
 "float4 main(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR {\n"
 "    float3 P = ViewPos(uv);\n"
-"    if (P.z > 1500.0) return float4(1, 1, 1, 1);\n"   // sky/far (far plane ~2000)
+"    float zRaw = P.z;\n"
 // cross(ddx, ddy), NOT (ddy, ddx): view space is x-right/y-up/z-into-screen
 // and screen v runs DOWN, so the other order points normals AWAY from the
-// camera - every dot(v,N) clamps to zero and AO is white everywhere. That
-// was v24's entire failure; depth units were correct all along (measured
-// 4..2000 world units, [aodepth] 2026-08-15).
+// camera - every dot(v,N) clamps to zero and AO is white everywhere.
+// (Depth units were correct all along: measured 4..2000 world units.)
 "    float3 N = normalize(cross(ddx(P), ddy(P)));\n"
 "    float ign = frac(52.9829189 * frac(dot(vpos, float2(0.06711056, 0.00583715))));\n"
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
@@ -72,7 +72,22 @@ static const char *g_ssaoHlsl =
 "    }\n"
 "    float ao = saturate(1.0 - cParam1.w * occ / 12.0);\n"
 "    ao = 1.0 - cParam0.w * (1.0 - ao);\n"             // strength envelope
+"    if (zRaw > 1500.0) ao = 1.0;\n"                   // sky/far (far ~2000)
 "    float term = 0.5 + 0.5 * ao;\n"                   // map into [0.5..1]
+// Debug = one screen, four vertical bands, each a pipeline stage:
+//   [0-25%]  depth stripes: a grey cycle per 20 world units. FLAT GREY here
+//            means the depth sample itself is broken (bind or sampler).
+//   [25-50%] normals as colour. BLACK means derivatives/normal broke;
+//            uniform single colour means depth was flat.
+//   [50-75%] raw occlusion sum x2. BLACK means the estimator finds nothing
+//            even though depth+normals work (radius/units problem).
+//   [75-100%] the final term as it would be written.
+"    if (cParam2.x > 0.5) {\n"
+"        if (uv.x < 0.25)      { float s = frac(zRaw * 0.05); return float4(s, s, s, 1); }\n"
+"        else if (uv.x < 0.5)  { float3 nc = N * 0.5 + 0.5; return float4(nc, 1); }\n"
+"        else if (uv.x < 0.75) { float s = saturate(occ * 2.0 / 12.0); return float4(s, s, s, 1); }\n"
+"        return float4(term, term, term, 1);\n"
+"    }\n"
 "    return float4(term, term, term, 1.0);\n"          // alpha 1: MIN keeps sun mask
 "}\n";
 
@@ -204,8 +219,19 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
             c1[1] = (float)g_aoProj100 / 100.0f;
             c1[2] = 0.02f;    // depth-proportional bias (self-occlusion guard)
             c1[3] = 1.6f;     // estimator intensity, folded with strength
-            IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
-            IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);
+            float c2[4];
+            c2[0] = g_aoDebug ? 1.0f : 0.0f;
+            c2[1] = c2[2] = c2[3] = 0.0f;
+            HRESULT h0 = IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
+            HRESULT h1 = IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);
+            HRESULT h2 = IDirect3DDevice9_SetPixelShaderConstantF(dev, 2, c2, 1);
+            if (g_ssaoDraws == 0) {
+                char l[192];
+                sprintf(l, "[ssao] consts hr=%08lX/%08lX/%08lX c0=(%.5f %.5f %.2f %.2f) c1=(%.3f %.3f %.3f %.3f)",
+                        (unsigned long)h0, (unsigned long)h1, (unsigned long)h2,
+                        c0[0], c0[1], c0[2], c0[3], c1[0], c1[1], c1[2], c1[3]);
+                LogLine(l);
+            }
         }
         {
             // Half-texel offset: D3D9 maps texels to pixel CENTRES.
@@ -218,7 +244,13 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
                 q[k].u = (k & 1) ? 1.0f : 0.0f;
                 q[k].v = (k & 2) ? 1.0f : 0.0f;
             }
-            IDirect3DDevice9_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, q, sizeof(q[0]));
+            HRESULT hd = IDirect3DDevice9_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, q, sizeof(q[0]));
+            if (g_ssaoDraws == 0) {
+                char l[96];
+                sprintf(l, "[ssao] first DrawPrimitiveUP hr=%08lX (%s)",
+                        (unsigned long)hd, SUCCEEDED(hd) ? "ok" : "FAILED");
+                LogLine(l);
+            }
         }
         InterlockedIncrement(&g_ssaoDraws);
         if (g_ssaoDraws == 1)
