@@ -107,6 +107,41 @@ GAMEMENU_TOGGLE(MenuH_StdD3D9,     g_forceStdD3D9)
 GAMEMENU_TOGGLE(MenuH_Overlay,     g_overlayEnabled)
 GAMEMENU_TOGGLE(MenuH_Status,      g_statusEnabled)
 
+// Log marker. A MOMENTARY ACTION, not a toggle: it writes a line and always
+// reports itself unchecked, so the menu entry behaves like a button.
+//
+// This replaces marking runs by toggling shadow distance. That worked, but it
+// changed a real graphics setting to do it - the marked run then had to be
+// toggled back to the intended value, and a mistimed second toggle silently
+// altered what was being measured. Marks matter more than they look: analysis
+// MUST slice at the last mark, because whole-log stutter stats fold in boot,
+// save loading and teleports, whose causes (class loader, DDS decode, driver
+// shader compilation) do not occur in gameplay at all. Reading unsliced logs
+// once produced a cause roster in which three loading-only families looked
+// like major gameplay stutter sources. See tools/analyze_run.py.
+//
+// Advanced-only: it exists to make a diagnostic capture readable, and a
+// player who never reads the log has no use for it.
+static volatile LONG g_markCount = 0;
+
+static char __cdecl MenuH_LogMark(char apply)
+{
+    if (apply) {
+        SYSTEMTIME st;
+        char l[160];
+        LONG n = InterlockedIncrement(&g_markCount);
+        GetLocalTime(&st);
+        // Numbered so several marks in one session stay distinguishable, and
+        // stamped the same way the frametime line is so the two line up.
+        sprintf(l, "[mark] #%ld  (%02d:%02d:%02d  up=%.1fs  frame=%ld)",
+                n, st.wHour, st.wMinute, st.wSecond,
+                GetTickCount() / 1000.0, g_frameSeq);
+        LogLine(l);
+        LogFlushNow();
+    }
+    return 0;   // never checked - this is a button, not a state
+}
+
 // Stutter watchdog threshold. 1s = never fires in practice = "Off", which is
 // also the shipping default; the short values re-arm the logging.
 GAMEMENU_VALUE(MenuH_WdOff, g_stutterThresholdUsec, 1000000)
@@ -156,27 +191,11 @@ static void GameMenuSetSplit(LONG pct)
     InterlockedExchange(&g_shadowSplitNearPct, pct);
     InterlockedExchange(&g_shadowSplitFarPct, 0);
     SaveConfig();
-    // Doubles as the run marker for diagnostic captures. Nothing else in the
-    // log carries a wall-clock reference - [frametime] and [stutter] records
-    // are ordered by file position only - so a capture that starts partway
-    // into a session had no way to say WHERE it started. Toggling shadow
-    // distance is a one-button action reachable from the pause menu mid-run,
-    // which makes it the cheapest available "mark here" the player can press.
-    // Cost is one line per toggle, so it stays on in shipping builds.
-    //
-    // NOT NowUsec(): that is a LONG of microseconds, so it wraps at ~35
-    // minutes - fine for the short deltas it exists for, useless as a
-    // run-length reference. GetTickCount is milliseconds and wall clock is
-    // what the player can actually correlate against "I was in area X".
-    {
-        SYSTEMTIME st;
-        char l[160];
-        GetLocalTime(&st);
-        sprintf(l, "[mark] shadow distance -> %ld%%  (%02d:%02d:%02d  up=%.1fs  frame=%ld)",
-                pct, st.wHour, st.wMinute, st.wSecond,
-                GetTickCount() / 1000.0, g_frameSeq);
-        LogLine(l);
-    }
+    // This used to also write the run marker, because it was the cheapest
+    // one-button action reachable mid-run. Retired 2026-08-15 in favour of a
+    // dedicated "Mark Log" entry (MenuH_LogMark): marking a run should not
+    // change a graphics setting, and having to toggle back afterwards was a
+    // standing chance of measuring the wrong configuration.
 }
 static char __cdecl MenuH_DistStd(char apply)
 {
@@ -404,6 +423,10 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_Wd16",  (void *)MenuH_Wd16);  GameMenuFixLabel(mgr, L"16 ms");
         mAdd(mgr, NULL, "Mod_Wd33",  (void *)MenuH_Wd33);  GameMenuFixLabel(mgr, L"33 ms");
         mClose(mgr, NULL);
+        // Sits directly under the watchdog: the two are used together, since
+        // a mark is only useful when something is being captured.
+        mAdd(mgr, NULL, "Mod_LogMark", (void *)MenuH_LogMark);
+        GameMenuFixLabel(mgr, L"Mark Log (run start)");
         mClose(mgr, NULL);
     }
 

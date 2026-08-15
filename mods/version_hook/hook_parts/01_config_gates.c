@@ -391,6 +391,7 @@ static volatile LONG g_deferPerFrame = 12;
 static void DrainStagedUploads(void);
 static void ApplyCascadeSplitSource(void);   // per-frame; see the split-source block
 static void CutsceneDetectTick(void);        // per-frame; see 21_cutscene_shadow.c
+static void LogFlushNow(void);               // defined in 19_boot_install.c
 #if ENABLE_CRASH_LOG
 static void InstallCrashLogVeh(void);        // 22_d3dx_diag.c (crash logger half)
 #endif
