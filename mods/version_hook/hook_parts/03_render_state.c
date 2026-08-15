@@ -640,6 +640,34 @@ static char g_cutsceneName[24];
 // so the concern was a visible shadow pop twice per NPC chat. Reacting
 // immediately is the shipped behaviour; if talk cinemas do turn out to pop,
 // the fix is a hold counter here, not a change anywhere else.
+// ---- Heap compactor deferral (v18b, EXPERIMENTAL, default OFF) -----------
+// SQEX::CDev::Engine::Memory::Alternative::SeparateHeapSpace runs its
+// compactor (FUN_00b46c20, vtable +0x14 wrapper FUN_00b47ac0) ~2x/frame
+// from the main-thread job dispatcher. Normally 0.2-0.5us; in NPC-dense
+// areas single passes balloon to 3-10ms (measured 2026-08-15, Ruffian) and
+// consecutive ballooned passes are the dominant remaining stutter. A pass
+// cannot be interrupted midway, but it CAN be skipped entirely: the block
+// list is consistent between passes and an uncompacted heap just stays
+// fragmented until the next tick - compaction is housekeeping, not part of
+// any allocation's success path (fixed cadence regardless of load).
+// Two mechanisms, both per-frame:
+//   - budget: once passes have cost g_compactorBudgetUs in one frame,
+//     further passes that frame are skipped (bounds the per-frame total,
+//     minus one unavoidable overrun since a running pass can't be stopped).
+//   - cooldown: after any single pass exceeds the budget, skip ALL passes
+//     for COMPACTOR_COOLDOWN_FRAMES frames - turns "8ms every frame for 9
+//     seconds" into "8ms every Nth frame", spreading the storm.
+// Risk being tested: sustained deferral during heavy churn could let
+// fragmentation grow until some allocation fails in a way the engine
+// handles badly. Default OFF until a Ruffian A/B says otherwise.
+static volatile LONG g_compactorDeferEnabled = 0;
+static volatile LONG g_compactorBudgetUs = 2000;
+static volatile LONG g_compactorSkips;       // window counter, monitor resets
+static volatile LONG g_compactorFrameUs;     // spent this frame
+static volatile LONG g_compactorSeq;         // frame the accumulator belongs to
+static volatile LONG g_compactorCooldown;    // frames left to skip
+#define COMPACTOR_COOLDOWN_FRAMES 4
+
 // ---- Shadow map resolution multiplier ------------------------------------
 // The RT inventory (see FEATURES.md) identified the shadow set precisely: at
 // 4K the game allocates a 2048x4096 R32F atlas (two cascades stacked) plus

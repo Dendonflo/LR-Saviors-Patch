@@ -462,6 +462,17 @@ static DWORD WINAPI MonitorThread(LPVOID param)
             LogLine(line);
         }
 
+        // Compactor deferral: only speaks when it actually skipped something,
+        // so a silent log means the gate never engaged.
+        {
+            LONG csk = InterlockedExchange(&g_compactorSkips, 0);
+            if (csk) {
+                sprintf(line, "[compactor] deferred %ld passes this window (budget %ldus/frame, cooldown %d frames)",
+                        csk, g_compactorBudgetUs, COMPACTOR_COOLDOWN_FRAMES);
+                LogLine(line);
+            }
+        }
+
         // WaitForSingleObject: report TOTAL time spent blocked across all
         // threads in this window (sum, not average) - this is the
         // aggregate "how much wall-clock-equivalent time did the process

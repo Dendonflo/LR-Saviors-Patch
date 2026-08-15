@@ -167,6 +167,15 @@ static void *OnReturnBookkeeping(int fnIdx)
         // frametime's own 1.76x fast/slow ratio. Per-frame values settle
         // whether the 9-frame wave lives INSIDE this call or outside it.
         if (fnIdx == FN_AC3040) g_lastAc3040Usec = usec;
+        // Compactor deferral bookkeeping: charge this pass against the
+        // frame budget, and an over-budget single pass arms the cooldown
+        // (the pass itself couldn't be stopped - what CAN be prevented is
+        // the next few frames repeating it back to back).
+        if (fnIdx == FN_B46C20 && g_compactorDeferEnabled) {
+            g_compactorFrameUs += usec;
+            if (usec > g_compactorBudgetUs)
+                g_compactorCooldown = COMPACTOR_COOLDOWN_FRAMES;
+        }
     }
 
     return f.trueRetAddr;
@@ -818,7 +827,26 @@ __declspec(naked) void OnReturn_aa7850(void)
 // what "throttle first, understand the constraint later" costs. Measure
 // per-call duration and per-window call count first; whether the right
 // lever is slicing, deferral, or leaving it alone comes out of that data.
-__declspec(noinline) int __cdecl OnEnter_b46c20_C(void *r) { return OnEnterBookkeeping(r, FN_B46C20); }
+// Returns -1 to SKIP the pass entirely (detour pops and `ret 4`s without
+// ever entering the compactor - callee-clean __thiscall with one stack arg,
+// verified against wrapper A's call site: no add esp after the CALL), 1 to
+// run hijacked (timed), 0 to run untimed (per-thread stack full).
+__declspec(noinline) int __cdecl OnEnter_b46c20_C(void *r)
+{
+    if (g_compactorDeferEnabled) {
+        LONG seq = g_frameSeq;
+        if (seq != g_compactorSeq) {
+            g_compactorSeq = seq;
+            g_compactorFrameUs = 0;
+            if (g_compactorCooldown > 0) InterlockedDecrement(&g_compactorCooldown);
+        }
+        if (g_compactorCooldown > 0 || g_compactorFrameUs >= g_compactorBudgetUs) {
+            InterlockedIncrement(&g_compactorSkips);
+            return -1;
+        }
+    }
+    return OnEnterBookkeeping(r, FN_B46C20);
+}
 __declspec(noinline) void *__cdecl OnReturn_b46c20_C(void) { return OnReturnBookkeeping(FN_B46C20); }
 __declspec(naked) void OnReturn_b46c20(void)
 {
@@ -1045,6 +1073,8 @@ __declspec(naked) void Detour_b46c20(void)
         push eax
         call OnEnter_b46c20_C
         add esp, 4
+        cmp eax, -1
+        je defer_b46c20
         test eax, eax
         jz skip_b46c20
         mov dword ptr [esp + 8], offset OnReturn_b46c20
@@ -1052,6 +1082,12 @@ __declspec(naked) void Detour_b46c20(void)
         pop edx
         pop ecx
         jmp dword ptr [g_trampoline_b46c20]
+    defer_b46c20:
+        ; skip the pass entirely: __thiscall, one stack arg, callee cleans -
+        ; behave exactly like an immediate RET 4 from FUN_00b46c20.
+        pop edx
+        pop ecx
+        ret 4
     }
 }
 

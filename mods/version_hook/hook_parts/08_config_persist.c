@@ -158,6 +158,13 @@ static NumericSetting g_numerics[] = {
     { &g_cutsceneMode,     "CutsceneDetectMode",   1, 2 },
     { &g_cutsceneFlagOff,  "CutsceneFlagOffset",   0, 0x4000 },
     { &g_cutsceneFlagMask, "CutsceneFlagMask",     0, 0x7fffffff },
+    // Heap-compactor deferral (v18b, see 03_render_state.c). Defer=1 arms
+    // both the per-frame budget and the post-storm cooldown; BudgetUs is
+    // the per-frame compaction allowance AND the single-pass size that
+    // counts as a storm. EXPERIMENTAL - ini-only until a Ruffian A/B run
+    // says the fragmentation risk doesn't bite.
+    { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
+    { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },
 #if ENABLE_CASCADE_HUNT
     // Near-cascade extent multiplier, percent. 0/100 = untouched,
     // 200 = twice the ground covered by the sharp cascade.
