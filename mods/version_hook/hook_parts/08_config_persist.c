@@ -208,7 +208,8 @@ static NumericSetting g_numerics[] = {
     // [0.5..1] shadow envelope AO may use; Radius in engine units x100,
     // tuned by eye in the debug view; Proj = cot(fovY/2) x100 - wrong values
     // show as AO stretching with screen position in the debug view.
-    { &g_aoEnable,      "AoEnable",      0, 1 },
+    // AoEnable: 0=off 1=SSAO (Alchemy spiral) 2=HBAO (horizon march).
+    { &g_aoEnable,      "AoEnable",      0, 2 },
     { &g_aoDebug,       "AoDebug",       0, 1 },
     // Strength past 100 pushes the AO term below the engine's own 0.5 shadow
     // floor - deeper-than-stock creases, by user request ("very aggressive").

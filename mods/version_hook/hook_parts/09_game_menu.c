@@ -130,6 +130,7 @@ static char __cdecl MenuH_AoDump(char apply)
 // estimator swap exists - g_aoEnable=2 is reserved for it.
 GAMEMENU_VALUE(MenuH_AoOff,  g_aoEnable, 0)
 GAMEMENU_VALUE(MenuH_AoSsao, g_aoEnable, 1)
+GAMEMENU_VALUE(MenuH_AoHbao, g_aoEnable, 2)
 GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
 // Bilateral blur A/B lever: default ON (it IS the noise cure), the toggle
 // exists so raw-vs-blurred can be compared live while tuning.
@@ -691,6 +692,7 @@ static void GameMenuAppend(void)
                 if (sub) {
                     GameMenuInsertLeaf(sub, 0, id++, L"Off",  MenuH_AoOff);
                     GameMenuInsertLeaf(sub, 1, id++, L"SSAO", MenuH_AoSsao);
+                    GameMenuInsertLeaf(sub, 2, id++, L"HBAO", MenuH_AoHbao);
                     groups++;
                 }
 #endif

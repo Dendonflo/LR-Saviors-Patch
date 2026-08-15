@@ -622,11 +622,13 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
             // which branch actually rendered.
             {
                 static LONG lastMode = -1;
-                LONG mode = !g_aoEnable ? 0 : (g_aoDebug ? 2 : 1);
+                LONG mode = !g_aoEnable ? 0
+                          : (g_aoDebug ? 2 : (g_aoEnable == 2 ? 3 : 1));
                 if (mode != lastMode) {
                     lastMode = mode;
                     LogLine(mode == 0 ? "[ssao] mode: OFF"
-                          : mode == 1 ? "[ssao] mode: NORMAL (multiply into shadow term)"
+                          : mode == 1 ? "[ssao] mode: NORMAL SSAO/Alchemy (multiply into shadow term)"
+                          : mode == 3 ? "[ssao] mode: NORMAL HBAO (multiply into shadow term)"
                                       : "[ssao] mode: DEBUG (4-band diagnostic replaces shadows)");
                 }
             }
