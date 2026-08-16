@@ -70,6 +70,15 @@ static const char *g_ssaoHlsl =
 "float4 main(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR {\n"
 "    float3 P = ViewPos(uv);\n"
 "    float zRaw = P.z;\n"
+// Guard 1 (v25c): INVALID DEPTH. Everything downstream divides by P.z, so
+// a pixel whose depth never reached the prepass (z==0: alpha-blended
+// geometry skips depth prepasses, and menu scenes do not always run a full
+// one) makes rPix INF, the tap offsets NaN, and the whole occlusion sum
+// NaN - which the engine renders as a FULLY BLACK object, uniform and
+// hard-edged. That is the 2026-08-16 black-shield report in the main menu,
+// and the same class as the v24f normalize(0) black geometry. No valid
+// depth means no AO opinion: return white (no darkening).
+"    if (!(zRaw > 0.05)) return float4(1, 1, 1, 1);\n"
 // cross(ddx, ddy), NOT (ddy, ddx): view space is x-right/y-up/z-into-screen
 // and screen v runs DOWN, so the other order points normals AWAY from the
 // camera - every dot(v,N) clamps to zero and AO is white everywhere.
@@ -94,6 +103,12 @@ static const char *g_ssaoHlsl =
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
 "    float occ = 0.0;\n"
 "    float rPix = cParam0.z * cParam1.y / P.z;\n"      // world radius -> uv
+// Guard 2: near-camera geometry. A world-space radius projects to a HUGE
+// screen radius up close (0.6 units at z=1 is most of the screen), which
+// samples unrelated geometry and manufactures maximum occlusion - black
+// objects again, this time with a real number. Menu and cutscene framing
+// put geometry far closer to the camera than gameplay ever does.
+"    rPix = min(rPix, 0.25);\n"
 "#if ESTIMATOR == 1\n"
 // HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
 // direction contributes its HORIZON - the highest elevation above the
@@ -143,6 +158,16 @@ static const char *g_ssaoHlsl =
 // engine's 0.5 floor for deeper-than-stock creases (output clamps at 0).
 "    float ao = 1.0 - cParam0.w * (1.0 - aoBase);\n"
 "    float term = 0.5 + 0.5 * ao;\n"                   // map into [0.5..1]
+// Guard 3: catch-all NaN/INF scrub. Guards 1 and 2 close the two known
+// sources, but a NaN reaching the shadow term is catastrophic and silent
+// (uniform black geometry, no gradient, looks nothing like an AO bug), so
+// the last line of defence is unconditional: NaN fails every comparison,
+// so this asks "is term a real number" rather than trying to spot NaN.
+// The bounds are deliberately far outside the legitimate range instead of
+// [0..1]: strength >100% is SUPPOSED to drive the term to 0 (deeper than
+// the engine's own floor) and float rounding can put it a hair below, so a
+// tight test would flip the deepest creases to white - the opposite bug.
+"    term = (term > -1000.0 && term < 1000.0) ? term : 1.0;\n"
 // Mode 3: RAW view - the estimator's own output as full-range grey, drawn
 // over the finished frame: no albedo, no shadow term, no [0.5..1] mapping.
 "    if (cParam2.x > 2.5) return float4(aoBase, aoBase, aoBase, 1.0);\n"
@@ -206,6 +231,9 @@ static const char *g_aoBlurHlsl =
 "        }\n"
 "    }\n"
 "    float v = sum / wsum;\n"
+// Same scrub as the estimator: a NaN in the depth buffer would poison every
+// tap weight here independently of what the estimator produced.
+"    v = (v > -1000.0 && v < 1000.0) ? v : 1.0;\n"
 "    return float4(v, v, v, 1.0);\n"
 "}\n";
 
