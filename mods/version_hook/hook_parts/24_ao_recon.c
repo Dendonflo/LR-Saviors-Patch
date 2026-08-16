@@ -836,6 +836,7 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_SetVSConstF_Fov)(
 static PFN_SetVSConstF_Fov g_origSetVSConstFov = NULL;
 static volatile LONG g_fovProbeLogged = 0;
 static volatile LONG g_fovCalls = 0;
+static volatile LONG g_fovReg = -1;   // register the matrix lands at, once known
 
 static float g_fovBestW = 0.0f;      // closest-to-1 w-column norm seen
 static volatile LONG g_fovWindows = 0;
@@ -856,7 +857,7 @@ static volatile LONG g_fovWindows = 0;
 //
 // Given that, projX and projY are the norms of columns 0 and 1: view
 // contributes a rotation, and a rotation cannot change a column norm.
-static void FovProbeExamine(const float *m)
+static void FovProbeExamine(const float *m, LONG absReg)
 {
     float px = 0.0f, py = 0.0f, wn;
     const char *how;
@@ -881,24 +882,38 @@ static void FovProbeExamine(const float *m)
             return;
         }
     }
-    if (!(py > 0.4f && py < 6.0f) || !(px > 0.2f && px < 6.0f)) return;
+    if (!(py > 0.4f && py < 8.0f) || !(px > 0.2f && px < 8.0f)) return;
     {
         // A perspective matrix's two scales differ by exactly the aspect
         // ratio. Anything else is some other matrix that happened to carry
-        // a 1 in the right slot.
+        // a unit-length w column.
         float ratio = px / py;
+        LONG want;
         if (ratio < 0.35f || ratio > 1.05f) return;
-        if (InterlockedIncrement(&g_fovProbeLogged) <= 6) {
-            char l[224];
-            double fy = 2.0 * atan(1.0 / py) * 180.0 / 3.14159265358979;
-            double fx = 2.0 * atan(1.0 / px) * 180.0 / 3.14159265358979;
-            sprintf(l, "[fov] %s projX=%.4f projY=%.4f ratio=%.4f -> fovY=%.2f fovX=%.2f deg"
-                       "  ==> AoProj100 = %d",
-                    how, px, py, ratio, fy, fx, (int)(py * 100.0f + 0.5f));
-            LogLine(l);
-            LogFlushNow();
+        // Remember WHERE it lives. From here on only that one window is
+        // examined, so tracking the camera live costs an integer compare
+        // rather than a sliding search over every constant upload.
+        if (g_fovReg < 0) g_fovReg = absReg;
+        want = (LONG)(py * 100.0f + 0.5f);
+        if (want != g_aoProjMeasured) {
+            g_aoProjMeasured = want;
+            if (InterlockedIncrement(&g_fovProbeLogged) <= 8) {
+                char l[224];
+                double fy = 2.0 * atan(1.0 / py) * 180.0 / 3.14159265358979;
+                double fx = 2.0 * atan(1.0 / px) * 180.0 / 3.14159265358979;
+                sprintf(l, "[fov] %s reg=%ld projX=%.4f projY=%.4f ratio=%.4f"
+                           " -> fovY=%.2f fovX=%.2f deg  ==> AoProj100 = %ld",
+                        how, absReg, px, py, ratio, fy, fx, want);
+                LogLine(l);
+                LogFlushNow();
+            }
+            if (g_aoProjAuto) {
+                // Both slots: Projection describes the camera, so the two
+                // estimators can never legitimately disagree about it.
+                InterlockedExchange(&g_aoProj100E[0], want);
+                InterlockedExchange(&g_aoProj100E[1], want);
+            }
         }
-        if (g_fovProbeLogged >= 6) g_fovProbeDone = 1;
     }
 }
 
@@ -906,11 +921,23 @@ static HRESULT STDMETHODCALLTYPE HookedSetVSConstFov(
     IDirect3DDevice9 *This, UINT reg, const float *data, UINT count)
 {
     // Hot path: one load and a branch once the probe has said its piece.
+    // Once the register is known this is an integer compare, so the camera
+    // can be tracked all session - cutscenes and any camera with its own
+    // FOV included - rather than sampled once at boot.
+    if (data && count >= 4 && g_fovReg >= 0) {
+        LONG k = g_fovReg;
+        if (k >= (LONG)reg && k + 4 <= (LONG)(reg + count)) {
+            __try {
+                FovProbeExamine(data + (k - (LONG)reg) * 4, k);
+            } __except (EXCEPTION_EXECUTE_HANDLER) { g_fovReg = -1; g_fovProbeDone = 1; }
+        }
+        return g_origSetVSConstFov(This, reg, data, count);
+    }
     if (!g_fovProbeDone && data && count >= 4) {
         __try {
             UINT lim = (count > 20) ? 20 : count;   // bound the sliding cost
             for (UINT i = 0; i + 4 <= lim; i++)
-                FovProbeExamine(data + i * 4);
+                FovProbeExamine(data + i * 4, (LONG)(reg + i));
             // Liveness. A silent log was ambiguous last run - dead hook or
             // live hook that never matched? - so say which, once.
             if (InterlockedIncrement(&g_fovCalls) == 60000 && !g_fovProbeLogged) {

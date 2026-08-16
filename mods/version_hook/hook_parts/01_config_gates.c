@@ -301,8 +301,20 @@ static volatile LONG g_aoStageDumpRequest;
 // view part, the projection scales are exactly the norms of M's first two
 // columns - the rotation contributes nothing to a column norm. That yields
 // projX and projY directly, no FOV convention to guess at.
+// MEASURED 2026-08-16: projX=1.7840 projY=3.1716, ratio 0.5625 = exactly
+// 1080/1920, so this is unquestionably the perspective matrix. fovY=35.00
+// degrees - which means the engine's 80 degree "field default" is some
+// other camera mode or a horizontal figure, and guessing from it would
+// have been wrong either way. AoProj100 = 317, against a default of 130
+// and a hand-tuned 115: the reconstruction was skewed by 2.75x all along.
+//
+// So it self-calibrates now. AoProjAuto=1 writes the measured value into
+// both estimator slots whenever it changes, which also handles cutscenes
+// and any camera that uses a different FOV. Set it to 0 to tune by hand.
 #define ENABLE_FOV_PROBE 1
 static volatile LONG g_fovProbeDone;
+static volatile LONG g_aoProjAuto = 1;        // ini AoProjAuto
+static volatile LONG g_aoProjMeasured = 0;    // last measured cot(fovY/2)*100
 static void InstallFovProbe(void **vtbl);   // 24_ao_recon.c
 // Black-model bisect (2026-08-16): blackness FOLLOWS THE NEWEST-LOADED
 // MODEL (user-observed: switching weapons blackens the newly shown one),

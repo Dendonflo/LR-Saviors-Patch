@@ -703,7 +703,10 @@ static struct {
     { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, NULL },
     { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
-    { "Projection",  &g_aoProj100E[0],     { &g_aoProj100E[0],     &g_aoProj100E[1] },     80,  250,  5, NULL },
+    // Range widened to 500: the measured value for this game is 317
+    // (fovY 35 degrees), which the old 250 ceiling could not even express.
+    // With AoProjAuto on this row is a live readout of the camera.
+    { "Projection",  &g_aoProj100E[0],     { &g_aoProj100E[0],     &g_aoProj100E[1] },     50,  500,  5, NULL },
     // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
     // the projection, not an estimator preference.
     { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   25,  1, NULL },
