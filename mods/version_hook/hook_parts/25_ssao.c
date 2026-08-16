@@ -178,9 +178,22 @@ static const char *g_ssaoHlsl =
 "    }\n"
 "    float occN = occ / (float)(AO_DIRS);\n"
 "#else\n"
-"    [unroll] for (int i = 0; i < AO_TAPS; i++) {\n"
-"        float ang = (i + 0.5) * (6.2831853 * 0.3819661);\n"
-"        float rad = sqrt((i + 0.5) / (float)(AO_TAPS)) * rPix * 0.5;\n"
+// SAO's documented sampling pattern, replacing the Vogel/sunflower disk
+// (golden angle + sqrt radius) that was here. That one is a perfectly
+// standard pattern, but it is not this paper's, and it was chosen from
+// memory rather than from the text:
+//     alpha_i = (i + 0.5) / s
+//     h_i     = r * alpha_i          <- LINEAR in alpha, not sqrt
+//     theta_i = 2*pi * alpha_i * tau + phi
+// The linear radius is the substantive difference: it concentrates
+// samples toward the centre, so near geometry carries more weight than
+// under uniform-area sampling. phi is our per-pixel rotation, applied
+// through the ca/sa matrix below, which is the same thing as adding it
+// to theta. tau is the paper's spiral-turns constant, taken from its
+// minimum-discrepancy table at our tap counts (8 -> 3, 12 -> 5, 20 -> 9).
+"        float alpha = (i + 0.5) / (float)(AO_TAPS);\n"
+"        float ang = 6.2831853 * alpha * (float)(AO_TURNS);\n"
+"        float rad = alpha * rPix * 0.5;\n"
 "        float2 d0 = float2(cos(ang), sin(ang));\n"
 "        float2 duv = float2(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * rad;\n"
 "        duv.y *= cParam0.y / cParam0.x;\n"            // aspect-correct
@@ -198,7 +211,13 @@ static const char *g_ssaoHlsl =
 // Sign note: the paper writes "+ z_C * beta" for a view space with
 // negative z. Ours is positive (3..2000 world units), so the equivalent is
 // a subtraction. This line matches the paper.
-"        occ += max(0.0, dot(v, N) - cParam1.z * P.z) / (dot(v, v) + 0.01);\n"
+// epsilon 1e-4, the paper's value, replacing 0.01. That mattered at our
+// unit scale: world units run 3..2000 and the sampling disc is under about
+// one unit, so the nearest taps have v.v of the same ORDER as the old
+// epsilon and were being roughly halved before they were summed - exactly
+// the contact-shading samples that matter most, which is the likely reason
+// Intensity had to run at 2000.
+"        occ += max(0.0, dot(v, N) - cParam1.z * P.z) / (dot(v, v) + 0.0001);\n"
 "    }\n"
 "    float occN = occ / (float)(AO_TAPS);\n"
 "#endif\n"
@@ -456,6 +475,10 @@ static LONG g_aoPsState[AO_VARIANTS];    // 0 not tried, 1 ok, -1 failed
 static const char *g_aoQTaps[3]  = { "8", "12", "20" };
 static const char *g_aoQDirs[3]  = { "3", "4",  "6"  };
 static const char *g_aoQSteps[3] = { "4", "4",  "4"  };
+// SAO's spiral-turns constant, per tap count, from the paper's
+// minimum-discrepancy table (entries 8, 12 and 20). Alchemy only - HBAO
+// marches directions and has no spiral.
+static const char *g_aoQTurns[3] = { "3", "5",  "9"  };
 static IDirect3DPixelShader9 *g_aoBlurPs = NULL;
 static LONG g_aoBlurState = 0;
 static IDirect3DPixelShader9 *g_aoCombinePs = NULL;
@@ -552,13 +575,14 @@ static void AoEnsureShaders(IDirect3DDevice9 *dev, int est, int q)
 {
     int idx = est * 3 + q;
     if (g_aoPsState[idx] == 0) {
-        AoHlslMacro defs[5];
+        AoHlslMacro defs[6];
         char what[80];
         defs[0].Name = "ESTIMATOR"; defs[0].Definition = est ? "1" : "0";
         defs[1].Name = "AO_TAPS";   defs[1].Definition = g_aoQTaps[q];
         defs[2].Name = "AO_DIRS";   defs[2].Definition = g_aoQDirs[q];
         defs[3].Name = "AO_STEPS";  defs[3].Definition = g_aoQSteps[q];
-        defs[4].Name = NULL;        defs[4].Definition = NULL;
+        defs[4].Name = "AO_TURNS";  defs[4].Definition = g_aoQTurns[q];
+        defs[5].Name = NULL;        defs[5].Definition = NULL;
         if (est) sprintf(what, "HBAO %s dirs x %s steps", g_aoQDirs[q], g_aoQSteps[q]);
         else     sprintf(what, "SSAO Alchemy %s taps", g_aoQTaps[q]);
         g_aoPs[idx] = AoCompilePs(dev, g_ssaoHlsl, defs, what);
