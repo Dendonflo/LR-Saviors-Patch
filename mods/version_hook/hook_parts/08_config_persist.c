@@ -245,6 +245,9 @@ static NumericSetting g_numerics[] = {
     { &g_aoResDiv,      "AoResDiv",      1, 4 },
     { &g_aoSsaaIndep,   "AoSsaaIndep",   0, 1 },
     { &g_aoUpsampleDepth, "AoUpsampleDepth", 0, 1 },
+    // Estimator tap count. Costs scale roughly linearly with it; the payoff
+    // is temporal stability, not sharpness.
+    { &g_aoQuality,     "AoQuality",     0, 2 },
     { &g_aoBlur,        "AoBlur",        0, 1 },
     { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED

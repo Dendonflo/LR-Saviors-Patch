@@ -143,6 +143,10 @@ GAMEMENU_VALUE(MenuH_AoHbao, g_aoEnable, 2)
 GAMEMENU_VALUE(MenuH_AoRes1, g_aoResDiv, 1)
 GAMEMENU_VALUE(MenuH_AoRes2, g_aoResDiv, 2)
 GAMEMENU_VALUE(MenuH_AoRes4, g_aoResDiv, 4)
+// Estimator sample count - the shimmer dial (see g_aoQuality).
+GAMEMENU_VALUE(MenuH_AoQ0, g_aoQuality, 0)
+GAMEMENU_VALUE(MenuH_AoQ1, g_aoQuality, 1)
+GAMEMENU_VALUE(MenuH_AoQ2, g_aoQuality, 2)
 GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
 // Bilateral blur A/B lever: default ON (it IS the noise cure), the toggle
 // exists so raw-vs-blurred can be compared live while tuning.
@@ -768,6 +772,13 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 0, id++, L"Full",    MenuH_AoRes1);
                     GameMenuInsertLeaf(sub, 1, id++, L"Half",    MenuH_AoRes2);
                     GameMenuInsertLeaf(sub, 2, id++, L"Quarter", MenuH_AoRes4);
+                    groups++;
+                }
+                sub = GameMenuInsertGroup(gfx, at + 5, L"AO Quality");
+                if (sub) {
+                    GameMenuInsertLeaf(sub, 0, id++, L"Low",    MenuH_AoQ0);
+                    GameMenuInsertLeaf(sub, 1, id++, L"Medium", MenuH_AoQ1);
+                    GameMenuInsertLeaf(sub, 2, id++, L"High",   MenuH_AoQ2);
                     groups++;
                 }
 #endif

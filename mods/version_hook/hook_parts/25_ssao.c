@@ -154,13 +154,13 @@ static const char *g_ssaoHlsl =
 // horizon point sits. Rays accumulate monotonically instead of Alchemy's
 // independent per-tap coin flips, which is exactly why it is less noisy at
 // a comparable tap count (16 vs 12).
-"    [unroll] for (int di = 0; di < 4; di++) {\n"
-"        float ang = (di + 0.5) * 1.5707963;\n"
+"    [unroll] for (int di = 0; di < AO_DIRS; di++) {\n"
+"        float ang = (di + 0.5) * (6.2831853 / (float)(AO_DIRS));\n"
 "        float2 d0 = float2(cos(ang), sin(ang));\n"
 "        float2 dir = float2(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca);\n"
 "        float sinH = 0.0, wH = 0.0;\n"
-"        [unroll] for (int st = 1; st <= 4; st++) {\n"
-"            float2 duv = dir * (rPix * 0.5 * (float)st / 4.0);\n"
+"        [unroll] for (int st = 1; st <= AO_STEPS; st++) {\n"
+"            float2 duv = dir * (rPix * 0.5 * (float)st / (float)(AO_STEPS));\n"
 "            duv.y *= cParam0.y / cParam0.x;\n"        // aspect-correct
 "            float3 Q = ViewPos(uv + duv);\n"
 "            float3 v = Q - P;\n"
@@ -176,11 +176,11 @@ static const char *g_ssaoHlsl =
 // would otherwise manufacture on every smooth surface.
 "        occ += saturate(sinH - cParam1.z) * wH;\n"
 "    }\n"
-"    float aoBase = saturate(1.0 - cParam1.w * occ * 0.25);\n"
+"    float occN = occ / (float)(AO_DIRS);\n"
 "#else\n"
-"    [unroll] for (int i = 0; i < 12; i++) {\n"
+"    [unroll] for (int i = 0; i < AO_TAPS; i++) {\n"
 "        float ang = (i + 0.5) * (6.2831853 * 0.3819661);\n"
-"        float rad = sqrt((i + 0.5) / 12.0) * rPix * 0.5;\n"
+"        float rad = sqrt((i + 0.5) / (float)(AO_TAPS)) * rPix * 0.5;\n"
 "        float2 d0 = float2(cos(ang), sin(ang));\n"
 "        float2 duv = float2(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * rad;\n"
 "        duv.y *= cParam0.y / cParam0.x;\n"            // aspect-correct
@@ -189,8 +189,12 @@ static const char *g_ssaoHlsl =
 "        occ += max(0.0, dot(v, N) - cParam1.z * P.z)\n"
 "             / (dot(v, v) + 0.01);\n"
 "    }\n"
-"    float aoBase = saturate(1.0 - cParam1.w * occ / 12.0);\n"
+"    float occN = occ / (float)(AO_TAPS);\n"
 "#endif\n"
+// One normalised occlusion for both estimators, so intensity, the debug
+// bands and the occlusion stage view all mean the same thing whichever
+// estimator and tap count are compiled in.
+"    float aoBase = saturate(1.0 - cParam1.w * occN);\n"
 "    if (zRaw > 1500.0) aoBase = 1.0;\n"               // sky/far (far ~2000)
 // The engine's [0.5..1] ENVELOPE, and why staying inside it is the default
 // (v25e). Measured from an A/B dump pair of the same menu frame: with AO
@@ -226,7 +230,7 @@ static const char *g_ssaoHlsl =
 //   5 = the reconstructed NORMAL as colour  <- the estimator's one derived
 //       input, and the only remaining suspect that can vary per row
 //   6 = the raw occlusion sum, before any mapping
-"    if (cParam2.x > 5.5) { float so = saturate(occ * 2.0 / 12.0); return float4(so, so, so, 1); }\n"
+"    if (cParam2.x > 5.5) { float so = saturate(occN * 2.0); return float4(so, so, so, 1); }\n"
 "    if (cParam2.x > 4.5) { float3 nc = N * 0.5 + 0.5; return float4(nc, 1); }\n"
 "    if (cParam2.x > 3.5) { float sd = frac(zRaw * 0.05); return float4(sd, sd, sd, 1); }\n"
 "    if (cParam2.x > 2.5) return float4(aoBase, aoBase, aoBase, 1.0);\n"
@@ -241,7 +245,7 @@ static const char *g_ssaoHlsl =
 "    if (cParam2.x > 0.5) {\n"
 "        if (uv.x < 0.25)      { float s = frac(zRaw * 0.05); return float4(s, s, s, 1); }\n"
 "        else if (uv.x < 0.5)  { float3 nc = N * 0.5 + 0.5; return float4(nc, 1); }\n"
-"        else if (uv.x < 0.75) { float s = saturate(occ * 2.0 / 12.0); return float4(s, s, s, 1); }\n"
+"        else if (uv.x < 0.75) { float s = saturate(occN * 2.0); return float4(s, s, s, 1); }\n"
 "        return float4(term, term, term, 1);\n"
 "    }\n"
 "    return float4(term, term, term, 1.0);\n"          // alpha 1: mult keeps sun mask
@@ -321,9 +325,26 @@ static const char *g_aoCombineHlsl =
 // by how well ITS depth matches this pixel's depth rejects those taps
 // instead. The depth compared is the full-res buffer sampled at the low-res
 // tap's own position, so no second (downsampled) depth buffer is needed.
+"float4 cK2 : register(c222);\n"        // xy = depth texel size, zw = depth size
+// Fixed and re-enabled (v25q). The first version weighted each tap by
+// saturate(1 - sharp*|dz|/z), a LINEAR ramp, and that resonated at exactly
+// 2:1: half the output pixels compare against the very texel they sit on,
+// score a perfect match at full weight, and their neighbours do not - so
+// alternate rows were treated differently by construction and striped.
+//
+// Two changes kill it. The weight is now a reciprocal QUADRATIC, which is
+// flat near zero: a smooth surface gives r~0.001, sharp*r*r ~ 1e-4, so all
+// four taps weigh essentially the same and the filter degenerates to plain
+// bilinear exactly where plain bilinear is correct. Only a real depth
+// discontinuity (r near 1) drives a tap's weight to nothing. And the tap's
+// depth fetch is snapped to its texel centre, the same fix that cured the
+// estimator's normals - a low-res texel centre lands exactly on a full-res
+// texel boundary at 2:1, so this fetch had the identical coin-flip.
 "float3 UpTap(float2 suv, float bw, float z0, float sharp, out float wOut) {\n"
-"    float zi = tex2D(dptTex, suv).r;\n"
-"    float w = bw * saturate(1.0 - sharp * abs(zi - z0) / max(z0, 1.0)) + 1e-4;\n"
+"    float2 sn = (floor(suv * cK2.zw + 0.25) + 0.5) * cK2.xy;\n"
+"    float zi = tex2D(dptTex, sn).r;\n"
+"    float r = (zi - z0) / max(z0, 0.001);\n"
+"    float w = bw / (1.0 + sharp * r * r) + 1e-5;\n"
 "    wOut = w;\n"
 "    return tex2D(aoTex, suv).rgb * w;\n"
 "}\n"
@@ -389,8 +410,20 @@ typedef HRESULT (WINAPI *PFN_D3DXCompileShader)(
 // Estimator shaders by index: 0 = Alchemy spiral (AoEnable=1), 1 = HBAO
 // horizon march (AoEnable=2). Same HLSL string, selected by the ESTIMATOR
 // define at compile time; each compiles lazily on first use.
-static IDirect3DPixelShader9 *g_aoPs[2] = { NULL, NULL };
-static LONG g_aoPsState[2] = { 0, 0 };   // 0 not tried, 1 ok, -1 failed
+// Estimator shaders by (estimator, quality): index = est * 3 + quality.
+// Quality is a COMPILE-TIME tap count, not a loop bound - ps_3_0 unrolls
+// these loops, and a dynamic count would cost more than the taps it saves.
+// Each variant compiles on first use, so a session only pays for the tiers
+// it actually selects.
+#define AO_VARIANTS 6
+static IDirect3DPixelShader9 *g_aoPs[AO_VARIANTS];
+static LONG g_aoPsState[AO_VARIANTS];    // 0 not tried, 1 ok, -1 failed
+// Low / Medium / High. HBAO counts are dirs x steps, so its totals are
+// 8 / 16 / 24 against Alchemy's 8 / 12 / 20 - deliberately close, so
+// switching estimator at a given tier is roughly cost-neutral.
+static const char *g_aoQTaps[3]  = { "8", "12", "20" };
+static const char *g_aoQDirs[3]  = { "4", "4",  "6"  };
+static const char *g_aoQSteps[3] = { "2", "4",  "4"  };
 static IDirect3DPixelShader9 *g_aoBlurPs = NULL;
 static LONG g_aoBlurState = 0;
 static IDirect3DPixelShader9 *g_aoCombinePs = NULL;
@@ -483,18 +516,21 @@ static IDirect3DPixelShader9 *AoCompilePs(
     return ps;
 }
 
-static void AoEnsureShaders(IDirect3DDevice9 *dev, int est)
+static void AoEnsureShaders(IDirect3DDevice9 *dev, int est, int q)
 {
-    if (g_aoPsState[est] == 0) {
-        AoHlslMacro defs[2];
-        defs[0].Name = "ESTIMATOR";
-        defs[0].Definition = est ? "1" : "0";
-        defs[1].Name = NULL;
-        defs[1].Definition = NULL;
-        g_aoPs[est] = AoCompilePs(dev, g_ssaoHlsl, defs,
-                                  est ? "HBAO (4-dir horizon march)"
-                                      : "SSAO (Alchemy spiral, 12 taps)");
-        g_aoPsState[est] = g_aoPs[est] ? 1 : -1;
+    int idx = est * 3 + q;
+    if (g_aoPsState[idx] == 0) {
+        AoHlslMacro defs[5];
+        char what[80];
+        defs[0].Name = "ESTIMATOR"; defs[0].Definition = est ? "1" : "0";
+        defs[1].Name = "AO_TAPS";   defs[1].Definition = g_aoQTaps[q];
+        defs[2].Name = "AO_DIRS";   defs[2].Definition = g_aoQDirs[q];
+        defs[3].Name = "AO_STEPS";  defs[3].Definition = g_aoQSteps[q];
+        defs[4].Name = NULL;        defs[4].Definition = NULL;
+        if (est) sprintf(what, "HBAO %s dirs x %s steps", g_aoQDirs[q], g_aoQSteps[q]);
+        else     sprintf(what, "SSAO Alchemy %s taps", g_aoQTaps[q]);
+        g_aoPs[idx] = AoCompilePs(dev, g_ssaoHlsl, defs, what);
+        g_aoPsState[idx] = g_aoPs[idx] ? 1 : -1;
     }
     if (g_aoBlurState == 0) {
         g_aoBlurPs = AoCompilePs(dev, g_aoBlurHlsl, NULL,
@@ -792,6 +828,15 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     else     { if (fr == lastFrame)    return; lastFrame = fr; }
 
     int est = (g_aoEnable == 2) ? 1 : 0;
+    int qual = (int)g_aoQuality;
+    if (qual < 0) qual = 0;
+    if (qual > 2) qual = 2;
+    {
+        int vi = est * 3 + qual;
+        if (g_aoPsState[vi] == 0 || g_aoBlurState == 0 || g_aoCombineState == 0)
+            AoEnsureShaders(dev, est, qual);
+        if (g_aoPsState[vi] != 1) return;
+    }
     // Bisect level (diagnostic, see 01): peels stages off the END of the
     // pipeline so the run can name which draw's side effect blackens the
     // newest-loaded model. Logged on change so sessions self-document.
@@ -840,9 +885,6 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
         return;
     }
-    if (g_aoPsState[est] == 0 || g_aoBlurState == 0 || g_aoCombineState == 0)
-        AoEnsureShaders(dev, est);
-    if (g_aoPsState[est] != 1) return;
     if (!g_aoDepthTex) return;
 
     // The RT path is now used for EVERY mode, not just blurred ones: the
@@ -948,7 +990,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // term (mode 0) - the mapping is linear, so blurring the term
             // equals blurring ao.
             if (!AoTarget(dev, surfA, rw, rh)) goto done;
-            AoSetPs(dev, g_aoPs[est]);
+            AoSetPs(dev, g_aoPs[est * 3 + qual]);
             AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             AoBlendOpaque(dev, 0x0F);
             AoSetEstimatorConsts(dev, rw, rh,
@@ -1011,6 +1053,22 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 k1[0] = 1.0f / (float)rw;
                 k1[1] = 1.0f / (float)rh;
                 k1[2] = !upscaling ? 0.0f : (g_aoUpsampleDepth ? 2.0f : 1.0f);
+                {
+                    // Depth dimensions for the tap snap - same reason as the
+                    // estimator's c223: the AO buffer's size is not the
+                    // depth buffer's, and that gap is what misaligns them.
+                    float k2[4];
+                    D3DSURFACE_DESC dd;
+                    k2[2] = (float)d.Width; k2[3] = (float)d.Height;
+                    if (g_aoDepthTex && SUCCEEDED(IDirect3DTexture9_GetLevelDesc(
+                            (IDirect3DTexture9 *)g_aoDepthTex, 0, &dd)) && dd.Width && dd.Height) {
+                        k2[2] = (float)dd.Width;
+                        k2[3] = (float)dd.Height;
+                    }
+                    k2[0] = 1.0f / k2[2];
+                    k2[1] = 1.0f / k2[3];
+                    IDirect3DDevice9_SetPixelShaderConstantF(dev, 222, k2, 1);
+                }
                 // Same screen-space correction as the blur: these taps are one
                 // AO texel apart, which is aoScale screen pixels.
                 k1[3] = (float)g_aoBlurSharp / aoScale;
@@ -1060,7 +1118,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // Single-pass direct path (AoBlur=0, debug bands, or blur infra
             // unavailable) - the v24 behavior, unchanged.
             if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-            AoSetPs(dev, g_aoPs[est]);
+            AoSetPs(dev, g_aoPs[est * 3 + qual]);
             AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             if (raw) {
                 // Opaque overwrite; the UI draws after this, stays readable.
@@ -1083,8 +1141,8 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         InterlockedIncrement(&g_ssaoDraws);
         if (g_ssaoDraws == 1) {
             char l[128];
-            sprintf(l, "[ssao] first draw: est=%s path=%s floor=%s",
-                    est ? "HBAO" : "Alchemy",
+            sprintf(l, "[ssao] first draw: est=%s q=%d path=%s floor=%s",
+                    est ? "HBAO" : "Alchemy", qual,
                     !useRt ? "LEGACY direct multiply (no combine shader)"
                            : (useBlur ? "estimator->atrous->combine"
                                       : (g_aoDebug ? "DEBUG bands" : "estimator->combine")),
