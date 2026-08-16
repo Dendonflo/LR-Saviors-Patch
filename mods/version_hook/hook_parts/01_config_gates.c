@@ -276,6 +276,12 @@ static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not
 // persisted (the armed-toggle lesson).
 static volatile LONG g_aoDebugStage = 0;
+// One-shot: dump RT A at the RAW-VIEW call site, where it holds the stage
+// image (normals/depth/occlusion) rather than the AO term. The normal-stage
+// picture is written to an 8-bit target, so smooth normals would band in
+// the VIEW regardless - only the numbers can tell a real staircase from a
+// quantisation artifact of the visualisation.
+static volatile LONG g_aoStageDumpRequest;
 // Black-model bisect (2026-08-16): blackness FOLLOWS THE NEWEST-LOADED
 // MODEL (user-observed: switching weapons blackens the newly shown one),
 // while the dumped composite is unremarkable over the black object - so

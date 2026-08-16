@@ -125,6 +125,14 @@ static char __cdecl MenuH_AoDump(char apply)
     return 0;
 }
 #if ENABLE_AO_SSAO
+// Captures whatever the raw view is currently showing (needs Raw View on).
+static char __cdecl MenuH_AoStageDump(char apply)
+{
+    if (apply) InterlockedExchange(&g_aoStageDumpRequest, 1);
+    return 0;
+}
+#endif
+#if ENABLE_AO_SSAO
 // Graphics > Ambient Occlusion: Off / SSAO as a radio pair, the shape every
 // other graphics group uses. "HBAO" joins as a third value when the
 // estimator swap exists - g_aoEnable=2 is reserved for it.
@@ -576,6 +584,8 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoStage2", (void *)MenuH_AoStage2); GameMenuFixLabel(mgr, L"Normals");
         mAdd(mgr, NULL, "Mod_AoStage3", (void *)MenuH_AoStage3); GameMenuFixLabel(mgr, L"Occlusion");
         mClose(mgr, NULL);
+        mAdd(mgr, NULL, "Mod_AoStageDump", (void *)MenuH_AoStageDump);
+        GameMenuFixLabel(mgr, L"Dump Raw View Stage");
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);
         GameMenuFixLabel(mgr, L"SSAO Pipeline Bands (diagnostic)");
 #endif

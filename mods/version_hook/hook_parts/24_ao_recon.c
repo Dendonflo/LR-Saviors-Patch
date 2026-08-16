@@ -800,6 +800,11 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
         // True-raw AO over the finished frame, at the start of the UI pass
         // so menus stay readable on top.
         SsaoApply(dev, NULL, 1);
+        // RT A now holds the STAGE image (the AO term dump at the s14 bind
+        // cannot capture this - by then RT A holds the composite-bound term
+        // and the stage pass has not run yet).
+        if (InterlockedCompareExchange(&g_aoStageDumpRequest, 0, 1) == 1 && g_aoRtA)
+            AoDumpBuffer(dev, (IDirect3DBaseTexture9 *)g_aoRtA, "ao_stage");
 #endif
     } else if (pass > PASS_MS && g_aoShadowSurf) {
         // Lifetime check 3: the shadow buffer re-targeted after the material
