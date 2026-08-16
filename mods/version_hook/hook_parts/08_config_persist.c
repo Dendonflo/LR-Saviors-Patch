@@ -221,11 +221,13 @@ static NumericSetting g_numerics[] = {
     { &g_aoStrengthPctE[1], "AoHbaoStrengthPct", 0, 200 },
     { &g_aoIntensityE[1], "AoHbaoIntensity100", 50, 2000 },
     { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
-    { &g_aoProj100,     "AoProj100",     10, 1000 },
+    { &g_aoProj100E[0], "AoProj100",     10, 1000 },
+    { &g_aoProj100E[1], "AoHbaoProj100", 10, 1000 },
     // Screen-radius ceiling, % of screen width. Below ~4 the AO becomes
     // contact-only; above ~15 near geometry samples unrelated scenery and
     // the estimator's variance shows up as low-resolution banding.
-    { &g_aoRadiusMaxPct, "AoRadiusMaxPct", 1, 25 },
+    { &g_aoRadiusMaxPctE[0], "AoRadiusMaxPct",     1, 25 },
+    { &g_aoRadiusMaxPctE[1], "AoHbaoRadiusMaxPct", 1, 25 },
     // Bilateral blur pass (25_ssao.c): Sharp is the depth edge-stop - how
     // hard the blur refuses to smooth across depth discontinuities. 0 turns
     // the edge-stop off (plain gaussian, expect haloes); high values keep
@@ -245,16 +247,20 @@ static NumericSetting g_numerics[] = {
     { &g_aoResDiv,      "AoResDiv",      1, 4 },
     { &g_aoSsaaIndep,   "AoSsaaIndep",   0, 1 },
     { &g_aoUpsampleDepth, "AoUpsampleDepth", 0, 1 },
-    // Estimator tap count. Costs scale roughly linearly with it; the payoff
-    // is temporal stability, not sharpness.
-    { &g_aoQuality,     "AoQuality",     0, 2 },
+    // AoQuality RETIRED 2026-08-16 by user decision ("no more option, locked
+    // to quality"). The estimator always compiles the High tier; the Low and
+    // Medium tables stay in 25_ssao.c in case a performance tier is ever
+    // wanted again. Old inis carrying AoQuality are ignored, as intended.
     { &g_aoBlur,        "AoBlur",        0, 1 },
-    { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
+    { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 400 },
+    { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 400 },
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED
     // spacing, so reach grows 9/17/33/65px for a linear cost. Spread scales
     // the base spacing (100 = 1px between taps).
-    { &g_aoBlurPasses,  "AoBlurPasses",  1, 4 },
-    { &g_aoBlurStep100, "AoBlurStep100", 25, 400 },
+    { &g_aoBlurPassesE[0], "AoBlurPasses",     1, 4 },
+    { &g_aoBlurPassesE[1], "AoHbaoBlurPasses", 1, 4 },
+    { &g_aoBlurStep100E[0], "AoBlurStep100",     25, 400 },
+    { &g_aoBlurStep100E[1], "AoHbaoBlurStep100", 25, 400 },
 #endif
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },

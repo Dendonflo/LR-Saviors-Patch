@@ -680,15 +680,15 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c0[1] = 1.0f / (float)h;
     c0[2] = (float)g_aoRadiusE[est] / 100.0f;
     c0[3] = (float)g_aoStrengthPctE[est] / 100.0f;
-    c1[0] = ((float)g_aoProj100 / 100.0f) * ((float)h / (float)w);
-    c1[1] = (float)g_aoProj100 / 100.0f;
+    c1[0] = ((float)g_aoProj100E[est] / 100.0f) * ((float)h / (float)w);
+    c1[1] = (float)g_aoProj100E[est] / 100.0f;
     // Bias units differ per estimator: Alchemy multiplies by P.z inside the
     // shader (depth-proportional), HBAO compares in sin-of-elevation space.
     c1[2] = est ? 0.15f : 0.02f;
     c1[3] = (float)g_aoIntensityE[est] / 100.0f;   // estimator gain, live-tunable
     c2[0] = mode;
     c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
-    c2[2] = (float)g_aoRadiusMaxPct / 100.0f;   // screen-radius ceiling, UV
+    c2[2] = (float)g_aoRadiusMaxPctE[est] / 100.0f;   // screen-radius ceiling, UV
     c2[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, c1, 1);
@@ -723,7 +723,7 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
 // changes size with the resolution setting - which is exactly what produced
 // the 2026-08-16 horizontal streaks at low AO res.
 static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
-                            float dx, float dy, float spacing, float aoScale)
+                            float dx, float dy, float spacing, float aoScale, int est)
 {
     float c0[4], c1[4];
     c0[0] = 1.0f / (float)w;
@@ -743,7 +743,7 @@ static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     // edge threshold: half weight at a relative depth difference of
     // 1/sqrt(sharp) - 16% at 40, 5% at 400.
     (void)aoScale;
-    c1[0] = (float)g_aoBlurSharp;
+    c1[0] = (float)g_aoBlurSharpE[est];
     c1[1] = spacing;
     c1[2] = c1[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
@@ -847,9 +847,11 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     else     { if (fr == lastFrame)    return; lastFrame = fr; }
 
     int est = (g_aoEnable == 2) ? 1 : 0;
-    int qual = (int)g_aoQuality;
-    if (qual < 0) qual = 0;
-    if (qual > 2) qual = 2;
+    // LOCKED to the High tier (2026-08-16, user: "we're going with quality
+    // AO, no more option, locked to quality"). The Low and Medium tables
+    // remain in the variant arrays above, so a performance tier is one
+    // assignment away if it is ever wanted; nothing selects them today.
+    const int qual = 2;
     {
         int vi = est * 3 + qual;
         if (g_aoPsState[vi] == 0 || g_aoBlurState == 0 || g_aoCombineState == 0)
@@ -1026,7 +1028,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 AoSetPs(dev, g_aoBlurPs);
                 AoBindTex(dev, 13, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 {
-                    LONG passes = g_aoBlurPasses;
+                    LONG passes = g_aoBlurPassesE[est];
                     if (passes < 1) passes = 1;
                     if (passes > 4) passes = 4;
                     // Resolution independence, via PASSES rather than spacing.
@@ -1046,19 +1048,19 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                         float s = aoScale;
                         while (s >= 1.9f && passes > 1) { passes--; s *= 0.5f; }
                     }
-                    float base = (float)g_aoBlurStep100 / 100.0f;
+                    float base = (float)g_aoBlurStep100E[est] / 100.0f;
                     for (LONG p = 0; p < passes; p++) {
                         float spacing = base * (float)(1 << p);
                         if (spacing < 1.0f) spacing = 1.0f;
                         if (!AoTarget(dev, surfB, rw, rh)) goto done;
                         AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
                         AoBlendOpaque(dev, 0x0F);
-                        AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing, aoScale);
+                        AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing, aoScale, est);
                         AoDrawFsQuad(dev, rw, rh);
                         if (!AoTarget(dev, surfA, rw, rh)) goto done;
                         AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtB);
                         AoBlendOpaque(dev, 0x0F);
-                        AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing, aoScale);
+                        AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing, aoScale, est);
                         AoDrawFsQuad(dev, rw, rh);
                     }
                 }
@@ -1103,7 +1105,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 }
                 // Same screen-space correction as the blur: these taps are one
                 // AO texel apart, which is aoScale screen pixels.
-                k1[3] = (float)g_aoBlurSharp / aoScale;
+                k1[3] = (float)g_aoBlurSharpE[est];
                 AoBindTex(dev, 11, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, k1, 1);
                 if (!raw && !g_aoDebug && bis < 2) {

@@ -685,8 +685,14 @@ static HWND g_hAoTweak = NULL;
 
 // val is the ACTIVE binding; vals[] holds the per-estimator slots
 // ([0]=SSAO [1]=HBAO). The overlay thread re-points val when the estimator
-// changes, so the panel always edits the live estimator's values. Shared
-// rows (Projection, Blur Sharp) list the same pointer twice.
+// changes, so the panel always edits the live estimator's values.
+//
+// EVERY row is per-estimator as of 2026-08-16, by user request - the two
+// estimators respond differently enough to the same numbers that sharing
+// any of them made tuning one disturb the other. Worth knowing while
+// tuning: Projection describes the CAMERA (cot(fovY/2)), not the
+// estimator, so the two slots should end up holding the SAME value - if
+// they diverge, one of them is simply mis-set.
 static struct {
     const char *name;
     volatile LONG *val;
@@ -697,16 +703,16 @@ static struct {
     { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, NULL },
     { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
-    { "Projection",  &g_aoProj100,         { &g_aoProj100,         &g_aoProj100 },         80,  250,  5, NULL },
+    { "Projection",  &g_aoProj100E[0],     { &g_aoProj100E[0],     &g_aoProj100E[1] },     80,  250,  5, NULL },
     // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
     // the projection, not an estimator preference.
-    { "Max Radius %", &g_aoRadiusMaxPct,   { &g_aoRadiusMaxPct,    &g_aoRadiusMaxPct },     1,   25,  1, NULL },
+    { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   25,  1, NULL },
     // Blur rows (shared; only meaningful with AoBlur=1). Sharp = depth
     // edge-stop, 0 = plain gaussian. Passes = a-trous levels, each doubling
     // reach. Spread = base tap spacing in pixels x100.
-    { "Blur Sharp",  &g_aoBlurSharp,       { &g_aoBlurSharp,       &g_aoBlurSharp },        0,  400, 10, NULL },
-    { "Blur Passes", &g_aoBlurPasses,      { &g_aoBlurPasses,      &g_aoBlurPasses },       1,    4,  1, NULL },
-    { "Blur Spread", &g_aoBlurStep100,     { &g_aoBlurStep100,     &g_aoBlurStep100 },     25,  400, 25, NULL },
+    { "Blur Sharp",  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0,  400, 10, NULL },
+    { "Blur Passes", &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   1,    4,  1, NULL },
+    { "Blur Spread", &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] }, 25,  400, 25, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34

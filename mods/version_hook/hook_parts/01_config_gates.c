@@ -264,12 +264,12 @@ static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
 static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct / AoHbaoStrengthPct
 static volatile LONG g_aoIntensityE[2] = { 250, 250 };    // ini AoIntensity100 / AoHbaoIntensity100
 static volatile LONG g_aoRadiusE[2] = { 60, 60 };         // ini AoRadius100 / AoHbaoRadius100
-static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
+static volatile LONG g_aoProj100E[2] = { 130, 130 };  // ini AoProj100 / AoHbaoProj100
 // Ceiling on the SCREEN-space sample radius, percent of screen width. The
 // world-space Radius projects larger the closer geometry is, and without a
 // sane ceiling near-camera pixels sample a quarter of the screen - distant
 // unrelated geometry, huge variance, banding. 10 = 10% of screen width.
-static volatile LONG g_aoRadiusMaxPct = 10;
+static volatile LONG g_aoRadiusMaxPctE[2] = { 10, 10 };
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
@@ -297,7 +297,7 @@ static volatile LONG g_aoBisect = 0;
 // influence. 0 = off. Session-only, same non-persistence rule as bisect.
 static volatile LONG g_aoFlatTest = 0;
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
-static volatile LONG g_aoBlurSharp = 40;      // ini AoBlurSharp: blur depth edge-stop
+static volatile LONG g_aoBlurSharpE[2] = { 40, 40 };  // ini AoBlurSharp / AoHbaoBlurSharp
 static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside the
                                               //   engine's [0.5..1] shadow envelope
 // AO buffer resolution. The DIVISOR is applied to the DISPLAY resolution,
@@ -314,18 +314,17 @@ static volatile LONG g_aoSsaaIndep = 1;       // ini AoSsaaIndep: divide SSAA ou
 // the toggle: if striping ever returns at Half, this is the first thing
 // to flip.
 static volatile LONG g_aoUpsampleDepth = 1;
-// Estimator sample count: 0 = low, 1 = medium, 2 = high. Compile-time tap
-// counts (8/12/20 for Alchemy, 4x2/4x4/6x4 for HBAO), so this is the dial
-// for temporal SHIMMER - fewer taps means a wider per-frame distribution
-// and more boiling as the camera moves. It does nothing for blurriness,
-// which is the resolution and the upsample.
-static volatile LONG g_aoQuality = 1;
+// AO quality tier RETIRED as a setting 2026-08-16 (user: "no more option,
+// locked to quality"). SsaoApply hardcodes the High tier; the Low/Medium
+// tap tables survive in 25_ssao.c so a performance tier can come back as a
+// one-line change. AO Resolution remains the performance lever, which is
+// the one that actually moves frame time.
 // Live AO buffer state, defined in 25_ssao.c - tentative definitions here so
 // the status panel (part 10) can read them despite coming earlier in the TU.
 static LONG g_aoRtW, g_aoRtH;
 static volatile LONG g_ssaoDraws;
-static volatile LONG g_aoBlurPasses = 2;      // ini AoBlurPasses: a-trous levels (1..4)
-static volatile LONG g_aoBlurStep100 = 100;   // ini AoBlurStep100: base tap spacing x100 px
+static volatile LONG g_aoBlurPassesE[2] = { 2, 2 };   // ini AoBlurPasses / AoHbaoBlurPasses
+static volatile LONG g_aoBlurStep100E[2] = { 100, 100 };  // ini AoBlurStep100 / AoHbaoBlurStep100
 static void SsaoReleaseRts(void);             // 25_ssao.c - the blur RT pair is
                                               //   D3DPOOL_DEFAULT; AoReconReset calls this
 #endif
