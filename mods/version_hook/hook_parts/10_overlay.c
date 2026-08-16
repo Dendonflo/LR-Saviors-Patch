@@ -674,9 +674,12 @@ static struct {
     { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
     { "Projection",  &g_aoProj100,         { &g_aoProj100,         &g_aoProj100 },         80,  250,  5, NULL },
-    // Blur depth edge-stop (0 = plain gaussian). Only meaningful with
-    // AoBlur=1; the row is harmless when the blur is off.
+    // Blur rows (shared; only meaningful with AoBlur=1). Sharp = depth
+    // edge-stop, 0 = plain gaussian. Passes = a-trous levels, each doubling
+    // reach. Spread = base tap spacing in pixels x100.
     { "Blur Sharp",  &g_aoBlurSharp,       { &g_aoBlurSharp,       &g_aoBlurSharp },        0,  400, 10, NULL },
+    { "Blur Passes", &g_aoBlurPasses,      { &g_aoBlurPasses,      &g_aoBlurPasses },       1,    4,  1, NULL },
+    { "Blur Spread", &g_aoBlurStep100,     { &g_aoBlurStep100,     &g_aoBlurStep100 },     25,  400, 25, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34

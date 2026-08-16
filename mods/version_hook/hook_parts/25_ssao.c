@@ -10,14 +10,16 @@
 //   - The R32F linear-depth prepass texture is bindable and full-res.
 //
 // Injection (v25, blurred pipeline): at the s14 bind,
-//   1. estimator pass  -> RT A   (AO term as grey, opaque)
-//   2. horizontal blur -> RT B   (depth-aware bilateral, opaque)
-//   3. vertical blur   -> the composite, dst*src multiply with the alpha
-//      path pinned ZERO/ONE so the world sun-shadow mask survives bit-exact
-//      (THE v24-series bug: the engine leaves SEPARATEALPHABLENDENABLE on
-//      with its own factors, and an inherited alpha-replace wipes the mask).
-// The bilateral blur is the standard cure for raw-estimator grain: 9-tap
-// gaussian per direction, each tap weighted down by relative depth
+//   1. estimator pass -> RT A    (AO term as grey, opaque)
+//   2. N a-trous levels, each a separable H then V with DOUBLED tap
+//      spacing, ping-ponging A->B->A
+//   3. the last vertical pass -> the composite, dst*src multiply with the
+//      alpha path pinned ZERO/ONE so the world sun-shadow mask survives
+//      bit-exact (THE v24-series bug: the engine leaves
+//      SEPARATEALPHABLENDENABLE on with its own factors, and an inherited
+//      alpha-replace wipes the mask).
+// The cross-bilateral blur is the standard cure for raw-estimator grain:
+// 9-tap gaussian per direction, each tap weighted down by relative depth
 // difference so the smoothing never bleeds across silhouettes. AoBlur=0
 // falls back to the v24 single-pass direct multiply (the A/B lever).
 //
@@ -161,20 +163,36 @@ static const char *g_ssaoHlsl =
 "    return float4(term, term, term, 1.0);\n"          // alpha 1: mult keeps sun mask
 "}\n";
 
-// Separable bilateral blur, one shader for both directions (c0.zw selects).
-// 9 taps: centre + 4 each side at 1px spacing, gaussian sigma ~2.3px. Each
-// tap's weight is cut by RELATIVE depth difference (dz/z, so the edge-stop
-// behaves the same at 5 units and 500), which is what keeps AO from
+// Separable cross-bilateral blur, one shader for both directions (c0.zw
+// selects) and every a-trous level (c1.y = tap spacing in pixels).
+//
+// Two weights per tap, multiplied: a fixed spatial GAUSSIAN (sigma ~2.3
+// taps) times a RANGE term on depth. The range term is what stops AO
 // bleeding across silhouettes - a plain gaussian here reads as haloes
-// around every character against the sky.
+// around every character against the sky - and it is computed from a
+// different buffer than the one being filtered, which is what makes this
+// "cross"/"joint" bilateral rather than plain bilateral.
+//
+// A-trous (Dammertz et al., as used by SVGF): instead of one huge kernel,
+// run the same 9 taps repeatedly with DOUBLING spacing. Reach grows
+// 9/17/33/65 px for a cost that only grows linearly, and because every
+// level re-applies the edge-stop, wide smoothing still respects
+// silhouettes.
+//
+// The depth tolerance is scaled by tap spacing CPU-side (see
+// AoSetBlurConsts). Without that, a floor at a grazing angle - where depth
+// legitimately changes fast per pixel - has every tap rejected as if it
+// were a silhouette, so the blur silently turns itself OFF exactly where
+// the grain is worst (user-observed 2026-08-16: "top left is fine, bottom
+// is still a bit diagonal heavy").
 static const char *g_aoBlurHlsl =
 "sampler2D aoTex    : register(s0);\n"
 "sampler2D depthTex : register(s1);\n"
 "float4 cB0 : register(c0);\n"   // x=texelW y=texelH z=dirX w=dirY
-"float4 cB1 : register(c1);\n"   // x=edge-stop sharpness (AoBlurSharp)
+"float4 cB1 : register(c1);\n"   // x=edge-stop sharpness y=tap spacing (px)
 "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
 "    float z0 = tex2Dlod(depthTex, float4(uv, 0, 0)).r;\n"
-"    float2 stp = cB0.zw * cB0.xy;\n"
+"    float2 stp = cB0.zw * cB0.xy * cB1.y;\n"
 "    float sum = tex2Dlod(aoTex, float4(uv, 0, 0)).r;\n"
 "    float wsum = 1.0;\n"
 "    static const float gw[5] = { 1.0, 0.84, 0.49, 0.20, 0.06 };\n"
@@ -386,14 +404,21 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
 }
 
 static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
-                            float dx, float dy)
+                            float dx, float dy, float spacing)
 {
     float c0[4], c1[4];
     c0[0] = 1.0f / (float)w;
     c0[1] = 1.0f / (float)h;
     c0[2] = dx; c0[3] = dy;
-    c1[0] = (float)g_aoBlurSharp;
-    c1[1] = c1[2] = c1[3] = 0.0f;
+    // Tolerance scales with tap DISTANCE: on a planar surface the depth
+    // difference to a tap grows linearly with how far away that tap is, so
+    // a fixed tolerance rejects everything on grazing-angle geometry (and
+    // on every a-trous level past the first). Dividing by spacing keeps the
+    // edge-stop testing "is this the same surface" instead of "is this
+    // pixel close in depth", which is the question it is actually for.
+    c1[0] = (float)g_aoBlurSharp / (spacing > 1.0f ? spacing : 1.0f);
+    c1[1] = spacing;
+    c1[2] = c1[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);
 }
@@ -504,21 +529,43 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             AoBlendOpaque(dev, 0x0F);
             AoSetEstimatorConsts(dev, rw, rh, raw ? 3.0f : 0.0f, est);
             AoDrawFsQuad(dev, rw, rh);
-            // Pass 2: horizontal blur, RT A -> RT B, opaque.
+
+            // A-trous levels: each is a separable H then V with the spacing
+            // doubled, ping-ponging A->B->A. The LAST vertical pass targets
+            // the destination directly, so the extra levels cost two draws
+            // each and no extra buffer.
             IDirect3DDevice9_SetPixelShader(dev, g_aoBlurPs);
-            if (!AoTarget(dev, surfB, rw, rh)) goto done;
-            AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
             AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoDepthTex);
-            AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f);
-            AoDrawFsQuad(dev, rw, rh);
-            // Pass 3: vertical blur, RT B -> destination. Multiply with the
-            // alpha pin into the composite; opaque overwrite for raw view.
-            if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-            AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtB);
-            AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f);
-            if (raw) AoBlendOpaque(dev, 0x0F);
-            else     AoBlendMultiply(dev);
-            AoDrawFsQuad(dev, d.Width, d.Height);
+            {
+                LONG passes = g_aoBlurPasses;
+                if (passes < 1) passes = 1;
+                if (passes > 4) passes = 4;
+                float base = (float)g_aoBlurStep100 / 100.0f;
+                for (LONG p = 0; p < passes; p++) {
+                    float spacing = base * (float)(1 << p);
+                    int last = (p == passes - 1);
+                    // Horizontal: A -> B, always opaque and at RT size.
+                    if (!AoTarget(dev, surfB, rw, rh)) goto done;
+                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                    AoBlendOpaque(dev, 0x0F);
+                    AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing);
+                    AoDrawFsQuad(dev, rw, rh);
+                    // Vertical: B -> A, or on the last level B -> the
+                    // destination (multiply with the alpha pin into the
+                    // composite; opaque overwrite for the raw view).
+                    if (last) {
+                        if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
+                        if (raw) AoBlendOpaque(dev, 0x0F);
+                        else     AoBlendMultiply(dev);
+                    } else {
+                        if (!AoTarget(dev, surfA, rw, rh)) goto done;
+                        AoBlendOpaque(dev, 0x0F);
+                    }
+                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtB);
+                    AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing);
+                    AoDrawFsQuad(dev, last ? d.Width : rw, last ? d.Height : rh);
+                }
+            }
         } else {
             // Single-pass direct path (AoBlur=0, debug bands, or blur infra
             // unavailable) - the v24 behavior, unchanged.

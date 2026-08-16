@@ -228,6 +228,11 @@ static NumericSetting g_numerics[] = {
     // edges crisp at the cost of residual grain along them.
     { &g_aoBlur,        "AoBlur",        0, 1 },
     { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
+    // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED
+    // spacing, so reach grows 9/17/33/65px for a linear cost. Spread scales
+    // the base spacing (100 = 1px between taps).
+    { &g_aoBlurPasses,  "AoBlurPasses",  1, 4 },
+    { &g_aoBlurStep100, "AoBlurStep100", 25, 400 },
 #endif
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },

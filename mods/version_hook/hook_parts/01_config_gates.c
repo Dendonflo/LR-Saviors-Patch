@@ -269,6 +269,8 @@ static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persist
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
 static volatile LONG g_aoBlurSharp = 40;      // ini AoBlurSharp: blur depth edge-stop
+static volatile LONG g_aoBlurPasses = 2;      // ini AoBlurPasses: a-trous levels (1..4)
+static volatile LONG g_aoBlurStep100 = 100;   // ini AoBlurStep100: base tap spacing x100 px
 static void SsaoReleaseRts(void);             // 25_ssao.c - the blur RT pair is
                                               //   D3DPOOL_DEFAULT; AoReconReset calls this
 #endif
