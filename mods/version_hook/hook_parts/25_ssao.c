@@ -98,8 +98,21 @@ static const char *g_ssaoHlsl =
 // the lines into per-pixel grain, which a separable gaussian actually
 // removes. vpos is wrapped before the sin-hash: sin() of large arguments
 // loses precision on some GPUs and re-introduces banding.
+// v25j: the sin-hash is GONE. frac(sin(dot(p, k)) * 43758.5453) is the
+// textbook one-liner and it is quietly broken at these magnitudes: after
+// range reduction, sin() of an argument in the tens of thousands keeps only
+// a few good bits, and because consecutive ROWS advance the argument by a
+// near-integer number of periods (78.233 / 2pi = 12.45), neighbouring rows
+// come out CORRELATED rather than independent. At full resolution that is a
+// one-pixel structure nobody can see; at 1/8 the upsample magnifies it 8x
+// into horizontal banding across the ground - user-observed, and it appears
+// only when the AO buffer is smaller, which is the tell.
+// Replacement is Hoskins' hash12: pure frac/dot arithmetic, no
+// transcendentals, no large arguments, no row correlation.
 "    float2 np = fmod(vpos, 1024.0);\n"
-"    float ign = frac(sin(dot(np, float2(12.9898, 78.233))) * 43758.5453);\n"
+"    float3 h3 = frac(float3(np.x, np.y, np.x) * 0.1031);\n"
+"    h3 += dot(h3, h3.yzx + 33.33);\n"
+"    float ign = frac((h3.x + h3.y) * h3.z);\n"
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
 "    float occ = 0.0;\n"
 "    float rPix = cParam0.z * cParam1.y / P.z;\n"      // world radius -> uv
