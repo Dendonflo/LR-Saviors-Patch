@@ -378,7 +378,19 @@ static void AoDumpDepthStats(IDirect3DDevice9 *dev)
     if (sys) IDirect3DSurface9_Release(sys);
 }
 
-static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
+#if ENABLE_AO_SSAO
+// Tentative definition: RT A lives in 25_ssao.c, which follows this part in
+// TU order. Needed so the dump can capture the AO buffer ITSELF, not just
+// the composite it ends up in.
+static IDirect3DTexture9 *g_aoRtA;
+#endif
+
+// name: "ao_buffer" for the composite, "ao_rt" for our own AO buffer. The
+// pair is what separates "the bands are in the AO we computed" from "the
+// bands appear when it lands in the composite" - a distinction three
+// rounds of screenshot analysis could not make.
+static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex,
+                         const char *name)
 {
     IDirect3DSurface9 *surf = NULL, *sys = NULL;
     FILE *f = NULL;
@@ -402,12 +414,13 @@ static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
                 // destroyed the first. The log line records which mode
                 // produced each file so the pair can never be mixed up.
                 static LONG dumpIdx = 0;
-                char path[MAX_PATH], name[64];
+                char path[MAX_PATH], fname[80];
                 GetModuleFileNameA(NULL, path, MAX_PATH);
                 char *slash = strrchr(path, '\\');
-                sprintf(name, "ao_buffer_%02ld_%s.bmp", dumpIdx++,
-                        !g_aoEnable ? "off" : (g_aoEnable == 2 ? "hbao" : "ssao"));
-                if (slash) strcpy(slash + 1, name);
+                sprintf(fname, "%s_%02ld_%s_r%ld.bmp", name, dumpIdx++,
+                        !g_aoEnable ? "off" : (g_aoEnable == 2 ? "hbao" : "ssao"),
+                        g_aoResDiv);
+                if (slash) strcpy(slash + 1, fname);
                 f = fopen(path, "wb");
                 if (f) {
                     // 32bpp BMP, BI_RGB, rows bottom-up.
@@ -714,7 +727,13 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
             if (g_aoTint)
                 AoTintBuffer(dev, tex);
             if (wantDump) {
-                AoDumpBuffer(dev, tex);
+                AoDumpBuffer(dev, tex, "ao_buffer");
+#if ENABLE_AO_SSAO
+                // The AO buffer as the estimator and blur left it, BEFORE
+                // the upsample and before it meets the engine's own values.
+                if (g_aoRtA)
+                    AoDumpBuffer(dev, (IDirect3DBaseTexture9 *)g_aoRtA, "ao_rt");
+#endif
                 AoDumpDepthStats(dev);
             }
         }

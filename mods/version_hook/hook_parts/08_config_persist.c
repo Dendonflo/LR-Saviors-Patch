@@ -236,7 +236,9 @@ static NumericSetting g_numerics[] = {
     // divided out first unless AoSsaaIndep=0). 1=full 2=half 4=quarter
     // 8=eighth; the estimator and blur run there, the composite step
     // upsamples with a depth-aware filter.
-    { &g_aoResDiv,      "AoResDiv",      1, 8 },
+    // 1/8 removed 2026-08-16 (user: "basically unusable anyway") - the
+    // estimator has too few samples per screen area to hold together.
+    { &g_aoResDiv,      "AoResDiv",      1, 4 },
     { &g_aoSsaaIndep,   "AoSsaaIndep",   0, 1 },
     { &g_aoUpsampleDepth, "AoUpsampleDepth", 0, 1 },
     { &g_aoBlur,        "AoBlur",        0, 1 },
