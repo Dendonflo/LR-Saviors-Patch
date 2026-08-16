@@ -147,6 +147,14 @@ static const char *g_ssaoHlsl =
 // material the low-resolution banding is made of (also why Alchemy's 12
 // independent taps band worse than HBAO's 4 accumulating rays).
 "    rPix = min(rPix, cParam2.z);\n"
+// The world radius ACTUALLY sampled, after the screen clamp. Near the
+// camera the clamp shrinks the disc well below the nominal Radius, so a
+// falloff measured against the nominal value barely engages there while
+// engaging fully at distance - which is why v25s made SSAO read as
+// depth-dependent, soft far away and unchanged up close (user-observed).
+// Measuring against the effective radius makes the falloff's SHAPE the
+// same at every depth; the clamp still shrinks the disc, which is its job.
+"    float rWorld = rPix * P.z / cParam1.y;\n"
 "#if ESTIMATOR == 1\n"
 // HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
 // direction contributes its HORIZON - the highest elevation above the
@@ -195,7 +203,7 @@ static const char *g_ssaoHlsl =
 // character a metre off a wall kept contributing at every screen-space
 // distance the taps could reach. Squared so it eases out rather than
 // cutting, since a hard edge here would print the radius as a ring.
-"        float fo = saturate(1.0 - vv / (cParam0.z * cParam0.z));\n"
+"        float fo = saturate(1.0 - vv / (rWorld * rWorld));\n"
 "        occ += fo * fo * max(0.0, dot(v, N) - cParam1.z * P.z)\n"
 "             / (vv + 0.01);\n"
 "    }\n"
