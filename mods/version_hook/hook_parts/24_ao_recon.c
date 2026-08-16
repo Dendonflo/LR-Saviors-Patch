@@ -835,28 +835,51 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_SetVSConstF_Fov)(
     IDirect3DDevice9 *, UINT, const float *, UINT);
 static PFN_SetVSConstF_Fov g_origSetVSConstFov = NULL;
 static volatile LONG g_fovProbeLogged = 0;
+static volatile LONG g_fovCalls = 0;
 
-// One candidate 4x4. Accepts either upload convention:
-//   row-vector (p * M):  M[2][3] == 1, M[3][3] == 0  -> columns are strided
-//   transposed (M * p):  M[3][2] == 1, M[3][3] == 0  -> columns are rows
-// Either way the two projection scales are the norms of the ORIGINAL
-// matrix's first two columns, because view is a rotation plus translation
-// and a rotation leaves column norms alone.
+static float g_fovBestW = 0.0f;      // closest-to-1 w-column norm seen
+static volatile LONG g_fovWindows = 0;
+
+// One candidate 4x4.
+//
+// v2 signature. The first version looked for a PURE projection matrix
+// (m[2][3]==1, m[3][3]==0) and matched nothing, which was the wrong test:
+// in M = view * projection the w column is not the projection's, it is the
+// VIEW's third column - the camera's forward axis - with the camera's z
+// translation in the last slot. So m[3][3] is a distance, not zero.
+//
+// The right invariant is that the w column's 3-vector part is a rotation
+// axis, so its norm is 1. That holds for view*proj and equally for
+// world*view*proj as long as the world transform carries no scale - and a
+// scaled one fails the same test, so this self-filters to the matrices the
+// column-norm trick is actually valid for.
+//
+// Given that, projX and projY are the norms of columns 0 and 1: view
+// contributes a rotation, and a rotation cannot change a column norm.
 static void FovProbeExamine(const float *m)
 {
-    float px = 0.0f, py = 0.0f;
+    float px = 0.0f, py = 0.0f, wn;
     const char *how;
-    if (m[11] > 0.99f && m[11] < 1.01f && m[15] > -0.01f && m[15] < 0.01f) {
-        // rows are m[0..3][0..3]; column c = m[0][c], m[1][c], m[2][c]
+    InterlockedIncrement(&g_fovWindows);
+    // Row-vector upload: column c is m[c], m[4+c], m[8+c].
+    wn = (float)sqrt(m[3] * m[3] + m[7] * m[7] + m[11] * m[11]);
+    if (wn > 0.98f && wn < 1.02f) {
         px = (float)sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
         py = (float)sqrt(m[1] * m[1] + m[5] * m[5] + m[9] * m[9]);
-        how = "row-vector";
-    } else if (m[14] > 0.99f && m[14] < 1.01f && m[15] > -0.01f && m[15] < 0.01f) {
-        px = (float)sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-        py = (float)sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-        how = "transposed";
+        how = "view*proj";
     } else {
-        return;
+        float wt;
+        if (wn > g_fovBestW && wn < 1.5f) g_fovBestW = wn;
+        // Transposed upload: the uploaded rows ARE the original columns.
+        wt = (float)sqrt(m[12] * m[12] + m[13] * m[13] + m[14] * m[14]);
+        if (wt > 0.98f && wt < 1.02f) {
+            px = (float)sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+            py = (float)sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+            how = "view*proj transposed";
+        } else {
+            if (wt > g_fovBestW && wt < 1.5f) g_fovBestW = wt;
+            return;
+        }
     }
     if (!(py > 0.4f && py < 6.0f) || !(px > 0.2f && px < 6.0f)) return;
     {
@@ -885,8 +908,20 @@ static HRESULT STDMETHODCALLTYPE HookedSetVSConstFov(
     // Hot path: one load and a branch once the probe has said its piece.
     if (!g_fovProbeDone && data && count >= 4) {
         __try {
-            for (UINT i = 0; i + 4 <= count; i++)
+            UINT lim = (count > 20) ? 20 : count;   // bound the sliding cost
+            for (UINT i = 0; i + 4 <= lim; i++)
                 FovProbeExamine(data + i * 4);
+            // Liveness. A silent log was ambiguous last run - dead hook or
+            // live hook that never matched? - so say which, once.
+            if (InterlockedIncrement(&g_fovCalls) == 60000 && !g_fovProbeLogged) {
+                char l[192];
+                sprintf(l, "[fov] hook live: %ld calls, %ld windows examined, "
+                           "NO perspective matrix matched (best w-column norm %.4f, want 1.0)",
+                        g_fovCalls, g_fovWindows, g_fovBestW);
+                LogLine(l);
+                LogFlushNow();
+                g_fovProbeDone = 1;
+            }
         } __except (EXCEPTION_EXECUTE_HANDLER) { g_fovProbeDone = 1; }
     }
     return g_origSetVSConstFov(This, reg, data, count);
