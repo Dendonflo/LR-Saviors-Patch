@@ -147,14 +147,6 @@ static const char *g_ssaoHlsl =
 // material the low-resolution banding is made of (also why Alchemy's 12
 // independent taps band worse than HBAO's 4 accumulating rays).
 "    rPix = min(rPix, cParam2.z);\n"
-// The world radius ACTUALLY sampled, after the screen clamp. Near the
-// camera the clamp shrinks the disc well below the nominal Radius, so a
-// falloff measured against the nominal value barely engages there while
-// engaging fully at distance - which is why v25s made SSAO read as
-// depth-dependent, soft far away and unchanged up close (user-observed).
-// Measuring against the effective radius makes the falloff's SHAPE the
-// same at every depth; the clamp still shrinks the disc, which is its job.
-"    float rWorld = rPix * P.z / cParam1.y;\n"
 "#if ESTIMATOR == 1\n"
 // HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
 // direction contributes its HORIZON - the highest elevation above the
@@ -194,18 +186,19 @@ static const char *g_ssaoHlsl =
 "        duv.y *= cParam0.y / cParam0.x;\n"            // aspect-correct
 "        float3 Q = ViewPos(uv + duv);\n"
 "        float3 v = Q - P;\n"
-"        float vv = dot(v, v);\n"
-// WORLD-SPACE RANGE FALLOFF (v25s). This term belongs to the reference
-// Alchemy/SAO estimator and had been dropped, which is why SSAO haloed
-// around characters near walls while HBAO did not: HBAO has always had
-// exactly this check (its wH), so an occluder beyond the radius in 3D
-// contributes nothing, whereas Alchemy's 1/(v.v) only DECAYS - a
-// character a metre off a wall kept contributing at every screen-space
-// distance the taps could reach. Squared so it eases out rather than
-// cutting, since a hard edge here would print the radius as a ring.
-"        float fo = saturate(1.0 - vv / (rWorld * rWorld));\n"
-"        occ += fo * fo * max(0.0, dot(v, N) - cParam1.z * P.z)\n"
-"             / (vv + 0.01);\n"
+// The published estimator, and nothing else:
+//   A = max(0, 1 - (2s/N) * SUM max(0, v.n + z*beta) / (v.v + eps))
+// The 1/(v.v + eps) denominator IS Alchemy's falloff - there is no
+// separate range term in the paper. One was added here on 2026-08-16 to
+// chase halos and removed again the same day: it was not in the reference,
+// it cost a second patch to stop it reading depth-dependent, and it ended
+// up suppressing the effect at every setting. Do not reintroduce it
+// without deciding to deviate from the paper deliberately.
+//
+// Sign note: the paper writes "+ z_C * beta" for a view space with
+// negative z. Ours is positive (3..2000 world units), so the equivalent is
+// a subtraction. This line matches the paper.
+"        occ += max(0.0, dot(v, N) - cParam1.z * P.z) / (dot(v, v) + 0.01);\n"
 "    }\n"
 "    float occN = occ / (float)(AO_TAPS);\n"
 "#endif\n"
