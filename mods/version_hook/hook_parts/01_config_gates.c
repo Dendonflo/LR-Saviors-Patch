@@ -278,6 +278,9 @@ static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not
 // DELIBERATELY not persisted (the armed-diagnostic-poisons-later-launches
 // lesson from v24): every session starts at 0.
 static volatile LONG g_aoBisect = 0;
+// Flat-write test: combine writes eng * (value/100) with no estimator
+// influence. 0 = off. Session-only, same non-persistence rule as bisect.
+static volatile LONG g_aoFlatTest = 0;
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
 static volatile LONG g_aoBlurSharp = 40;      // ini AoBlurSharp: blur depth edge-stop
 static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside the

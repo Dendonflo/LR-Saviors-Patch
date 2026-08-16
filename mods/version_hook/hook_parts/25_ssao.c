@@ -267,6 +267,17 @@ static const char *g_aoCombineHlsl =
 "    float3 ao = tex2D(aoTex, uv).rgb;\n"
 "    if (cK0.y > 0.5) return float4(ao, 1.0);\n"   // raw view / debug bands
 "    float3 eng = tex2D(engTex, uv).rgb;\n"
+// Flat-write test (cK0.z > 0): the whole pipeline runs, but the value
+// written is a CONSTANT multiplier with no estimator influence. Splits the
+// black-model bug's remaining suspect space in one observation: black
+// under a flat x0.9 means the mere act of darkening blackens that
+// material (content side); clean means the estimator's VALUES are the
+// problem, not the machinery.
+"    if (cK0.z > 0.0) {\n"
+"        float3 f = eng * cK0.z;\n"
+"        if (cK0.x > 0.5) f = max(f, 0.5);\n"
+"        return float4(f, 1.0);\n"
+"    }\n"
 "    float3 outc = eng * ao.r;\n"
 // Where the engine is already at its maximum darkness, AO adds nothing;
 // where it is lit, AO may darken it to that same maximum and no further.
@@ -732,7 +743,8 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 float k0[4];
                 k0[0] = g_aoRespectFloor ? 1.0f : 0.0f;
                 k0[1] = (raw || g_aoDebug) ? 1.0f : 0.0f;
-                k0[2] = k0[3] = 0.0f;
+                k0[2] = (float)g_aoFlatTest / 100.0f;   // 0 = off
+                k0[3] = 0.0f;
                 if (!raw && !g_aoDebug && bis < 2) {
                     // RT B is still bound at s0 from the last blur pass, and
                     // it is about to be a StretchRect DESTINATION - a texture

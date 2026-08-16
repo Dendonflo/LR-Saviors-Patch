@@ -151,6 +151,10 @@ GAMEMENU_VALUE(MenuH_AoBis1, g_aoBisect, 1)
 GAMEMENU_VALUE(MenuH_AoBis2, g_aoBisect, 2)
 GAMEMENU_VALUE(MenuH_AoBis3, g_aoBisect, 3)
 GAMEMENU_VALUE(MenuH_AoBis4, g_aoBisect, 4)
+// Flat-write test values (see g_aoFlatTest in 01).
+GAMEMENU_VALUE(MenuH_AoFlatOff, g_aoFlatTest, 0)
+GAMEMENU_VALUE(MenuH_AoFlat90,  g_aoFlatTest, 90)
+GAMEMENU_VALUE(MenuH_AoFlat60,  g_aoFlatTest, 60)
 // Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
 // not a button: the checkbox mirrors the window's own close box.
 GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
@@ -541,6 +545,12 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoBis2", (void *)MenuH_AoBis2); GameMenuFixLabel(mgr, L"2 + No Snapshot Copy");
         mAdd(mgr, NULL, "Mod_AoBis3", (void *)MenuH_AoBis3); GameMenuFixLabel(mgr, L"3 + No Blur Draws");
         mAdd(mgr, NULL, "Mod_AoBis4", (void *)MenuH_AoBis4); GameMenuFixLabel(mgr, L"4 Setup Only");
+        mClose(mgr, NULL);
+        mOpen(mgr, NULL, "Mod_AoFlat"); GameMenuFixLabel(mgr, L"AO Flat Write Test");
+        mBegin(mgr, NULL);
+        mAdd(mgr, NULL, "Mod_AoFlatOff", (void *)MenuH_AoFlatOff); GameMenuFixLabel(mgr, L"Off (normal AO)");
+        mAdd(mgr, NULL, "Mod_AoFlat90",  (void *)MenuH_AoFlat90);  GameMenuFixLabel(mgr, L"Flat x0.90");
+        mAdd(mgr, NULL, "Mod_AoFlat60",  (void *)MenuH_AoFlat60);  GameMenuFixLabel(mgr, L"Flat x0.60");
         mClose(mgr, NULL);
         mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
         GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
