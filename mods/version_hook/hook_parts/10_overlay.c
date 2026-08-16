@@ -826,7 +826,7 @@ static void EnsureAoTweakWindow(void)
         SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
     }
     g_hAoRawCheck = CreateWindowExA(
-        0, "BUTTON", "Show raw AO (fullscreen)",
+        0, "BUTTON", "Show raw AO",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         10, 10 + (int)AO_ROWS * AOTW_ROW_H + 2, cw - 20, 20,
         g_hAoTweak, (HMENU)(UINT_PTR)AOTW_CHECK_ID, wc.hInstance, NULL);
@@ -947,7 +947,7 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                     lastEnable = aoOn;
                     EnableWindow(g_hAoRawCheck, aoOn ? TRUE : FALSE);
                     SetWindowTextA(g_hAoRawCheck,
-                                   aoOn ? "Show raw AO (fullscreen)"
+                                   aoOn ? "Show raw AO"
                                         : "Show raw AO  -  turn AO on first");
                     if (!aoOn) {
                         SendMessageA(g_hAoRawCheck, BM_SETCHECK, BST_UNCHECKED, 0);
