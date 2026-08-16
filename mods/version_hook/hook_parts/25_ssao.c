@@ -257,6 +257,7 @@ static volatile LONG g_ssaoDraws = 0;
 // lazily (which is also what resizes them when SSAA changes the composite).
 static IDirect3DTexture9 *g_aoRtA = NULL, *g_aoRtB = NULL;
 static LONG g_aoRtW = 0, g_aoRtH = 0;
+static LONG g_aoMrtLogged = 0;   // one-shot: are MRT slots 1-3 in use here?
 
 static void *BufPtr(ID3DXBuffer *b)
 {
@@ -502,10 +503,43 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
 
     IDirect3DSurface9 *dstSurf = NULL, *oldRt = NULL;
     IDirect3DSurface9 *surfA = NULL, *surfB = NULL;
+    IDirect3DSurface9 *oldMrt[3] = { NULL, NULL, NULL };
     IDirect3DStateBlock9 *sb = NULL;
     __try {
         D3DSURFACE_DESC d;
         if (FAILED(g_origGetRenderTarget(dev, 0, &oldRt)) || !oldRt) goto done;
+        // MRT slots 1..3 (v25d). State blocks do NOT capture render targets -
+        // we always knew that for RT0 and restore it by hand - and D3D9
+        // requires every bound target to share dimensions, so pointing RT0 at
+        // our own surfaces silently drops whatever was in 1..3. Anything the
+        // engine renders afterwards that expected a second output then writes
+        // into nowhere, which is exactly the shape of "one object renders
+        // pure black only when AO is on" (2026-08-16 menu shield report:
+        // the dumped composite is a ~0.65 multiplier over that object, which
+        // cannot blacken anything, so the AO term is not what breaks it).
+        // Save, unbind for our passes, restore after.
+        {
+            int i;
+            for (i = 1; i <= 3; i++) {
+                IDirect3DSurface9 *s = NULL;
+                if (SUCCEEDED(g_origGetRenderTarget(dev, (DWORD)i, &s)) && s) {
+                    oldMrt[i - 1] = s;
+                    g_origSetRT(dev, (DWORD)i, NULL);
+                }
+            }
+            if (!g_aoMrtLogged) {
+                g_aoMrtLogged = 1;
+                if (oldMrt[0] || oldMrt[1] || oldMrt[2]) {
+                    char l[160];
+                    sprintf(l, "[ssao] MRT live at injection: rt1=%p rt2=%p rt3=%p"
+                               " - saved and restored around our passes",
+                            (void *)oldMrt[0], (void *)oldMrt[1], (void *)oldMrt[2]);
+                    LogLine(l);
+                } else {
+                    LogLine("[ssao] MRT slots 1-3 empty at injection (single render target)");
+                }
+            }
+        }
         if (raw) {
             // Current RT0 (the backbuffer during DRAW_MENU) is the target.
             dstSurf = oldRt;
@@ -630,6 +664,17 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     done:;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     if (oldRt) { g_origSetRT(dev, 0, oldRt); }
+    // MRT slots after RT0 (they must match its dimensions to bind at all)
+    // and before the state block, which restores the viewport RT0 reset.
+    {
+        int i;
+        for (i = 1; i <= 3; i++) {
+            if (oldMrt[i - 1]) {
+                g_origSetRT(dev, (DWORD)i, oldMrt[i - 1]);
+                IDirect3DSurface9_Release(oldMrt[i - 1]);
+            }
+        }
+    }
     if (sb) { IDirect3DStateBlock9_Apply(sb); IDirect3DStateBlock9_Release(sb); }
     if (surfA) IDirect3DSurface9_Release(surfA);
     if (surfB) IDirect3DSurface9_Release(surfB);

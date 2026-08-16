@@ -309,6 +309,67 @@ static void AoDumpDepthStats(IDirect3DDevice9 *dev)
                     LogLine(l);
                     LogFlushNow();
                 }
+                // Depth as an IMAGE (v25d). The stats say the menu depth is
+                // bimodal - character at 3..10, everything else at the far
+                // plane - but not WHICH pixels are which, and the open
+                // question is whether the black object is in the depth
+                // prepass at all (alpha-blended meshes routinely are not).
+                // Near geometry gets the full 0..254 ramp; the far plane is
+                // pinned at 255 so missing geometry reads as flat white.
+                {
+                    char dpath[MAX_PATH], dname[64], dlog[MAX_PATH + 64];
+                    static LONG depthIdx = 0;
+                    FILE *df;
+                    GetModuleFileNameA(NULL, dpath, MAX_PATH);
+                    char *dslash = strrchr(dpath, '\\');
+                    sprintf(dname, "ao_depth_%02ld.bmp", depthIdx++);
+                    if (dslash) strcpy(dslash + 1, dname);
+                    df = fopen(dpath, "wb");
+                    if (df) {
+                        DWORD rowBytes = ((d.Width * 3 + 3) & ~3u);
+                        BITMAPFILEHEADER fh;
+                        BITMAPINFOHEADER ih;
+                        unsigned char *row = (unsigned char *)malloc(rowBytes);
+                        memset(&fh, 0, sizeof(fh));
+                        memset(&ih, 0, sizeof(ih));
+                        fh.bfType = 0x4D42;
+                        fh.bfOffBits = sizeof(fh) + sizeof(ih);
+                        fh.bfSize = fh.bfOffBits + rowBytes * d.Height;
+                        ih.biSize = sizeof(ih);
+                        ih.biWidth = (LONG)d.Width;
+                        ih.biHeight = (LONG)d.Height;
+                        ih.biPlanes = 1;
+                        ih.biBitCount = 24;
+                        fwrite(&fh, sizeof(fh), 1, df);
+                        fwrite(&ih, sizeof(ih), 1, df);
+                        if (row) {
+                            memset(row, 0, rowBytes);
+                            for (LONG y = (LONG)d.Height - 1; y >= 0; y--) {
+                                const float *src = (const float *)
+                                    ((const unsigned char *)lr.pBits + y * lr.Pitch);
+                                for (UINT x = 0; x < d.Width; x++) {
+                                    float z = src[x];
+                                    int v;
+                                    if (!(z > 0.0f)) v = 0;            // no depth / NaN
+                                    else if (z > 1500.0f) v = 255;     // far plane
+                                    else {
+                                        v = (int)(z * (254.0f / 50.0f));
+                                        if (v > 254) v = 254;
+                                    }
+                                    row[x * 3 + 0] = (unsigned char)v;
+                                    row[x * 3 + 1] = (unsigned char)v;
+                                    row[x * 3 + 2] = (unsigned char)v;
+                                }
+                                fwrite(row, rowBytes, 1, df);
+                            }
+                            free(row);
+                        }
+                        fclose(df);
+                        sprintf(dlog, "[aodepth] wrote %s (black=no depth, white=far plane)", dpath);
+                        LogLine(dlog);
+                        LogFlushNow();
+                    }
+                }
             }
             IDirect3DSurface9_UnlockRect(sys);
         }
@@ -335,10 +396,18 @@ static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
             if (FAILED(IDirect3DSurface9_LockRect(sys, &lr, NULL, D3DLOCK_READONLY)))
                 goto done;
             {
-                char path[MAX_PATH];
+                // Indexed filenames (v25d): the black-shield investigation
+                // needs an A/B pair - the SAME menu screen dumped with AO off
+                // and with AO on - and a fixed name meant the second dump
+                // destroyed the first. The log line records which mode
+                // produced each file so the pair can never be mixed up.
+                static LONG dumpIdx = 0;
+                char path[MAX_PATH], name[64];
                 GetModuleFileNameA(NULL, path, MAX_PATH);
                 char *slash = strrchr(path, '\\');
-                if (slash) strcpy(slash + 1, "ao_buffer.bmp");
+                sprintf(name, "ao_buffer_%02ld_%s.bmp", dumpIdx++,
+                        !g_aoEnable ? "off" : (g_aoEnable == 2 ? "hbao" : "ssao"));
+                if (slash) strcpy(slash + 1, name);
                 f = fopen(path, "wb");
                 if (f) {
                     // 32bpp BMP, BI_RGB, rows bottom-up.
@@ -362,9 +431,11 @@ static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex)
                         fwrite((unsigned char *)lr.pBits + y * lr.Pitch, rowBytes, 1, f);
                     fclose(f); f = NULL;
                     {
-                        char l[224];
-                        sprintf(l, "[aodump] wrote %s (%lux%lu fmt=%d)",
-                                path, d.Width, d.Height, (int)d.Format);
+                        char l[256];
+                        sprintf(l, "[aodump] wrote %s (%lux%lu fmt=%d) mode=%s blur=%ld",
+                                path, d.Width, d.Height, (int)d.Format,
+                                !g_aoEnable ? "OFF" : (g_aoEnable == 2 ? "HBAO" : "SSAO"),
+                                g_aoBlur);
                         LogLine(l);
                         LogFlushNow();
                     }
