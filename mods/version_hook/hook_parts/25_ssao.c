@@ -116,12 +116,16 @@ static const char *g_ssaoHlsl =
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
 "    float occ = 0.0;\n"
 "    float rPix = cParam0.z * cParam1.y / P.z;\n"      // world radius -> uv
-// Guard 2: near-camera geometry. A world-space radius projects to a HUGE
-// screen radius up close (0.6 units at z=1 is most of the screen), which
-// samples unrelated geometry and manufactures maximum occlusion - black
-// objects again, this time with a real number. Menu and cutscene framing
-// put geometry far closer to the camera than gameplay ever does.
-"    rPix = min(rPix, 0.25);\n"
+// Guard 2, now a real control (cParam2.z, AoRadiusMaxPct). A world-space
+// radius projects to a HUGE screen radius up close, and the hardcoded 0.25
+// this replaces was an emergency stop, not a sane working value: measured
+// on open ground at z=6.5 with radius 1.61, the disc wanted 0.285 UV and
+// was capped at 0.25 - a QUARTER OF THE SCREEN, every tap landing up to
+// 240px away on the fence, the cart, distant trees. That is not ambient
+// occlusion, it is distant-geometry occlusion, and its variance is the raw
+// material the low-resolution banding is made of (also why Alchemy's 12
+// independent taps band worse than HBAO's 4 accumulating rays).
+"    rPix = min(rPix, cParam2.z);\n"
 "#if ESTIMATOR == 1\n"
 // HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
 // direction contributes its HORIZON - the highest elevation above the
@@ -595,7 +599,8 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c1[3] = (float)g_aoIntensityE[est] / 100.0f;   // estimator gain, live-tunable
     c2[0] = mode;
     c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
-    c2[2] = c2[3] = 0.0f;
+    c2[2] = (float)g_aoRadiusMaxPct / 100.0f;   // screen-radius ceiling, UV
+    c2[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, c1, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 222, c2, 1);

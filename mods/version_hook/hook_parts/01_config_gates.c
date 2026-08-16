@@ -265,6 +265,11 @@ static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct /
 static volatile LONG g_aoIntensityE[2] = { 250, 250 };    // ini AoIntensity100 / AoHbaoIntensity100
 static volatile LONG g_aoRadiusE[2] = { 60, 60 };         // ini AoRadius100 / AoHbaoRadius100
 static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 - eyeball)
+// Ceiling on the SCREEN-space sample radius, percent of screen width. The
+// world-space Radius projects larger the closer geometry is, and without a
+// sane ceiling near-camera pixels sample a quarter of the screen - distant
+// unrelated geometry, huge variance, banding. 10 = 10% of screen width.
+static volatile LONG g_aoRadiusMaxPct = 10;
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Black-model bisect (2026-08-16): blackness FOLLOWS THE NEWEST-LOADED

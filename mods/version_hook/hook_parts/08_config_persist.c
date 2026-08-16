@@ -222,6 +222,10 @@ static NumericSetting g_numerics[] = {
     { &g_aoIntensityE[1], "AoHbaoIntensity100", 50, 2000 },
     { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
     { &g_aoProj100,     "AoProj100",     10, 1000 },
+    // Screen-radius ceiling, % of screen width. Below ~4 the AO becomes
+    // contact-only; above ~15 near geometry samples unrelated scenery and
+    // the estimator's variance shows up as low-resolution banding.
+    { &g_aoRadiusMaxPct, "AoRadiusMaxPct", 1, 25 },
     // Bilateral blur pass (25_ssao.c): Sharp is the depth edge-stop - how
     // hard the blur refuses to smooth across depth discontinuities. 0 turns
     // the edge-stop off (plain gaussian, expect haloes); high values keep

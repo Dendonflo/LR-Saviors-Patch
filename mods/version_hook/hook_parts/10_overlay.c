@@ -698,6 +698,9 @@ static struct {
     { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
     { "Projection",  &g_aoProj100,         { &g_aoProj100,         &g_aoProj100 },         80,  250,  5, NULL },
+    // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
+    // the projection, not an estimator preference.
+    { "Max Radius %", &g_aoRadiusMaxPct,   { &g_aoRadiusMaxPct,    &g_aoRadiusMaxPct },     1,   25,  1, NULL },
     // Blur rows (shared; only meaningful with AoBlur=1). Sharp = depth
     // edge-stop, 0 = plain gaussian. Passes = a-trous levels, each doubling
     // reach. Spread = base tap spacing in pixels x100.
