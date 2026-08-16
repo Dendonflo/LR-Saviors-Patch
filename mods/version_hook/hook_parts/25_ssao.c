@@ -61,9 +61,30 @@ static const char *g_ssaoHlsl =
 "sampler2D depthTex : register(s12);\n"
 "float4 cParam0 : register(c220);\n"   // x=texelW y=texelH z=radius w=strength
 "float4 cParam1 : register(c221);\n"   // x=projX  y=projY  z=bias   w=intensity
+"float4 cParam3 : register(c223);\n"   // xy = depth texel size, zw = depth size
+// TEXEL-CENTRE SNAP (v25p) - the fix for the low-resolution banding.
+//
+// An AO pixel centre is at (i+0.5)/aoW. Multiply by the DEPTH texture's
+// width and at half resolution that is exactly 2i+1: precisely ON a texel
+// boundary. Point sampling there is a coin flip decided by interpolator
+// rounding, so neighbouring pixels fetch texel 2i or 2i+1 unpredictably.
+// The true vertical depth step is ~0.009 and that ambiguity is ~0.005, so
+// cross(ddx(P), ddy(P)) ends up dominated by sampling noise - measured
+// normals jumping 26-36 8-bit levels at a time, up to 204, on FLAT GROUND.
+// At full resolution the same arithmetic gives i+0.5, dead centre, no
+// ambiguity - which is exactly why the artifact was absent at 1/1, present
+// at 1/2 and 1/4, and why the flip boundaries drew diagonals (they follow
+// where the interpolated coordinate crosses integers).
+//
+// Snapping to the containing texel's CENTRE removes the ambiguity at every
+// ratio. The +0.25 bias keeps floor() away from the exact boundary it would
+// otherwise land on. ndc is derived from the SNAPPED coordinate too, so P
+// is the true view position of the texel actually sampled and the
+// derivatives difference real sample points instead of mismatched ones.
 "float3 ViewPos(float2 uv) {\n"
-"    float z = tex2Dlod(depthTex, float4(uv, 0, 0)).r;\n"
-"    float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);\n"
+"    float2 sn = (floor(uv * cParam3.zw + 0.25) + 0.5) * cParam3.xy;\n"
+"    float z = tex2Dlod(depthTex, float4(sn, 0, 0)).r;\n"
+"    float2 ndc = float2(sn.x * 2 - 1, 1 - sn.y * 2);\n"
 "    return float3(ndc.x * z / cParam1.x, ndc.y * z / cParam1.y, z);\n"
 "}\n"
 "float4 cParam2 : register(c222);\n"   // x=debug mode (0/1), yzw unused
@@ -615,6 +636,22 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, c1, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 222, c2, 1);
+    {
+        // The DEPTH texture's own size, which is what the texel-centre snap
+        // in ViewPos needs - not the AO buffer's. They differ by exactly the
+        // resolution divisor, which is the whole reason the snap matters.
+        float c3[4];
+        D3DSURFACE_DESC dd;
+        c3[2] = (float)w; c3[3] = (float)h;          // fallback: assume 1:1
+        if (g_aoDepthTex && SUCCEEDED(IDirect3DTexture9_GetLevelDesc(
+                (IDirect3DTexture9 *)g_aoDepthTex, 0, &dd)) && dd.Width && dd.Height) {
+            c3[2] = (float)dd.Width;
+            c3[3] = (float)dd.Height;
+        }
+        c3[0] = 1.0f / c3[2];
+        c3[1] = 1.0f / c3[3];
+        IDirect3DDevice9_SetPixelShaderConstantF(dev, 223, c3, 1);
+    }
     if (g_ssaoDraws == 0) {
         char l[192];
         sprintf(l, "[ssao] consts est=%d c0=(%.5f %.5f %.2f %.2f) c1=(%.3f %.3f %.3f %.3f)",
