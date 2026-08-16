@@ -719,6 +719,12 @@ static struct {
 #define AOTW_LABEL_W 120
 #define AOTW_BAR_W   230
 #define AOTW_VAL_W   50
+// The raw-AO view lives HERE rather than in the menu (2026-08-16): it is a
+// tuning aid, and reaching it meant leaving the sliders, opening the game
+// menu and coming back. A checkbox in the same window can be flicked
+// between slider drags, which is how it actually gets used.
+#define AOTW_CHECK_ID 4001
+static HWND g_hAoRawCheck = NULL;
 
 static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -761,9 +767,19 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         EndPaint(h, &ps);
         return 0;
     }
+    case WM_COMMAND:
+        if (LOWORD(wp) == AOTW_CHECK_ID && HIWORD(wp) == BN_CLICKED) {
+            LONG on = (SendMessageA(g_hAoRawCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            InterlockedExchange(&g_aoRawView, on);
+            return 0;   // not persisted, so nothing to save
+        }
+        break;
     case WM_CLOSE:
         // Hide, don't destroy: reopening keeps positions, and the menu
-        // checkbox mirrors this flag so it unticks itself.
+        // checkbox mirrors this flag so it unticks itself. The raw view is
+        // dropped on close - leaving the game painted grey with no visible
+        // control to undo it would be a trap.
+        InterlockedExchange(&g_aoRawView, 0);
         InterlockedExchange(&g_aoTweakOpen, 0);
         ShowWindow(h, SW_HIDE);
         return 0;
@@ -783,7 +799,7 @@ static void EnsureAoTweakWindow(void)
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     RegisterClassA(&wc);
     int cw = 10 + AOTW_LABEL_W + AOTW_BAR_W + 8 + AOTW_VAL_W + 10;
-    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H;
+    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 28;   // + the raw-view checkbox
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
     g_hAoTweak = CreateWindowExA(
@@ -808,6 +824,19 @@ static void EnsureAoTweakWindow(void)
         si.nPos = (int)*g_aoRows[i].val;
         si.nPage = 1;
         SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
+    }
+    g_hAoRawCheck = CreateWindowExA(
+        0, "BUTTON", "Show raw AO (fullscreen)",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        10, 10 + (int)AO_ROWS * AOTW_ROW_H + 2, cw - 20, 20,
+        g_hAoTweak, (HMENU)(UINT_PTR)AOTW_CHECK_ID, wc.hInstance, NULL);
+    if (g_hAoRawCheck) {
+        // The child controls default to the ugly system font; the rest of
+        // this window uses the shell dialog font, so match it.
+        SendMessageA(g_hAoRawCheck, WM_SETFONT,
+                     (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+        SendMessageA(g_hAoRawCheck, BM_SETCHECK,
+                     g_aoRawView ? BST_CHECKED : BST_UNCHECKED, 0);
     }
 }
 #endif // ENABLE_AO_SSAO
@@ -896,9 +925,15 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 for (size_t i = 0; i < AO_ROWS; i++)
                     if (g_aoRows[i].bar)
                         SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
+                if (g_hAoRawCheck)
+                    SendMessageA(g_hAoRawCheck, BM_SETCHECK,
+                                 g_aoRawView ? BST_CHECKED : BST_UNCHECKED, 0);
                 ShowWindow(g_hAoTweak, SW_SHOW);
             }
         } else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
+            // Closed from the game menu rather than the window's own close
+            // box - drop the raw view here too, for the same reason.
+            InterlockedExchange(&g_aoRawView, 0);
             ShowWindow(g_hAoTweak, SW_HIDE);
         }
 #endif

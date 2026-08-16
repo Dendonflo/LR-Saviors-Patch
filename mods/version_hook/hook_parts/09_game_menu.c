@@ -171,12 +171,16 @@ GAMEMENU_VALUE(MenuH_AoBis6, g_aoBisect, 6)
 GAMEMENU_VALUE(MenuH_AoFlatOff, g_aoFlatTest, 0)
 GAMEMENU_VALUE(MenuH_AoFlat90,  g_aoFlatTest, 90)
 GAMEMENU_VALUE(MenuH_AoFlat60,  g_aoFlatTest, 60)
-// Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
-// not a button: the checkbox mirrors the window's own close box.
-GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
-// True-raw AO painted over the finished frame (start of the UI pass) - the
-// in-buffer debug view is always seen through albedo; this one is not.
-GAMEMENU_TOGGLE(MenuH_AoRaw,    g_aoRawView)
+// The live tuning window (10_overlay.c), now in Graphics beside the AO
+// settings rather than in Dev Tools - it is where AO is tuned, so it
+// belongs with AO. Value pair rather than a toggle because the Graphics
+// menu is built from radio groups; the window's own close box writes 0
+// here, so the two stay in step either way.
+GAMEMENU_VALUE(MenuH_AoTweakOff, g_aoTweakOpen, 0)
+GAMEMENU_VALUE(MenuH_AoTweakOn,  g_aoTweakOpen, 1)
+// The raw-AO view moved INTO that window as a checkbox (see AOTW_CHECK_ID
+// in 10_overlay.c) - it is a tuning aid, and reaching it through the game
+// menu meant leaving the sliders every time.
 // Which stage the raw view paints. Normals is the one that matters right
 // now: it is the estimator's only derived input and the last thing that
 // can vary row by row without the depth buffer doing so.
@@ -555,8 +559,6 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoDump", (void *)MenuH_AoDump);
         GameMenuFixLabel(mgr, L"AO Dump Buffer (ao_buffer.bmp)");
 #if ENABLE_AO_SSAO
-        mAdd(mgr, NULL, "Mod_AoTweak", (void *)MenuH_AoTweak);
-        GameMenuFixLabel(mgr, L"SSAO Tuning Panel");
         mAdd(mgr, NULL, "Mod_AoBlur", (void *)MenuH_AoBlur);
         GameMenuFixLabel(mgr, L"AO Blur (bilateral)");
         mAdd(mgr, NULL, "Mod_AoFloor", (void *)MenuH_AoFloor);
@@ -577,8 +579,11 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoFlat90",  (void *)MenuH_AoFlat90);  GameMenuFixLabel(mgr, L"Flat x0.90");
         mAdd(mgr, NULL, "Mod_AoFlat60",  (void *)MenuH_AoFlat60);  GameMenuFixLabel(mgr, L"Flat x0.60");
         mClose(mgr, NULL);
-        mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
-        GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
+        // The raw-view TOGGLE moved into the tuning window as a checkbox.
+        // The STAGE selector stays here: normals/depth/occlusion are
+        // pipeline diagnostics, not tuning aids, and they only mean
+        // anything while the raw view is on - which is now one click away
+        // in that window.
         mOpen(mgr, NULL, "Mod_AoStage"); GameMenuFixLabel(mgr, L"Raw View Stage");
         mBegin(mgr, NULL);
         mAdd(mgr, NULL, "Mod_AoStage0", (void *)MenuH_AoStage0); GameMenuFixLabel(mgr, L"AO Term");
@@ -770,6 +775,12 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 0, id++, L"Full",    MenuH_AoRes1);
                     GameMenuInsertLeaf(sub, 1, id++, L"Half",    MenuH_AoRes2);
                     GameMenuInsertLeaf(sub, 2, id++, L"Quarter", MenuH_AoRes4);
+                    groups++;
+                }
+                sub = GameMenuInsertGroup(gfx, at + 5, L"AO Tuning Panel");
+                if (sub) {
+                    GameMenuInsertLeaf(sub, 0, id++, L"Closed", MenuH_AoTweakOff);
+                    GameMenuInsertLeaf(sub, 1, id++, L"Open",   MenuH_AoTweakOn);
                     groups++;
                 }
 #endif
