@@ -1,4 +1,4 @@
-// ---- SSAO injection (v24) -------------------------------------------------
+﻿// ---- SSAO injection (v24) -------------------------------------------------
 // The payoff of the AO recon (24_ao_recon.c). Everything here rests on what
 // those six flights established:
 //
@@ -300,6 +300,31 @@ static IDirect3DTexture9 *g_aoRtA = NULL, *g_aoRtB = NULL;
 static LONG g_aoRtW = 0, g_aoRtH = 0;
 static LONG g_aoMrtLogged = 0;   // one-shot: are MRT slots 1-3 in use here?
 
+// ---- THE SELF-INTERFERENCE RULE (v25g) ------------------------------------
+// Every device call this file makes MUST go through the g_orig* pointers,
+// never the patched vtable. This is not hygiene, it is the black-model bug:
+// the mod's own hooks are STATE MACHINES - HookedSetPixelShader tracks the
+// current shader (g_curPsObj/g_curPsIdx, read by draw-time machinery) and
+// runs the A2C enable/restore ladder, which SETS RENDER STATES of its own
+// when the bound shader changes family. Our injected binds walked that
+// ladder mid-frame, and our state block Apply then restored the device
+// behind the machinery's back - belief and device permanently desynced,
+// wrong alpha-test/coverage state inherited by whichever draws come next
+// (user-isolated: the newest-loaded model, black; bisect level 4 proved the
+// draws themselves were innocent). HookedCreateTexture feeds the staging
+// machinery and HookedCreatePixelShader feeds the shader inventory, so our
+// internal RTs and runtime-compiled shaders must not pass through those
+// either; HookedStretchRect is the SSAA present-path probe. The calls this
+// file may still make through the macro form are exactly the UNHOOKED
+// slots: SetVertexShader, SetFVF, SetSamplerState, SetPixelShaderConstantF
+// (unhooked while ENABLE_CASCADE_HUNT=0 - revisit if that gate returns),
+// DrawPrimitiveUP, CreateStateBlock, GetSurfaceLevel, GetDesc.
+static void AoSetPs(IDirect3DDevice9 *dev, IDirect3DPixelShader9 *ps)
+{
+    if (g_origSetPixelShader) g_origSetPixelShader(dev, ps);
+    else IDirect3DDevice9_SetPixelShader(dev, ps);
+}
+
 static void *BufPtr(ID3DXBuffer *b)
 {
     void **vtbl = *(void ***)b;
@@ -335,7 +360,9 @@ static IDirect3DPixelShader9 *AoCompilePs(
         if (code) BufRelease(code);
         return NULL;
     }
-    hr = IDirect3DDevice9_CreatePixelShader(dev, (const DWORD *)BufPtr(code), &ps);
+    hr = g_origCreatePS
+       ? g_origCreatePS(dev, (const DWORD *)BufPtr(code), &ps)
+       : IDirect3DDevice9_CreatePixelShader(dev, (const DWORD *)BufPtr(code), &ps);
     BufRelease(code);
     if (errs) BufRelease(errs);
     if (FAILED(hr) || !ps) {
@@ -391,13 +418,14 @@ static int AoEnsureRts(IDirect3DDevice9 *dev, UINT w, UINT h)
 {
     if (g_aoRtA && g_aoRtB && g_aoRtW == (LONG)w && g_aoRtH == (LONG)h) return 1;
     SsaoReleaseRts();
-    if (FAILED(IDirect3DDevice9_CreateTexture(dev, w, h, 1, D3DUSAGE_RENDERTARGET,
+    if (!g_origCreateTexture) return 0;   // self-interference rule: never the hook
+    if (FAILED(g_origCreateTexture(dev, w, h, 1, D3DUSAGE_RENDERTARGET,
             D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &g_aoRtA, NULL)) || !g_aoRtA) {
         SsaoReleaseRts();
         LogLine("[ssao] blur RT A creation failed - falling back to direct");
         return 0;
     }
-    if (FAILED(IDirect3DDevice9_CreateTexture(dev, w, h, 1, D3DUSAGE_RENDERTARGET,
+    if (FAILED(g_origCreateTexture(dev, w, h, 1, D3DUSAGE_RENDERTARGET,
             D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &g_aoRtB, NULL)) || !g_aoRtB) {
         SsaoReleaseRts();
         LogLine("[ssao] blur RT B creation failed - falling back to direct");
@@ -657,7 +685,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // term (mode 0) - the mapping is linear, so blurring the term
             // equals blurring ao.
             if (!AoTarget(dev, surfA, rw, rh)) goto done;
-            IDirect3DDevice9_SetPixelShader(dev, g_aoPs[est]);
+            AoSetPs(dev, g_aoPs[est]);
             AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             AoBlendOpaque(dev, 0x0F);
             AoSetEstimatorConsts(dev, rw, rh,
@@ -670,7 +698,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // combine pass, which needs the finished AO in a texture it can
             // sample alongside the engine's own buffer.
             if (useBlur && bis < 3) {
-                IDirect3DDevice9_SetPixelShader(dev, g_aoBlurPs);
+                AoSetPs(dev, g_aoBlurPs);
                 AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 {
                     LONG passes = g_aoBlurPasses;
@@ -699,7 +727,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // into RT B, then write eng*ao clamped to its floor. Alpha is
             // never written in either composite case - the write mask, not
             // blend factors, is what protects the sun-shadow mask now.
-            IDirect3DDevice9_SetPixelShader(dev, g_aoCombinePs);
+            AoSetPs(dev, g_aoCombinePs);
             {
                 float k0[4];
                 k0[0] = g_aoRespectFloor ? 1.0f : 0.0f;
@@ -712,15 +740,17 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     // target is exactly the hazard D3D9 leaves undefined.
                     // Bind the finished AO (A) first, which displaces it.
                     AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
-                    if (FAILED(IDirect3DDevice9_StretchRect(
-                            dev, dstSurf, NULL, surfB, NULL, D3DTEXF_NONE))) {
+                    // Self-interference rule: HookedStretchRect is the SSAA
+                    // present-path probe; our snapshot must not feed it.
+                    if (!g_origStretchRect ||
+                        FAILED(g_origStretchRect(dev, dstSurf, NULL, surfB, NULL, D3DTEXF_NONE))) {
                         // No snapshot means no floor clamp is possible; fall
                         // back to the stacking multiply rather than drawing
                         // an un-combined AO term over the engine's buffer.
                         if (bis >= 1) goto drew;
                         if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
                         AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
-                        IDirect3DDevice9_SetPixelShader(dev, g_aoCombinePs);
+                        AoSetPs(dev, g_aoCombinePs);
                         k0[1] = 1.0f;
                         IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
                         AoBlendMultiply(dev);
@@ -742,7 +772,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // Single-pass direct path (AoBlur=0, debug bands, or blur infra
             // unavailable) - the v24 behavior, unchanged.
             if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-            IDirect3DDevice9_SetPixelShader(dev, g_aoPs[est]);
+            AoSetPs(dev, g_aoPs[est]);
             AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             if (raw) {
                 // Opaque overwrite; the UI draws after this, stays readable.
