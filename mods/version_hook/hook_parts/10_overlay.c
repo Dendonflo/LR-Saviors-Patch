@@ -725,6 +725,18 @@ static struct {
 // between slider drags, which is how it actually gets used.
 #define AOTW_CHECK_ID 4001
 static HWND g_hAoRawCheck = NULL;
+// AO resolution moved out of the Graphics menu and in here (2026-08-16):
+// it belongs with the settings it interacts with - the blur reach and the
+// upsample both key off it - and a dropdown states the three choices
+// better than a radio group buried a menu level away.
+#define AOTW_COMBO_ID 4002
+static HWND g_hAoResCombo = NULL;
+static const LONG g_aoResDivs[3] = { 1, 2, 4 };
+static int AoResIndexOf(LONG div)
+{
+    for (int i = 0; i < 3; i++) if (g_aoResDivs[i] == div) return i;
+    return 0;
+}
 
 static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -763,6 +775,12 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             sprintf(t, "%ld", *g_aoRows[i].val);
             TextOutA(dc, 10 + AOTW_LABEL_W + AOTW_BAR_W + 8, y + 4, t, (int)strlen(t));
         }
+        {
+            // Label for the resolution dropdown, in the same column as the
+            // slider labels so the two read as one list.
+            static const char *rl = "AO Resolution";
+            TextOutA(dc, 10, 10 + (int)AO_ROWS * AOTW_ROW_H + 32, rl, (int)strlen(rl));
+        }
         SelectObject(dc, old);
         EndPaint(h, &ps);
         return 0;
@@ -799,7 +817,8 @@ static void EnsureAoTweakWindow(void)
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     RegisterClassA(&wc);
     int cw = 10 + AOTW_LABEL_W + AOTW_BAR_W + 8 + AOTW_VAL_W + 10;
-    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 28;   // + the raw-view checkbox
+    // rows + the raw-view checkbox + the resolution dropdown
+    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 28 + 30;
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
     g_hAoTweak = CreateWindowExA(
@@ -837,6 +856,24 @@ static void EnsureAoTweakWindow(void)
                      (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
         SendMessageA(g_hAoRawCheck, BM_SETCHECK,
                      g_aoRawView ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
+    // The height passed here is the DROPPED-DOWN height, not the closed
+    // one - a combo box sized to its row shows an empty list.
+    g_hAoResCombo = CreateWindowExA(
+        0, "COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
+        10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + 28,
+        AOTW_BAR_W + 8 + AOTW_VAL_W, 120,
+        g_hAoTweak, (HMENU)(UINT_PTR)AOTW_COMBO_ID, wc.hInstance, NULL);
+    if (g_hAoResCombo) {
+        SendMessageA(g_hAoResCombo, WM_SETFONT,
+                     (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+        SendMessageA(g_hAoResCombo, CB_ADDSTRING, 0,
+                     (LPARAM)"Native (expensive at high res)");
+        SendMessageA(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)"Half");
+        SendMessageA(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)"Quarter");
+        SendMessageA(g_hAoResCombo, CB_SETCURSEL,
+                     (WPARAM)AoResIndexOf(g_aoResDiv), 0);
     }
 }
 #endif // ENABLE_AO_SSAO
@@ -928,6 +965,9 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 if (g_hAoRawCheck)
                     SendMessageA(g_hAoRawCheck, BM_SETCHECK,
                                  g_aoRawView ? BST_CHECKED : BST_UNCHECKED, 0);
+                if (g_hAoResCombo)
+                    SendMessageA(g_hAoResCombo, CB_SETCURSEL,
+                                 (WPARAM)AoResIndexOf(g_aoResDiv), 0);
                 ShowWindow(g_hAoTweak, SW_SHOW);
             }
             // POLL the checkbox rather than trusting WM_COMMAND to arrive.
@@ -961,6 +1001,20 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                         LogLine(on ? "[ssao] raw view: ON (panel checkbox)"
                                    : "[ssao] raw view: off (panel checkbox)");
                     }
+                }
+            }
+            // Resolution dropdown, polled for the same reason as the
+            // checkbox. CB_GETCURSEL reports the COMMITTED selection, not
+            // whatever the mouse is hovering, so an open list cannot make
+            // this fire early.
+            if (g_hAoTweak && IsWindowVisible(g_hAoTweak) && g_hAoResCombo) {
+                LRESULT sel = SendMessageA(g_hAoResCombo, CB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < 3 && g_aoResDivs[sel] != g_aoResDiv) {
+                    char l[64];
+                    InterlockedExchange(&g_aoResDiv, g_aoResDivs[sel]);
+                    sprintf(l, "[ssao] AO resolution: 1/%ld (panel)", g_aoResDiv);
+                    LogLine(l);
+                    SaveConfig();
                 }
             }
         } else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {

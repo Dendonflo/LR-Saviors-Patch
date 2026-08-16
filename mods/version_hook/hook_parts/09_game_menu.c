@@ -139,10 +139,10 @@ static char __cdecl MenuH_AoStageDump(char apply)
 GAMEMENU_VALUE(MenuH_AoOff,  g_aoEnable, 0)
 GAMEMENU_VALUE(MenuH_AoSsao, g_aoEnable, 1)
 GAMEMENU_VALUE(MenuH_AoHbao, g_aoEnable, 2)
-// AO buffer resolution, as a divisor of DISPLAY resolution (see g_aoResDiv).
-GAMEMENU_VALUE(MenuH_AoRes1, g_aoResDiv, 1)
-GAMEMENU_VALUE(MenuH_AoRes2, g_aoResDiv, 2)
-GAMEMENU_VALUE(MenuH_AoRes4, g_aoResDiv, 4)
+// AO buffer resolution moved to a dropdown in the tuning window
+// (10_overlay.c, AOTW_COMBO_ID): it interacts with the blur reach and the
+// upsample, both of which are tuned there, so splitting it across two
+// surfaces meant tuning with half the controls out of sight.
 // AO Quality menu RETIRED 2026-08-16 - the estimator is locked to the High
 // tier. AO Resolution stays as the performance lever.
 GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
@@ -772,13 +772,6 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 1, id++, L"SSAO", MenuH_AoSsao);
                     GameMenuInsertLeaf(sub, 2, id++, L"HBAO", MenuH_AoHbao);
                     GameMenuInsertLeaf(sub, 3, id++, L"Tuning Panel", MenuH_AoPanel);
-                    groups++;
-                }
-                sub = GameMenuInsertGroup(gfx, at + 4, L"AO Resolution");
-                if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Full",    MenuH_AoRes1);
-                    GameMenuInsertLeaf(sub, 1, id++, L"Half",    MenuH_AoRes2);
-                    GameMenuInsertLeaf(sub, 2, id++, L"Quarter", MenuH_AoRes4);
                     groups++;
                 }
 #endif
