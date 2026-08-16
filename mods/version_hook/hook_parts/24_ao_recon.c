@@ -309,6 +309,42 @@ static void AoDumpDepthStats(IDirect3DDevice9 *dev)
                     LogLine(l);
                     LogFlushNow();
                 }
+                // RAW float column (v25n). The normals view showed the ground
+                // as broad bands of N=(0,1,0), which is what the shader
+                // derives when ddy(depth) is EXACTLY zero across whole runs
+                // of rows. Every value is individually valid, so the stats
+                // above and the 8-bit image dump both looked healthy - only
+                // the exact bit patterns can show a staircase. 48 consecutive
+                // rows down the middle of the frame, with row-to-row deltas.
+                {
+                    UINT cx = d.Width / 2;
+                    UINT y0 = (d.Height * 3) / 4;
+                    UINT yend = y0 + 48;
+                    char line[200];
+                    float prev = 0.0f;
+                    LONG zeroDelta = 0, steps = 0;
+                    if (yend > d.Height) yend = d.Height;
+                    LogLine("[aodepth] raw column (x=W/2): row  z  delta");
+                    for (UINT yy = y0; yy < yend; yy++) {
+                        const float *row = (const float *)
+                            ((const unsigned char *)lr.pBits + yy * lr.Pitch);
+                        float z = row[cx];
+                        float dz = (yy > y0) ? (z - prev) : 0.0f;
+                        if (yy > y0) {
+                            if (dz == 0.0f) zeroDelta++;
+                            else steps++;
+                        }
+                        sprintf(line, "[aodepth]   %4lu  %.7f  %+.7f%s",
+                                (unsigned long)yy, z, dz,
+                                (yy > y0 && dz == 0.0f) ? "   <-- flat" : "");
+                        LogLine(line);
+                        prev = z;
+                    }
+                    sprintf(line, "[aodepth] of %ld row steps: %ld are EXACTLY zero, %ld change",
+                            zeroDelta + steps, zeroDelta, steps);
+                    LogLine(line);
+                    LogFlushNow();
+                }
                 // Depth as an IMAGE (v25d). The stats say the menu depth is
                 // bimodal - character at 3..10, everything else at the far
                 // plane - but not WHICH pixels are which, and the open

@@ -197,6 +197,17 @@ static const char *g_ssaoHlsl =
 "    term = (term > -1000.0 && term < 1000.0) ? term : 1.0;\n"
 // Mode 3: RAW view - the estimator's own output as full-range grey, drawn
 // over the finished frame: no albedo, no shadow term, no [0.5..1] mapping.
+// Full-screen single-stage views (v25m). The four-band diagnostic showed
+// each stage in a quarter-width strip, which is useless for judging a
+// pattern that spans the frame. These render ONE stage over the whole
+// picture, through the raw-view path so nothing is multiplied by albedo:
+//   4 = depth as a grey cycle per 20 world units
+//   5 = the reconstructed NORMAL as colour  <- the estimator's one derived
+//       input, and the only remaining suspect that can vary per row
+//   6 = the raw occlusion sum, before any mapping
+"    if (cParam2.x > 5.5) { float so = saturate(occ * 2.0 / 12.0); return float4(so, so, so, 1); }\n"
+"    if (cParam2.x > 4.5) { float3 nc = N * 0.5 + 0.5; return float4(nc, 1); }\n"
+"    if (cParam2.x > 3.5) { float sd = frac(zRaw * 0.05); return float4(sd, sd, sd, 1); }\n"
 "    if (cParam2.x > 2.5) return float4(aoBase, aoBase, aoBase, 1.0);\n"
 // Debug = one screen, four vertical bands, each a pipeline stage:
 //   [0-25%]  depth stripes: a grey cycle per 20 world units. FLAT GREY here
@@ -904,7 +915,8 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             AoBlendOpaque(dev, 0x0F);
             AoSetEstimatorConsts(dev, rw, rh,
-                                 raw ? 3.0f : (g_aoDebug ? 1.0f : 0.0f), est);
+                                 raw ? (g_aoDebugStage ? 3.0f + (float)g_aoDebugStage : 3.0f)
+                                     : (g_aoDebug ? 1.0f : 0.0f), est);
             if (bis < 4) AoDrawFsQuad(dev, rw, rh);
 
             // A-trous levels: each is a separable H then V with the spacing

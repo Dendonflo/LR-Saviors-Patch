@@ -167,6 +167,13 @@ GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
 // True-raw AO painted over the finished frame (start of the UI pass) - the
 // in-buffer debug view is always seen through albedo; this one is not.
 GAMEMENU_TOGGLE(MenuH_AoRaw,    g_aoRawView)
+// Which stage the raw view paints. Normals is the one that matters right
+// now: it is the estimator's only derived input and the last thing that
+// can vary row by row without the depth buffer doing so.
+GAMEMENU_VALUE(MenuH_AoStage0, g_aoDebugStage, 0)
+GAMEMENU_VALUE(MenuH_AoStage1, g_aoDebugStage, 1)
+GAMEMENU_VALUE(MenuH_AoStage2, g_aoDebugStage, 2)
+GAMEMENU_VALUE(MenuH_AoStage3, g_aoDebugStage, 3)
 #endif
 #endif
 
@@ -562,6 +569,13 @@ static void GameMenuAppend(void)
         mClose(mgr, NULL);
         mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
         GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
+        mOpen(mgr, NULL, "Mod_AoStage"); GameMenuFixLabel(mgr, L"Raw View Stage");
+        mBegin(mgr, NULL);
+        mAdd(mgr, NULL, "Mod_AoStage0", (void *)MenuH_AoStage0); GameMenuFixLabel(mgr, L"AO Term");
+        mAdd(mgr, NULL, "Mod_AoStage1", (void *)MenuH_AoStage1); GameMenuFixLabel(mgr, L"Depth");
+        mAdd(mgr, NULL, "Mod_AoStage2", (void *)MenuH_AoStage2); GameMenuFixLabel(mgr, L"Normals");
+        mAdd(mgr, NULL, "Mod_AoStage3", (void *)MenuH_AoStage3); GameMenuFixLabel(mgr, L"Occlusion");
+        mClose(mgr, NULL);
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);
         GameMenuFixLabel(mgr, L"SSAO Pipeline Bands (diagnostic)");
 #endif

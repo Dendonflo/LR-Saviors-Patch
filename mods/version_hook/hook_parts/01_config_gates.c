@@ -272,6 +272,10 @@ static volatile LONG g_aoProj100 = 130;       // ini AoProj100 (cot(fovY/2)x100 
 static volatile LONG g_aoRadiusMaxPct = 10;
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
+// Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
+// reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not
+// persisted (the armed-toggle lesson).
+static volatile LONG g_aoDebugStage = 0;
 // Black-model bisect (2026-08-16): blackness FOLLOWS THE NEWEST-LOADED
 // MODEL (user-observed: switching weapons blackens the newly shown one),
 // while the dumped composite is unremarkable over the black object - so
