@@ -591,9 +591,40 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     bis == 0 ? "full pipeline" :
                     bis == 1 ? "no composite write" :
                     bis == 2 ? "+ no snapshot copy" :
-                    bis == 3 ? "+ no blur draws" : "setup only, no draws");
+                    bis == 3 ? "+ no blur draws" :
+                    bis == 4 ? "setup only, no draws" :
+                    bis == 5 ? "state block bracket only" : "NOTHING (control)");
             LogLine(l);
+            LogFlushNow();
         }
+    }
+    {
+        static LONG lastFlat = 0;
+        if (g_aoFlatTest != lastFlat) {
+            char l[64];
+            lastFlat = g_aoFlatTest;
+            sprintf(l, "[ssao] flat-write test: %s (%ld%%)",
+                    g_aoFlatTest ? "ON" : "off", g_aoFlatTest);
+            LogLine(l);
+            LogFlushNow();
+        }
+    }
+    // Level 6: the control - SsaoApply contributes literally nothing, so a
+    // frame here must be indistinguishable from AO off. Black at 6 means the
+    // bug is not in this function at all.
+    if (bis >= 6) return;
+    // Level 5: the state block bracket alone - capture and immediately
+    // restore, no other call in between. Isolates CreateStateBlock/Apply
+    // from everything level 4 still does (retargets, binds, shader sets).
+    if (bis == 5) {
+        __try {
+            IDirect3DStateBlock9 *sb5 = NULL;
+            if (SUCCEEDED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb5)) && sb5) {
+                IDirect3DStateBlock9_Apply(sb5);
+                IDirect3DStateBlock9_Release(sb5);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        return;
     }
     if (g_aoPsState[est] == 0 || g_aoBlurState == 0 || g_aoCombineState == 0)
         AoEnsureShaders(dev, est);

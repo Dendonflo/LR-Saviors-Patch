@@ -151,6 +151,8 @@ GAMEMENU_VALUE(MenuH_AoBis1, g_aoBisect, 1)
 GAMEMENU_VALUE(MenuH_AoBis2, g_aoBisect, 2)
 GAMEMENU_VALUE(MenuH_AoBis3, g_aoBisect, 3)
 GAMEMENU_VALUE(MenuH_AoBis4, g_aoBisect, 4)
+GAMEMENU_VALUE(MenuH_AoBis5, g_aoBisect, 5)
+GAMEMENU_VALUE(MenuH_AoBis6, g_aoBisect, 6)
 // Flat-write test values (see g_aoFlatTest in 01).
 GAMEMENU_VALUE(MenuH_AoFlatOff, g_aoFlatTest, 0)
 GAMEMENU_VALUE(MenuH_AoFlat90,  g_aoFlatTest, 90)
@@ -545,6 +547,8 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoBis2", (void *)MenuH_AoBis2); GameMenuFixLabel(mgr, L"2 + No Snapshot Copy");
         mAdd(mgr, NULL, "Mod_AoBis3", (void *)MenuH_AoBis3); GameMenuFixLabel(mgr, L"3 + No Blur Draws");
         mAdd(mgr, NULL, "Mod_AoBis4", (void *)MenuH_AoBis4); GameMenuFixLabel(mgr, L"4 Setup Only");
+        mAdd(mgr, NULL, "Mod_AoBis5", (void *)MenuH_AoBis5); GameMenuFixLabel(mgr, L"5 State Block Only");
+        mAdd(mgr, NULL, "Mod_AoBis6", (void *)MenuH_AoBis6); GameMenuFixLabel(mgr, L"6 Nothing (control)");
         mClose(mgr, NULL);
         mOpen(mgr, NULL, "Mod_AoFlat"); GameMenuFixLabel(mgr, L"AO Flat Write Test");
         mBegin(mgr, NULL);
