@@ -288,7 +288,17 @@ static const char *g_aoBlurHlsl =
 "        [unroll] for (int s = 0; s < 2; s++) {\n"
 "            float2 u2 = uv + stp * (float)((s * 2 - 1) * i);\n"
 "            float zi = tex2Dlod(depthTex, float4(u2, 0, 0)).r;\n"
-"            float w = gw[i] * saturate(1.0 - cB1.x * abs(zi - z0) / max(z0, 1.0));\n"
+// Reciprocal QUADRATIC, not a saturating linear ramp (v25r). The ramp had
+// a hard cutoff: taps inside the threshold contributed fully, taps beyond
+// contributed exactly nothing. So the SET of contributing taps flipped
+// abruptly at a fixed distance from every depth edge, leaving a
+// discontinuity there - a ghost line parallel to the original, offset by
+// the cutoff distance. With a-trous's sparse taps that reads as the edge
+// DUPLICATED a few pixels away (user-observed, and absent before the blur,
+// which is what identified it). A quadratic decays smoothly and never
+// reaches zero, so no distance is special and no ring forms.
+"            float rz = (zi - z0) / max(z0, 0.001);\n"
+"            float w = gw[i] / (1.0 + cB1.x * rz * rz);\n"
 "            sum += tex2Dlod(aoTex, float4(u2, 0, 0)).r * w;\n"
 "            wsum += w;\n"
 "        }\n"
@@ -714,17 +724,15 @@ static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     // on every a-trous level past the first). Dividing by spacing keeps the
     // edge-stop testing "is this the same surface" instead of "is this
     // pixel close in depth", which is the question it is actually for.
-    {
-        // Tolerance tracks the tap's SCREEN separation (spacing x aoScale),
-        // not its texel separation: two taps 1 texel apart at 1/8 res are 8
-        // screen pixels apart and see 8x the depth difference on any sloped
-        // surface. Scaling by texels alone made the edge-stop 8x too tight
-        // there, so it rejected everything vertically (where a ground plane's
-        // depth changes fastest) while the horizontal pass smeared freely -
-        // the streaks.
-        float screenSpan = spacing * aoScale;
-        c1[0] = (float)g_aoBlurSharp / (screenSpan > 1.0f ? screenSpan : 1.0f);
-    }
+    // No distance scaling any more. That existed to stop the LINEAR ramp
+    // from rejecting everything at wide spacing; the quadratic is flat near
+    // zero, so taps on a smooth surface pass on their own merits however far
+    // apart they sit (r ~ 0.005 gives w ~ 0.99), and only a real
+    // discontinuity (r near 1) is refused. Sharp now reads directly as an
+    // edge threshold: half weight at a relative depth difference of
+    // 1/sqrt(sharp) - 16% at 40, 5% at 400.
+    (void)aoScale;
+    c1[0] = (float)g_aoBlurSharp;
     c1[1] = spacing;
     c1[2] = c1[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
