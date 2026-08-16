@@ -226,6 +226,12 @@ static NumericSetting g_numerics[] = {
     // hard the blur refuses to smooth across depth discontinuities. 0 turns
     // the edge-stop off (plain gaussian, expect haloes); high values keep
     // edges crisp at the cost of residual grain along them.
+    // Measured invariant: with AO off the composite's RGB minimum is
+    // EXACTLY 128 frame-wide - the engine never darkens past 50%, and
+    // materials are written to assume it. 0 = allow AO past that floor
+    // (deeper creases, but any material that decodes the range renders
+    // those pixels pure black - the 2026-08-16 menu shield).
+    { &g_aoRespectFloor, "AoRespectFloor", 0, 1 },
     { &g_aoBlur,        "AoBlur",        0, 1 },
     { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED

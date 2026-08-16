@@ -135,6 +135,14 @@ GAMEMENU_TOGGLE(MenuH_AoDebug,  g_aoDebug)
 // Bilateral blur A/B lever: default ON (it IS the noise cure), the toggle
 // exists so raw-vs-blurred can be compared live while tuning.
 GAMEMENU_TOGGLE(MenuH_AoBlur,   g_aoBlur)
+// Live A/B for the engine's [0.5..1] shadow envelope. Inverted sense: the
+// menu entry offers the RISKY option, so an unchecked box is the safe
+// default, same shape as the other experiment toggles here.
+static char __cdecl MenuH_AoFloor(char apply)
+{
+    if (apply) InterlockedExchange(&g_aoRespectFloor, g_aoRespectFloor ? 0 : 1);
+    return (char)(g_aoRespectFloor ? 0 : 1);
+}
 // Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
 // not a button: the checkbox mirrors the window's own close box.
 GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
@@ -516,6 +524,8 @@ static void GameMenuAppend(void)
         GameMenuFixLabel(mgr, L"SSAO Tuning Panel");
         mAdd(mgr, NULL, "Mod_AoBlur", (void *)MenuH_AoBlur);
         GameMenuFixLabel(mgr, L"AO Blur (bilateral)");
+        mAdd(mgr, NULL, "Mod_AoFloor", (void *)MenuH_AoFloor);
+        GameMenuFixLabel(mgr, L"AO Past Engine Floor (blackens geometry)");
         mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
         GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);

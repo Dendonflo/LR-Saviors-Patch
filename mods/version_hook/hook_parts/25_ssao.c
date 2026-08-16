@@ -154,9 +154,19 @@ static const char *g_ssaoHlsl =
 "    float aoBase = saturate(1.0 - cParam1.w * occ / 12.0);\n"
 "#endif\n"
 "    if (zRaw > 1500.0) aoBase = 1.0;\n"               // sky/far (far ~2000)
-// Strength deliberately UNsaturated: >100% pushes the term below the
-// engine's 0.5 floor for deeper-than-stock creases (output clamps at 0).
+// The engine's [0.5..1] ENVELOPE, and why staying inside it is the default
+// (v25e). Measured from an A/B dump pair of the same menu frame: with AO
+// off the composite's RGB minimum is EXACTLY 128 across the whole frame -
+// the engine never writes below 0.5, which the original recon already
+// called its "shadows never darken past 50%" cap. With AO on the minimum
+// was 24, so 3.86% of the frame sat under a floor the materials are
+// written to assume. Materials that DECODE that range (the natural
+// (term-0.5)*2 remap) turn everything at or below 0.5 into pure black and
+// double the apparent strength of everything above it - which is the
+// black-shield report, and why it looks flat and hard-edged instead of
+// like too much AO. cParam2.y = 0 restores the old unsaturated behaviour.
 "    float ao = 1.0 - cParam0.w * (1.0 - aoBase);\n"
+"    if (cParam2.y > 0.5) ao = saturate(ao);\n"
 "    float term = 0.5 + 0.5 * ao;\n"                   // map into [0.5..1]
 // Guard 3: catch-all NaN/INF scrub. Guards 1 and 2 close the two known
 // sources, but a NaN reaching the shadow term is catastrophic and silent
@@ -420,7 +430,8 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c1[2] = est ? 0.15f : 0.02f;
     c1[3] = (float)g_aoIntensityE[est] / 100.0f;   // estimator gain, live-tunable
     c2[0] = mode;
-    c2[1] = c2[2] = c2[3] = 0.0f;
+    c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
+    c2[2] = c2[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 2, c2, 1);
