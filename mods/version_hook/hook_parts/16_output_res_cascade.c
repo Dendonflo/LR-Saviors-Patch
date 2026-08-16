@@ -1808,11 +1808,13 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
         if (SUCCEEDED(IDirect3DDevice9_GetCreationParameters(dev, &cp)) &&
             SUCCEEDED(IDirect3DDevice9_GetDirect3D(dev, &d3d)) && d3d) {
             {
-                // For the state-block postmortem: a PURE device cannot answer
-                // state queries, and CreateStateBlock's recording depends on
-                // them - the leading explanation for why an empty
-                // capture/Apply bracket proved destructive here (bisect
-                // level 5). Logged so the theory is checkable from any log.
+                // The state-block postmortem's key evidence. Measured 0x44 =
+                // HARDWARE_VERTEXPROCESSING | MULTITHREADED, with PUREDEVICE
+                // ABSENT - which killed the first theory (Get-less pure
+                // device breaking CreateStateBlock's recording) and named the
+                // real one: multithreaded device access, so a full-state
+                // Apply reverts whatever another thread did in the meantime.
+                // See the note at the engine-state shadows in 15_msaa.c.
                 char l[96];
                 sprintf(l, "[rt] device BehaviorFlags=0x%08lX%s",
                         (unsigned long)cp.BehaviorFlags,

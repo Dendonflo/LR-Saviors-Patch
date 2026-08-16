@@ -58,11 +58,24 @@ static PFN_SetViewport g_origSetViewport = NULL;
 // (user: reflections moving at 5x camera speed). So injected passes may not
 // use state blocks AT ALL; they restore engine state explicitly instead.
 //
-// The restore values come from these shadows, which are written by OUR OWN
-// HOOKS - the mod already intercepts every engine call to these methods,
-// and injected code calls through g_orig* which bypasses the hooks, so the
-// shadows hold pure engine truth by construction. No Get* calls involved
-// anywhere (a pure device would lie to those).
+// WHY it is not identity, confirmed 2026-08-16: the device is created with
+// D3DCREATE_MULTITHREADED (BehaviorFlags=0x44, logged at creation; note
+// PUREDEVICE is ABSENT, which refutes the first theory that state-block
+// recording was failing on a Get-less device). The game drives D3D from
+// more than one thread, so between our capture and our Apply another
+// thread - the asset loader - can upload a freshly equipped model's
+// textures, constants and matrices. Apply then writes the ENTIRE captured
+// register file back, reverting that upload. The loader never repeats
+// itself, so the model renders with missing constants forever: flat unlit
+// geometry, and env-map matrices stuck at stale values. Equipment menus
+// are the worst case because switching gear IS loading models.
+//
+// The lesson generalises: a full-state restore is only safe if this thread
+// owns all device state, and here it does not. Restore ONLY what you
+// touched. The values come from these shadows, written by OUR OWN HOOKS -
+// the mod already intercepts every engine call to these methods, and
+// injected code calls through g_orig* which bypasses the hooks, so the
+// shadows hold engine truth by construction, with no Get* calls anywhere.
 static DWORD g_esRs[256];                    // last engine value per render state
 static unsigned char g_esRsKnown[256];       // 0 = engine never set it (use default)
 static D3DVIEWPORT9 g_esVp;                  // last engine viewport

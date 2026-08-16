@@ -567,9 +567,12 @@ static void AoBlendOpaque(IDirect3DDevice9 *dev, DWORD writeMask)
 // device (level 5: an empty capture/Apply bracket, nothing in between,
 // still broke the newest-loaded model and derailed env-map matrices), so
 // the AO passes restore exactly what they touch, from the engine-state
-// shadows the mod's own hooks maintain (15_msaa.c). No Get* calls: a pure
-// device lies to those, and the leading theory for the state-block failure
-// is precisely that CreateStateBlock's recording depends on them.
+// shadows the mod's own hooks maintain (15_msaa.c). Cause confirmed from
+// the device's BehaviorFlags (0x44 = HARDWARE_VERTEXPROCESSING |
+// MULTITHREADED, no PUREDEVICE): the game drives D3D from several threads,
+// so Apply reverts whatever the ASSET LOADER uploaded between capture and
+// restore - see the full note in 15_msaa.c. Restoring only what we touched
+// is what makes injection safe next to a loader thread.
 //
 // Deliberately NOT restored: sampler states on s12/s13 (nothing hooks
 // SetSamplerState; the recon showed materials sampling s0-s2 and s14, so
