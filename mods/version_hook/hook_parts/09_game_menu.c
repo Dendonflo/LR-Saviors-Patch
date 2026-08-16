@@ -171,13 +171,16 @@ GAMEMENU_VALUE(MenuH_AoBis6, g_aoBisect, 6)
 GAMEMENU_VALUE(MenuH_AoFlatOff, g_aoFlatTest, 0)
 GAMEMENU_VALUE(MenuH_AoFlat90,  g_aoFlatTest, 90)
 GAMEMENU_VALUE(MenuH_AoFlat60,  g_aoFlatTest, 60)
-// The live tuning window (10_overlay.c), now in Graphics beside the AO
-// settings rather than in Dev Tools - it is where AO is tuned, so it
-// belongs with AO. Value pair rather than a toggle because the Graphics
-// menu is built from radio groups; the window's own close box writes 0
-// here, so the two stay in step either way.
-GAMEMENU_VALUE(MenuH_AoTweakOff, g_aoTweakOpen, 0)
-GAMEMENU_VALUE(MenuH_AoTweakOn,  g_aoTweakOpen, 1)
+// The live tuning window (10_overlay.c) opens from a leaf inside the
+// Ambient Occlusion group itself. MOMENTARY, like Mark Log: it always
+// reports itself unchecked, so picking it opens the window without
+// disturbing which estimator the group has selected. Closing is done from
+// the window's own close box, which writes the flag back.
+static char __cdecl MenuH_AoPanel(char apply)
+{
+    if (apply) InterlockedExchange(&g_aoTweakOpen, 1);
+    return 0;
+}
 // The raw-AO view moved INTO that window as a checkbox (see AOTW_CHECK_ID
 // in 10_overlay.c) - it is a tuning aid, and reaching it through the game
 // menu meant leaving the sliders every time.
@@ -768,6 +771,7 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 0, id++, L"Off",  MenuH_AoOff);
                     GameMenuInsertLeaf(sub, 1, id++, L"SSAO", MenuH_AoSsao);
                     GameMenuInsertLeaf(sub, 2, id++, L"HBAO", MenuH_AoHbao);
+                    GameMenuInsertLeaf(sub, 3, id++, L"Tuning Panel", MenuH_AoPanel);
                     groups++;
                 }
                 sub = GameMenuInsertGroup(gfx, at + 4, L"AO Resolution");
@@ -775,12 +779,6 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 0, id++, L"Full",    MenuH_AoRes1);
                     GameMenuInsertLeaf(sub, 1, id++, L"Half",    MenuH_AoRes2);
                     GameMenuInsertLeaf(sub, 2, id++, L"Quarter", MenuH_AoRes4);
-                    groups++;
-                }
-                sub = GameMenuInsertGroup(gfx, at + 5, L"AO Tuning Panel");
-                if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Closed", MenuH_AoTweakOff);
-                    GameMenuInsertLeaf(sub, 1, id++, L"Open",   MenuH_AoTweakOn);
                     groups++;
                 }
 #endif

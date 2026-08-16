@@ -930,6 +930,19 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                                  g_aoRawView ? BST_CHECKED : BST_UNCHECKED, 0);
                 ShowWindow(g_hAoTweak, SW_SHOW);
             }
+            // POLL the checkbox rather than trusting WM_COMMAND to arrive.
+            // BS_AUTOCHECKBOX flips its own visual state natively, so its
+            // state is authoritative whether or not the notification reaches
+            // our proc - and the notification not arriving is exactly the
+            // failure being chased here. One SendMessage per overlay tick.
+            if (g_hAoTweak && IsWindowVisible(g_hAoTweak) && g_hAoRawCheck) {
+                LONG on = (SendMessageA(g_hAoRawCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                if (on != g_aoRawView) {
+                    InterlockedExchange(&g_aoRawView, on);
+                    LogLine(on ? "[ssao] raw view: ON (panel checkbox)"
+                               : "[ssao] raw view: off (panel checkbox)");
+                }
+            }
         } else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
             // Closed from the game menu rather than the window's own close
             // box - drop the raw view here too, for the same reason.
