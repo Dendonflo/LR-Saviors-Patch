@@ -1730,6 +1730,37 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
         vtbl[slotVP] = (void *)HookedSetViewport;
         VirtualProtect(&vtbl[slotVP], sizeof(void *), oldProtect, &oldProtect);
     }
+    // Engine-state shadow hooks (v25h, see 15_msaa.c): shadow-only
+    // passthroughs on SetVertexShader/SetFVF/SetVertexDeclaration/
+    // SetStreamSource, so the AO bracket can restore engine state without a
+    // state block (whose Apply the bisect proved non-identity on this
+    // device) and without Get* calls (which a pure device would lie to).
+    {
+        int slotVSh = offsetof(IDirect3DDevice9Vtbl, SetVertexShader) / sizeof(void *);
+        g_origSetVertexShader = (PFN_SetVertexShader)ResolveOrigSlot(vtbl[slotVSh]);
+        if (VirtualProtect(&vtbl[slotVSh], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+            vtbl[slotVSh] = (void *)HookedSetVertexShader;
+            VirtualProtect(&vtbl[slotVSh], sizeof(void *), oldProtect, &oldProtect);
+        }
+        int slotFvf = offsetof(IDirect3DDevice9Vtbl, SetFVF) / sizeof(void *);
+        g_origSetFVF = (PFN_SetFVF)ResolveOrigSlot(vtbl[slotFvf]);
+        if (VirtualProtect(&vtbl[slotFvf], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+            vtbl[slotFvf] = (void *)HookedSetFVF;
+            VirtualProtect(&vtbl[slotFvf], sizeof(void *), oldProtect, &oldProtect);
+        }
+        int slotVD = offsetof(IDirect3DDevice9Vtbl, SetVertexDeclaration) / sizeof(void *);
+        g_origSetVertexDecl = (PFN_SetVertexDecl)ResolveOrigSlot(vtbl[slotVD]);
+        if (VirtualProtect(&vtbl[slotVD], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+            vtbl[slotVD] = (void *)HookedSetVertexDecl;
+            VirtualProtect(&vtbl[slotVD], sizeof(void *), oldProtect, &oldProtect);
+        }
+        int slotSS = offsetof(IDirect3DDevice9Vtbl, SetStreamSource) / sizeof(void *);
+        g_origSetStreamSource = (PFN_SetStreamSource)ResolveOrigSlot(vtbl[slotSS]);
+        if (VirtualProtect(&vtbl[slotSS], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+            vtbl[slotSS] = (void *)HookedSetStreamSource;
+            VirtualProtect(&vtbl[slotSS], sizeof(void *), oldProtect, &oldProtect);
+        }
+    }
     // RETIRED: a SetViewport hook was installed here to compensate the
     // enlarged shadow maps. It CRASHED the game at startup, and the same run
     // reported `viewports_scaled=0` - so it never once did the job it was
@@ -1776,6 +1807,18 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
         IDirect3D9 *d3d = NULL;
         if (SUCCEEDED(IDirect3DDevice9_GetCreationParameters(dev, &cp)) &&
             SUCCEEDED(IDirect3DDevice9_GetDirect3D(dev, &d3d)) && d3d) {
+            {
+                // For the state-block postmortem: a PURE device cannot answer
+                // state queries, and CreateStateBlock's recording depends on
+                // them - the leading explanation for why an empty
+                // capture/Apply bracket proved destructive here (bisect
+                // level 5). Logged so the theory is checkable from any log.
+                char l[96];
+                sprintf(l, "[rt] device BehaviorFlags=0x%08lX%s",
+                        (unsigned long)cp.BehaviorFlags,
+                        (cp.BehaviorFlags & D3DCREATE_PUREDEVICE) ? "  (PUREDEVICE)" : "");
+                LogLine(l);
+            }
             D3DADAPTER_IDENTIFIER9 ai;
             if (SUCCEEDED(IDirect3D9_GetAdapterIdentifier(d3d, cp.AdapterOrdinal, 0, &ai))) {
                 g_gpuVendor = (LONG)ai.VendorId;

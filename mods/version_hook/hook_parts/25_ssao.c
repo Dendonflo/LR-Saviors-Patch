@@ -58,15 +58,15 @@
 //                        depth discontinuities (0 = plain gaussian)
 
 static const char *g_ssaoHlsl =
-"sampler2D depthTex : register(s0);\n"
-"float4 cParam0 : register(c0);\n"   // x=texelW y=texelH z=radius w=strength
-"float4 cParam1 : register(c1);\n"   // x=projX  y=projY  z=bias   w=intensity
+"sampler2D depthTex : register(s12);\n"
+"float4 cParam0 : register(c220);\n"   // x=texelW y=texelH z=radius w=strength
+"float4 cParam1 : register(c221);\n"   // x=projX  y=projY  z=bias   w=intensity
 "float3 ViewPos(float2 uv) {\n"
 "    float z = tex2Dlod(depthTex, float4(uv, 0, 0)).r;\n"
 "    float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);\n"
 "    return float3(ndc.x * z / cParam1.x, ndc.y * z / cParam1.y, z);\n"
 "}\n"
-"float4 cParam2 : register(c2);\n"   // x=debug mode (0/1), yzw unused
+"float4 cParam2 : register(c222);\n"   // x=debug mode (0/1), yzw unused
 "float4 main(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR {\n"
 "    float3 P = ViewPos(uv);\n"
 "    float zRaw = P.z;\n"
@@ -221,10 +221,10 @@ static const char *g_ssaoHlsl =
 // the grain is worst (user-observed 2026-08-16: "top left is fine, bottom
 // is still a bit diagonal heavy").
 static const char *g_aoBlurHlsl =
-"sampler2D aoTex    : register(s0);\n"
-"sampler2D depthTex : register(s1);\n"
-"float4 cB0 : register(c0);\n"   // x=texelW y=texelH z=dirX w=dirY
-"float4 cB1 : register(c1);\n"   // x=edge-stop sharpness y=tap spacing (px)
+"sampler2D aoTex    : register(s12);\n"
+"sampler2D depthTex : register(s13);\n"
+"float4 cB0 : register(c220);\n"   // x=texelW y=texelH z=dirX w=dirY
+"float4 cB1 : register(c221);\n"   // x=edge-stop sharpness y=tap spacing (px)
 "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
 "    float z0 = tex2Dlod(depthTex, float4(uv, 0, 0)).r;\n"
 "    float2 stp = cB0.zw * cB0.xy * cB1.y;\n"
@@ -260,9 +260,9 @@ static const char *g_aoBlurHlsl =
 // rather than by pinned blend factors - strictly safer, since it cannot be
 // defeated by whatever the engine left in the blend state.
 static const char *g_aoCombineHlsl =
-"sampler2D aoTex  : register(s0);\n"
-"sampler2D engTex : register(s1);\n"   // copy of the engine's own composite
-"float4 cK0 : register(c0);\n"         // x=respect floor  y=passthrough
+"sampler2D aoTex  : register(s12);\n"
+"sampler2D engTex : register(s13);\n"   // copy of the engine's own composite
+"float4 cK0 : register(c220);\n"         // x=respect floor  y=passthrough
 "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
 "    float3 ao = tex2D(aoTex, uv).rgb;\n"
 "    if (cK0.y > 0.5) return float4(ao, 1.0);\n"   // raw view / debug bands
@@ -507,9 +507,9 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c2[0] = mode;
     c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
     c2[2] = c2[3] = 0.0f;
-    IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
-    IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);
-    IDirect3DDevice9_SetPixelShaderConstantF(dev, 2, c2, 1);
+    IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
+    IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, c1, 1);
+    IDirect3DDevice9_SetPixelShaderConstantF(dev, 222, c2, 1);
     if (g_ssaoDraws == 0) {
         char l[192];
         sprintf(l, "[ssao] consts est=%d c0=(%.5f %.5f %.2f %.2f) c1=(%.3f %.3f %.3f %.3f)",
@@ -534,8 +534,8 @@ static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c1[0] = (float)g_aoBlurSharp / (spacing > 1.0f ? spacing : 1.0f);
     c1[1] = spacing;
     c1[2] = c1[3] = 0.0f;
-    IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, c0, 1);
-    IDirect3DDevice9_SetPixelShaderConstantF(dev, 1, c1, 1);
+    IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
+    IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, c1, 1);
 }
 
 // The alpha pin, needed on every draw whose target is the composite: the
@@ -562,8 +562,61 @@ static void AoBlendOpaque(IDirect3DDevice9 *dev, DWORD writeMask)
     g_origSetRenderState(dev, D3DRS_COLORWRITEENABLE, writeMask);
 }
 
-// Runs at the s14 bind, before the engine's consumers. dev-state discipline
-// identical to the tint probe: D3DSBT_ALL block plus hand-restored RT0.
+// Explicit engine-state restore - the state block replacement (v25h).
+// The bisect proved CreateStateBlock(ALL)+Apply is NOT identity on this
+// device (level 5: an empty capture/Apply bracket, nothing in between,
+// still broke the newest-loaded model and derailed env-map matrices), so
+// the AO passes restore exactly what they touch, from the engine-state
+// shadows the mod's own hooks maintain (15_msaa.c). No Get* calls: a pure
+// device lies to those, and the leading theory for the state-block failure
+// is precisely that CreateStateBlock's recording depends on them.
+//
+// Deliberately NOT restored: sampler states on s12/s13 (nothing hooks
+// SetSamplerState; the recon showed materials sampling s0-s2 and s14, so
+// our point/clamp settings on 12/13 have no observed consumer), and PS
+// constants c220-c222 (engine shaders use low registers; ours were moved
+// up there so there is nothing of the engine's to restore).
+static void AoRestoreEngineState(IDirect3DDevice9 *dev)
+{
+    g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_esTex[12]);
+    g_origSetTexture(dev, 13, (IDirect3DBaseTexture9 *)g_esTex[13]);
+    AoSetPs(dev, (IDirect3DPixelShader9 *)g_curPsObj);
+    if (g_origSetVertexShader)
+        g_origSetVertexShader(dev, (IDirect3DVertexShader9 *)g_esVs);
+    if (g_esDeclIsFvf) {
+        if (g_origSetFVF) g_origSetFVF(dev, g_esFvf);
+    } else if (g_esDecl && g_origSetVertexDecl) {
+        g_origSetVertexDecl(dev, (IDirect3DVertexDeclaration9 *)g_esDecl);
+    }
+    // DrawPrimitiveUP leaves stream 0 pointing at the runtime's internal
+    // buffer; put the engine's binding back (NULL is a valid restore).
+    if (g_origSetStreamSource)
+        g_origSetStreamSource(dev, 0, (IDirect3DVertexBuffer9 *)g_esStreamVb,
+                              g_esStreamOffset, g_esStreamStride);
+    g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, EsRs(D3DRS_ALPHABLENDENABLE, FALSE));
+    g_origSetRenderState(dev, D3DRS_BLENDOP, EsRs(D3DRS_BLENDOP, D3DBLENDOP_ADD));
+    g_origSetRenderState(dev, D3DRS_SRCBLEND, EsRs(D3DRS_SRCBLEND, D3DBLEND_ONE));
+    g_origSetRenderState(dev, D3DRS_DESTBLEND, EsRs(D3DRS_DESTBLEND, D3DBLEND_ZERO));
+    g_origSetRenderState(dev, D3DRS_SEPARATEALPHABLENDENABLE, EsRs(D3DRS_SEPARATEALPHABLENDENABLE, FALSE));
+    g_origSetRenderState(dev, D3DRS_BLENDOPALPHA, EsRs(D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD));
+    g_origSetRenderState(dev, D3DRS_SRCBLENDALPHA, EsRs(D3DRS_SRCBLENDALPHA, D3DBLEND_ONE));
+    g_origSetRenderState(dev, D3DRS_DESTBLENDALPHA, EsRs(D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO));
+    g_origSetRenderState(dev, D3DRS_ZENABLE, EsRs(D3DRS_ZENABLE, D3DZB_TRUE));
+    g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, EsRs(D3DRS_ZWRITEENABLE, TRUE));
+    g_origSetRenderState(dev, D3DRS_CULLMODE, EsRs(D3DRS_CULLMODE, D3DCULL_CCW));
+    g_origSetRenderState(dev, D3DRS_ALPHATESTENABLE, EsRs(D3DRS_ALPHATESTENABLE, FALSE));
+    g_origSetRenderState(dev, D3DRS_FOGENABLE, EsRs(D3DRS_FOGENABLE, FALSE));
+    g_origSetRenderState(dev, D3DRS_STENCILENABLE, EsRs(D3DRS_STENCILENABLE, FALSE));
+    g_origSetRenderState(dev, D3DRS_SCISSORTESTENABLE, EsRs(D3DRS_SCISSORTESTENABLE, FALSE));
+    g_origSetRenderState(dev, D3DRS_COLORWRITEENABLE, EsRs(D3DRS_COLORWRITEENABLE, 0x0F));
+    // Viewport last: the caller restored RT0 just before this, which reset
+    // the viewport to full-target - also the correct fallback when the
+    // engine has never called SetViewport at all.
+    if (g_esVpKnown) g_origSetViewport(dev, &g_esVp);
+}
+
+// Runs at the s14 bind, before the engine's consumers. dev-state discipline:
+// explicit save/restore via AoRestoreEngineState above - NO state block.
 // raw != 0: draw the estimator's output straight onto the CURRENT render
 // target (the backbuffer at DRAW_MENU time) - the true-raw debug view the
 // in-buffer debug mode cannot provide, since that one is always seen
@@ -643,7 +696,6 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     IDirect3DSurface9 *dstSurf = NULL, *oldRt = NULL;
     IDirect3DSurface9 *surfA = NULL, *surfB = NULL;
     IDirect3DSurface9 *oldMrt[3] = { NULL, NULL, NULL };
-    IDirect3DStateBlock9 *sb = NULL;
     __try {
         D3DSURFACE_DESC d;
         if (FAILED(g_origGetRenderTarget(dev, 0, &oldRt)) || !oldRt) goto done;
@@ -688,8 +740,6 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     (IDirect3DTexture9 *)tex, 0, &dstSurf)) || !dstSurf) goto done;
             if (FAILED(IDirect3DSurface9_GetDesc(dstSurf, &d))) goto done;
         }
-        if (FAILED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb)) || !sb) goto done;
-
         if (useRt) {
             if (raw) {
                 // The raw view rides the RT pair the normal path owns (it
@@ -709,9 +759,13 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         }
         if (!useRt) useBlur = 0;
 
-        // States shared by every pass.
-        IDirect3DDevice9_SetVertexShader(dev, NULL);
-        IDirect3DDevice9_SetFVF(dev, D3DFVF_XYZRHW | D3DFVF_TEX1);
+        // States shared by every pass. Through g_orig*: these methods are
+        // now hooked for the engine-state shadow, and our own traffic must
+        // stay invisible to it (the shadows hold engine truth only).
+        if (g_origSetVertexShader) g_origSetVertexShader(dev, NULL);
+        else IDirect3DDevice9_SetVertexShader(dev, NULL);
+        if (g_origSetFVF) g_origSetFVF(dev, D3DFVF_XYZRHW | D3DFVF_TEX1);
+        else IDirect3DDevice9_SetFVF(dev, D3DFVF_XYZRHW | D3DFVF_TEX1);
         g_origSetRenderState(dev, D3DRS_ZENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_CULLMODE, D3DCULL_NONE);
@@ -728,7 +782,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // equals blurring ao.
             if (!AoTarget(dev, surfA, rw, rh)) goto done;
             AoSetPs(dev, g_aoPs[est]);
-            AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoDepthTex);
+            AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             AoBlendOpaque(dev, 0x0F);
             AoSetEstimatorConsts(dev, rw, rh,
                                  raw ? 3.0f : (g_aoDebug ? 1.0f : 0.0f), est);
@@ -741,7 +795,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // sample alongside the engine's own buffer.
             if (useBlur && bis < 3) {
                 AoSetPs(dev, g_aoBlurPs);
-                AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoDepthTex);
+                AoBindTex(dev, 13, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 {
                     LONG passes = g_aoBlurPasses;
                     if (passes < 1) passes = 1;
@@ -750,12 +804,12 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     for (LONG p = 0; p < passes; p++) {
                         float spacing = base * (float)(1 << p);
                         if (!AoTarget(dev, surfB, rw, rh)) goto done;
-                        AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                        AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
                         AoBlendOpaque(dev, 0x0F);
                         AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing);
                         AoDrawFsQuad(dev, rw, rh);
                         if (!AoTarget(dev, surfA, rw, rh)) goto done;
-                        AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtB);
+                        AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtB);
                         AoBlendOpaque(dev, 0x0F);
                         AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing);
                         AoDrawFsQuad(dev, rw, rh);
@@ -782,7 +836,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     // that is simultaneously a sampler source and a copy
                     // target is exactly the hazard D3D9 leaves undefined.
                     // Bind the finished AO (A) first, which displaces it.
-                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                    AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
                     // Self-interference rule: HookedStretchRect is the SSAA
                     // present-path probe; our snapshot must not feed it.
                     if (!g_origStretchRect ||
@@ -792,21 +846,21 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                         // an un-combined AO term over the engine's buffer.
                         if (bis >= 1) goto drew;
                         if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-                        AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                        AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
                         AoSetPs(dev, g_aoCombinePs);
                         k0[1] = 1.0f;
-                        IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
+                        IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, k0, 1);
                         AoBlendMultiply(dev);
                         AoDrawFsQuad(dev, d.Width, d.Height);
                         goto drew;
                     }
-                    AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoRtB);
+                    AoBindTex(dev, 13, (IDirect3DBaseTexture9 *)g_aoRtB);
                 }
                 if (bis < 1) {
                     if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                    AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
                     AoBlendOpaque(dev, raw ? 0x0F : 0x07);
-                    IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
+                    IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, k0, 1);
                     AoDrawFsQuad(dev, d.Width, d.Height);
                 }
             }
@@ -816,7 +870,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // unavailable) - the v24 behavior, unchanged.
             if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
             AoSetPs(dev, g_aoPs[est]);
-            AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoDepthTex);
+            AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             if (raw) {
                 // Opaque overwrite; the UI draws after this, stays readable.
                 AoBlendOpaque(dev, 0x0F);
@@ -849,8 +903,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     done:;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     if (oldRt) { g_origSetRT(dev, 0, oldRt); }
-    // MRT slots after RT0 (they must match its dimensions to bind at all)
-    // and before the state block, which restores the viewport RT0 reset.
+    // MRT slots after RT0 (they must match its dimensions to bind at all).
     {
         int i;
         for (i = 1; i <= 3; i++) {
@@ -860,7 +913,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             }
         }
     }
-    if (sb) { IDirect3DStateBlock9_Apply(sb); IDirect3DStateBlock9_Release(sb); }
+    AoRestoreEngineState(dev);
     if (surfA) IDirect3DSurface9_Release(surfA);
     if (surfB) IDirect3DSurface9_Release(surfB);
     if (dstSurf && dstSurf != oldRt) IDirect3DSurface9_Release(dstSurf);

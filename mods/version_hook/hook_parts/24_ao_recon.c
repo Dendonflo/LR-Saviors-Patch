@@ -580,6 +580,11 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
     LONG pass = g_curPass;
     g_aoSetTexCalls++;   // racy increment is fine for a liveness counter
 
+    // Engine-state shadow (v25h): the AO bracket restores its touched
+    // texture stages from this. Engine traffic only - injected code binds
+    // through g_origSetTexture, which bypasses this hook.
+    if (stage < 16) g_esTex[stage] = (void *)tex;
+
     // Track every pass that binds the shadow container, not just MULTI_SAMPLE.
     if (tex && AoIsShadowTex((void *)tex)) {
         LONG p = pass;

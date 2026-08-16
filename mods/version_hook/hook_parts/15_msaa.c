@@ -49,6 +49,80 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_SetRenderTarget)(
 typedef HRESULT (STDMETHODCALLTYPE *PFN_SetViewport)(
     IDirect3DDevice9 *, const D3DVIEWPORT9 *);
 static PFN_SetViewport g_origSetViewport = NULL;
+
+// ---- Engine-state shadow (v25h) -------------------------------------------
+// Why this exists: the AO bisect proved that CreateStateBlock(D3DSBT_ALL) +
+// Apply - with NOTHING in between - is not an identity operation on this
+// device. One bracket per frame was enough to break the newest-loaded
+// model's rendering (flat unlit geometry) and derail env-map matrices
+// (user: reflections moving at 5x camera speed). So injected passes may not
+// use state blocks AT ALL; they restore engine state explicitly instead.
+//
+// The restore values come from these shadows, which are written by OUR OWN
+// HOOKS - the mod already intercepts every engine call to these methods,
+// and injected code calls through g_orig* which bypasses the hooks, so the
+// shadows hold pure engine truth by construction. No Get* calls involved
+// anywhere (a pure device would lie to those).
+static DWORD g_esRs[256];                    // last engine value per render state
+static unsigned char g_esRsKnown[256];       // 0 = engine never set it (use default)
+static D3DVIEWPORT9 g_esVp;                  // last engine viewport
+static volatile LONG g_esVpKnown = 0;
+static void *g_esVs = NULL;                  // engine's current vertex shader
+static void *g_esDecl = NULL;                // current vertex declaration
+static DWORD g_esFvf = 0;                    // current FVF
+static LONG  g_esDeclIsFvf = 0;              // which of decl/FVF was set last
+static void *g_esStreamVb = NULL;            // stream 0 binding (UP draws clobber it)
+static UINT  g_esStreamOffset = 0, g_esStreamStride = 0;
+static void *g_esTex[16];                    // engine textures per stage (written in
+                                             //   24's SetTexture hook)
+static DWORD EsRs(D3DRENDERSTATETYPE s, DWORD def)
+{
+    return ((DWORD)s < 256 && g_esRsKnown[s]) ? g_esRs[s] : def;
+}
+
+// Shadow-only passthrough hooks for the state the AO bracket touches that
+// nothing else intercepted. All low-frequency (per-material at worst).
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetVertexShader)(
+    IDirect3DDevice9 *, IDirect3DVertexShader9 *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetFVF)(IDirect3DDevice9 *, DWORD);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetVertexDecl)(
+    IDirect3DDevice9 *, IDirect3DVertexDeclaration9 *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetStreamSource)(
+    IDirect3DDevice9 *, UINT, IDirect3DVertexBuffer9 *, UINT, UINT);
+static PFN_SetVertexShader g_origSetVertexShader = NULL;
+static PFN_SetFVF g_origSetFVF = NULL;
+static PFN_SetVertexDecl g_origSetVertexDecl = NULL;
+static PFN_SetStreamSource g_origSetStreamSource = NULL;
+
+static HRESULT STDMETHODCALLTYPE HookedSetVertexShader(
+    IDirect3DDevice9 *This, IDirect3DVertexShader9 *sh)
+{
+    g_esVs = (void *)sh;
+    return g_origSetVertexShader(This, sh);
+}
+static HRESULT STDMETHODCALLTYPE HookedSetFVF(IDirect3DDevice9 *This, DWORD fvf)
+{
+    g_esFvf = fvf;
+    g_esDeclIsFvf = 1;
+    return g_origSetFVF(This, fvf);
+}
+static HRESULT STDMETHODCALLTYPE HookedSetVertexDecl(
+    IDirect3DDevice9 *This, IDirect3DVertexDeclaration9 *d)
+{
+    g_esDecl = (void *)d;
+    g_esDeclIsFvf = 0;
+    return g_origSetVertexDecl(This, d);
+}
+static HRESULT STDMETHODCALLTYPE HookedSetStreamSource(
+    IDirect3DDevice9 *This, UINT num, IDirect3DVertexBuffer9 *vb, UINT off, UINT stride)
+{
+    if (num == 0) {
+        g_esStreamVb = (void *)vb;
+        g_esStreamOffset = off;
+        g_esStreamStride = stride;
+    }
+    return g_origSetStreamSource(This, num, vb, off, stride);
+}
 #define VP_SEEN_MAX 64
 typedef struct { LONG pass; DWORD w, h, x, y; } VpSeen;
 static VpSeen g_vpSeen[VP_SEEN_MAX];
@@ -57,6 +131,8 @@ static volatile LONG g_vpSeenCount = 0;
 static HRESULT STDMETHODCALLTYPE HookedSetViewport(
     IDirect3DDevice9 *This, const D3DVIEWPORT9 *pVp)
 {
+    // Engine-state shadow (v25h): the AO bracket restores this viewport.
+    if (pVp) { g_esVp = *pVp; g_esVpKnown = 1; }
     // LOG-ONLY, again and deliberately. A scaling version lived here for one
     // build and made things worse: it matched on the viewport's SIZE, which
     // caught every 1920x1080 viewport - including those belonging to targets
@@ -1024,6 +1100,9 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_SetRenderState)(
 static HRESULT STDMETHODCALLTYPE HookedSetRenderState(
     IDirect3DDevice9 *This, D3DRENDERSTATETYPE State, DWORD Value)
 {
+    // Engine-state shadow (v25h): one store on the hot path. The AO bracket
+    // restores its touched render states from this instead of a state block.
+    if ((DWORD)State < 256) { g_esRs[State] = Value; g_esRsKnown[State] = 1; }
     if (State == D3DRS_MULTISAMPLEMASK || State == D3DRS_MULTISAMPLEANTIALIAS) {
         DWORD want = (State == D3DRS_MULTISAMPLEMASK) ? 0xFFFFFFFFu : (DWORD)TRUE;
         InterlockedIncrement(&g_rsMsWrites);
