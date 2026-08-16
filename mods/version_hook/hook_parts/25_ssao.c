@@ -186,8 +186,18 @@ static const char *g_ssaoHlsl =
 "        duv.y *= cParam0.y / cParam0.x;\n"            // aspect-correct
 "        float3 Q = ViewPos(uv + duv);\n"
 "        float3 v = Q - P;\n"
-"        occ += max(0.0, dot(v, N) - cParam1.z * P.z)\n"
-"             / (dot(v, v) + 0.01);\n"
+"        float vv = dot(v, v);\n"
+// WORLD-SPACE RANGE FALLOFF (v25s). This term belongs to the reference
+// Alchemy/SAO estimator and had been dropped, which is why SSAO haloed
+// around characters near walls while HBAO did not: HBAO has always had
+// exactly this check (its wH), so an occluder beyond the radius in 3D
+// contributes nothing, whereas Alchemy's 1/(v.v) only DECAYS - a
+// character a metre off a wall kept contributing at every screen-space
+// distance the taps could reach. Squared so it eases out rather than
+// cutting, since a hard edge here would print the radius as a ring.
+"        float fo = saturate(1.0 - vv / (cParam0.z * cParam0.z));\n"
+"        occ += fo * fo * max(0.0, dot(v, N) - cParam1.z * P.z)\n"
+"             / (vv + 0.01);\n"
 "    }\n"
 "    float occN = occ / (float)(AO_TAPS);\n"
 "#endif\n"
