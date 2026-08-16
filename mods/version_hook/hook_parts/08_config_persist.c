@@ -232,6 +232,12 @@ static NumericSetting g_numerics[] = {
     // (deeper creases, but any material that decodes the range renders
     // those pixels pure black - the 2026-08-16 menu shield).
     { &g_aoRespectFloor, "AoRespectFloor", 0, 1 },
+    // AO buffer resolution divisor, applied to DISPLAY resolution (SSAA is
+    // divided out first unless AoSsaaIndep=0). 1=full 2=half 4=quarter
+    // 8=eighth; the estimator and blur run there, the composite step
+    // upsamples with a depth-aware filter.
+    { &g_aoResDiv,      "AoResDiv",      1, 8 },
+    { &g_aoSsaaIndep,   "AoSsaaIndep",   0, 1 },
     { &g_aoBlur,        "AoBlur",        0, 1 },
     { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED

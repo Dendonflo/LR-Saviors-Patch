@@ -392,7 +392,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      228           // 10 rows + header
+#define STAT_H      262           // 12 rows + header
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -518,6 +518,30 @@ static void DrawStatusPanel(HDC dc)
                                : "active");
         StatRow(dc, &y, "Built-in FXAA", set, app, off && g_fxaaSubs == 0);
     }
+#if ENABLE_AO_SSAO
+    {
+        // Configured estimator vs whether it has actually drawn. "no draws"
+        // in amber is the tell for every way AO can be silently off: latches
+        // cleared and not re-latched, shader compile failure, or the pass
+        // never reaching its injection point in this scene.
+        LONG e = g_aoEnable;
+        sprintf(set, "%s", e == 2 ? "HBAO" : (e == 1 ? "SSAO" : "off"));
+        if (!e)                 sprintf(app, "off");
+        else if (g_ssaoDraws)   sprintf(app, "%ld draws", g_ssaoDraws);
+        else                    sprintf(app, "no draws");
+        StatRow(dc, &y, "Ambient occlusion", set, app, e && !g_ssaoDraws);
+    }
+    {
+        // Configured divisor vs the buffer that actually exists. They differ
+        // whenever SSAA is being divided out, which is the whole point of
+        // the row: it shows the AO buffer is NOT following the 8K composite.
+        LONG dv = g_aoResDiv;
+        sprintf(set, "1/%ld%s", dv, g_aoSsaaIndep ? "" : " (raw)");
+        if (g_aoRtW > 0) sprintf(app, "%ldx%ld", g_aoRtW, g_aoRtH);
+        else             sprintf(app, "not built");
+        StatRow(dc, &y, "AO resolution", set, app, g_aoEnable && g_aoRtW == 0);
+    }
+#endif
     // REMOVED: "Output" (resolution + format) and "Display mode"
     // (fullscreen/windowed). Both read straight from the present parameters
     // and both were wrong on screen - at a 1080p fullscreen setting on a 4K

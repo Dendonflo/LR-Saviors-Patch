@@ -262,9 +262,39 @@ static const char *g_aoBlurHlsl =
 static const char *g_aoCombineHlsl =
 "sampler2D aoTex  : register(s12);\n"
 "sampler2D engTex : register(s13);\n"   // copy of the engine's own composite
+"sampler2D dptTex : register(s11);\n"   // full-res depth, for the upsample
 "float4 cK0 : register(c220);\n"         // x=respect floor  y=passthrough
+"float4 cK1 : register(c221);\n"         // xy=AO texel  z=upsample  w=edge stop
+// Depth-aware (bilateral) upsample, used whenever the AO buffer is smaller
+// than the composite. Plain bilinear would weight the four low-res taps by
+// distance alone and happily pull AO across a silhouette - a dark halo
+// wherever a character meets the sky, unmissable at 1/8. Weighting each tap
+// by how well ITS depth matches this pixel's depth rejects those taps
+// instead. The depth compared is the full-res buffer sampled at the low-res
+// tap's own position, so no second (downsampled) depth buffer is needed.
+"float3 UpTap(float2 suv, float bw, float z0, float sharp, out float wOut) {\n"
+"    float zi = tex2D(dptTex, suv).r;\n"
+"    float w = bw * saturate(1.0 - sharp * abs(zi - z0) / max(z0, 1.0)) + 1e-4;\n"
+"    wOut = w;\n"
+"    return tex2D(aoTex, suv).rgb * w;\n"
+"}\n"
 "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
-"    float3 ao = tex2D(aoTex, uv).rgb;\n"
+"    float3 ao;\n"
+"    if (cK1.z > 0.5) {\n"
+"        float2 t = cK1.xy;\n"
+"        float2 p = uv / t - 0.5;\n"
+"        float2 fp = frac(p);\n"
+"        float2 b = (floor(p) + 0.5) * t;\n"
+"        float z0 = tex2D(dptTex, uv).r;\n"
+"        float w0, w1, w2, w3;\n"
+"        float3 s = UpTap(b, (1 - fp.x) * (1 - fp.y), z0, cK1.w, w0)\n"
+"                 + UpTap(b + float2(t.x, 0), fp.x * (1 - fp.y), z0, cK1.w, w1)\n"
+"                 + UpTap(b + float2(0, t.y), (1 - fp.x) * fp.y, z0, cK1.w, w2)\n"
+"                 + UpTap(b + t, fp.x * fp.y, z0, cK1.w, w3);\n"
+"        ao = s / (w0 + w1 + w2 + w3);\n"
+"    } else {\n"
+"        ao = tex2D(aoTex, uv).rgb;\n"
+"    }\n"
 "    if (cK0.y > 0.5) return float4(ao, 1.0);\n"   // raw view / debug bands
 "    float3 eng = tex2D(engTex, uv).rgb;\n"
 // Flat-write test (cK0.z > 0): the whole pipeline runs, but the value
@@ -425,6 +455,27 @@ static void SsaoReleaseRts(void)
     g_aoRtW = g_aoRtH = 0;
 }
 
+// AO buffer size from the composite's size. Two divisions, in this order:
+//   1. SSAA is divided OUT. The composite is the engine's INTERNAL target,
+//      so at 4K with SSAA x2 it is 8K - and AO at 8K is waste, the effect is
+//      low-frequency and gets blurred anyway. AoSsaaIndep=0 opts back in.
+//   2. the user's divisor (1/2/4/8), which therefore means "fraction of
+//      DISPLAY resolution" and keeps its meaning as SSAA changes.
+static void AoTargetSize(UINT cw, UINT ch, UINT *ow, UINT *oh)
+{
+    LONG div = g_aoResDiv;
+    LONG ss = g_aoSsaaIndep ? g_ssaaScale : 100;
+    if (div < 1) div = 1;
+    if (div > 8) div = 8;
+    if (ss < 100) ss = 100;
+    {
+        UINT w = (UINT)(((unsigned __int64)cw * 100u) / (unsigned)ss) / (unsigned)div;
+        UINT h = (UINT)(((unsigned __int64)ch * 100u) / (unsigned)ss) / (unsigned)div;
+        *ow = (w < 32) ? 32 : w;
+        *oh = (h < 32) ? 32 : h;
+    }
+}
+
 static int AoEnsureRts(IDirect3DDevice9 *dev, UINT w, UINT h)
 {
     if (g_aoRtA && g_aoRtB && g_aoRtW == (LONG)w && g_aoRtH == (LONG)h) return 1;
@@ -581,6 +632,7 @@ static void AoBlendOpaque(IDirect3DDevice9 *dev, DWORD writeMask)
 // up there so there is nothing of the engine's to restore).
 static void AoRestoreEngineState(IDirect3DDevice9 *dev)
 {
+    g_origSetTexture(dev, 11, (IDirect3DBaseTexture9 *)g_esTex[11]);
     g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_esTex[12]);
     g_origSetTexture(dev, 13, (IDirect3DBaseTexture9 *)g_esTex[13]);
     AoSetPs(dev, (IDirect3DPixelShader9 *)g_curPsObj);
@@ -751,7 +803,9 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 // size would thrash recreation every frame under SSAA.
                 if (!g_aoRtA || !g_aoRtB) useRt = 0;
             } else {
-                if (!AoEnsureRts(dev, d.Width, d.Height)) useRt = 0;
+                UINT aoW, aoH;
+                AoTargetSize(d.Width, d.Height, &aoW, &aoH);
+                if (!AoEnsureRts(dev, aoW, aoH)) useRt = 0;
             }
         }
         if (useRt) {
@@ -828,11 +882,20 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // blend factors, is what protects the sun-shadow mask now.
             AoSetPs(dev, g_aoCombinePs);
             {
-                float k0[4];
+                float k0[4], k1[4];
                 k0[0] = g_aoRespectFloor ? 1.0f : 0.0f;
                 k0[1] = (raw || g_aoDebug) ? 1.0f : 0.0f;
                 k0[2] = (float)g_aoFlatTest / 100.0f;   // 0 = off
                 k0[3] = 0.0f;
+                // Upsample only when the AO buffer really is smaller than
+                // what we are writing into - at 1:1 the extra taps would be
+                // pure cost for a filter that resolves to the centre tap.
+                k1[0] = 1.0f / (float)rw;
+                k1[1] = 1.0f / (float)rh;
+                k1[2] = (rw < d.Width || rh < d.Height) ? 1.0f : 0.0f;
+                k1[3] = (float)g_aoBlurSharp;   // same edge-stop dial as the blur
+                AoBindTex(dev, 11, (IDirect3DBaseTexture9 *)g_aoDepthTex);
+                IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, k1, 1);
                 if (!raw && !g_aoDebug && bis < 2) {
                     // RT B is still bound at s0 from the last blur pass, and
                     // it is about to be a StretchRect DESTINATION - a texture

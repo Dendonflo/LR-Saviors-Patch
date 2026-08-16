@@ -285,6 +285,17 @@ static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the
 static volatile LONG g_aoBlurSharp = 40;      // ini AoBlurSharp: blur depth edge-stop
 static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside the
                                               //   engine's [0.5..1] shadow envelope
+// AO buffer resolution. The DIVISOR is applied to the DISPLAY resolution,
+// not to the engine's internal one: at 4K with SSAA x2 the composite is 8K,
+// and AO at 8K is pure waste (the effect is low-frequency and gets blurred
+// anyway). AoSsaaIndep=0 restores the old behaviour of following the
+// composite, for anyone who actually wants supersampled AO.
+static volatile LONG g_aoResDiv = 1;          // ini AoResDiv: 1 / 2 / 4 / 8
+static volatile LONG g_aoSsaaIndep = 1;       // ini AoSsaaIndep: divide SSAA out
+// Live AO buffer state, defined in 25_ssao.c - tentative definitions here so
+// the status panel (part 10) can read them despite coming earlier in the TU.
+static LONG g_aoRtW, g_aoRtH;
+static volatile LONG g_ssaoDraws;
 static volatile LONG g_aoBlurPasses = 2;      // ini AoBlurPasses: a-trous levels (1..4)
 static volatile LONG g_aoBlurStep100 = 100;   // ini AoBlurStep100: base tap spacing x100 px
 static void SsaoReleaseRts(void);             // 25_ssao.c - the blur RT pair is
