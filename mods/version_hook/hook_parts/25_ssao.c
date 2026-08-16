@@ -78,7 +78,17 @@ static const char *g_ssaoHlsl =
 "    float3 g = cross(ddx(P), ddy(P));\n"
 "    float gl = length(g);\n"
 "    float3 N = (gl > 1e-6) ? g / gl : float3(0, 0, -1);\n"
-"    float ign = frac(52.9829189 * frac(dot(vpos, float2(0.06711056, 0.00583715))));\n"
+// Rotation noise: WHITE-NOISE hash, not interleaved gradient noise. IGN's
+// iso-value contours are parallel diagonal lines, and since all taps in a
+// pixel rotate by the same angle, the estimator's residual error inherits
+// that structure - user-observed as a diagonal hatch pattern in BOTH
+// estimators, surviving the blur (which is axis-aligned separable and
+// cannot chase correlation along long diagonal runs). White noise turns
+// the lines into per-pixel grain, which a separable gaussian actually
+// removes. vpos is wrapped before the sin-hash: sin() of large arguments
+// loses precision on some GPUs and re-introduces banding.
+"    float2 np = fmod(vpos, 1024.0);\n"
+"    float ign = frac(sin(dot(np, float2(12.9898, 78.233))) * 43758.5453);\n"
 "    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
 "    float occ = 0.0;\n"
 "    float rPix = cParam0.z * cParam1.y / P.z;\n"      // world radius -> uv
