@@ -483,7 +483,7 @@ static void AoDumpBuffer(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex,
                         char l[256];
                         sprintf(l, "[aodump] wrote %s (%lux%lu fmt=%d) mode=%s blur=%ld",
                                 path, d.Width, d.Height, (int)d.Format,
-                                !g_aoEnable ? "OFF" : (g_aoEnable == 2 ? "HBAO" : "SSAO"),
+                                !g_aoEnable ? "OFF" : (g_aoEnable == 2 ? "HBAO+" : "SSAO"),
                                 g_aoBlur);
                         LogLine(l);
                         LogFlushNow();

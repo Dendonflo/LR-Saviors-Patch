@@ -87,6 +87,38 @@ static const char *g_ssaoHlsl =
 "    float2 ndc = float2(sn.x * 2 - 1, 1 - sn.y * 2);\n"
 "    return float3(ndc.x * z / cParam1.x, ndc.y * z / cParam1.y, z);\n"
 "}\n"
+// Shared by both estimators, and both take it from their own reference.
+// SAO calls it lowPrecisionHash and feeds it the pixel coordinate; HBAO+
+// has no hash at all (it reads a 16-entry random texture built CPU-side with
+// mt19937), so we feed the same function the 4x4 TILE index instead and get
+// a fixed 16-value table with the same statistics and no texture to bind.
+//
+// It is pure frac/dot arithmetic. The textbook frac(sin(dot(p,k))*43758.5)
+// that used to be here is quietly broken at these magnitudes: after range
+// reduction sin() keeps only a few good bits, and consecutive ROWS advance
+// the argument by a near-integer number of periods, so neighbouring rows
+// come out correlated rather than independent - invisible at 1/1, magnified
+// into horizontal banding at 1/4.
+"float Hash12(float2 p) {\n"
+"    float3 p3 = frac(float3(p.x, p.y, p.x) * 0.13);\n"
+"    p3 += dot(p3, p3.yzx + 3.333);\n"
+"    return frac((p3.x + p3.y) * p3.z);\n"
+"}\n"
+// HBAO+'s normal reconstruction, from gl_ssao's ReconstructNormal:
+//     vec3 MinDiff(vec3 P, vec3 Pr, vec3 Pl) {
+//       vec3 V1 = Pr - P; vec3 V2 = P - Pl;
+//       return (dot(V1,V1) < dot(V2,V2)) ? V1 : V2;
+//     }
+// Take the SHORTER of the forward and backward difference on each axis. At a
+// silhouette one of the two straddles the depth cliff and is therefore huge,
+// so this picks the one that stayed on the near surface. That is a different
+// answer to the same problem SAO solves by rejecting the pixel outright, and
+// it is the better one: it yields a usable normal instead of a hole.
+"float3 MinDiff(float3 P, float3 Pr, float3 Pl) {\n"
+"    float3 V1 = Pr - P;\n"
+"    float3 V2 = P - Pl;\n"
+"    return (dot(V1, V1) < dot(V2, V2)) ? V1 : V2;\n"
+"}\n"
 "float4 cParam2 : register(c222);\n"   // x=debug mode (0/1), yzw unused
 "float4 main(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR {\n"
 "    float3 P = ViewPos(uv);\n"
@@ -100,85 +132,20 @@ static const char *g_ssaoHlsl =
 // and the same class as the v24f normalize(0) black geometry. No valid
 // depth means no AO opinion: return white (no darkening).
 "    if (!(zRaw > 0.05)) return float4(1, 1, 1, 1);\n"
-// cross(ddx, ddy), NOT (ddy, ddx): view space is x-right/y-up/z-into-screen
-// and screen v runs DOWN, so the other order points normals AWAY from the
-// camera - every dot(v,N) clamps to zero and AO is white everywhere.
-// (Depth units were correct all along: measured 4..2000 world units.)
-// NaN guard (v24f): on flat-depth regions (sky, surfaces parallel to a
-// derivative axis) cross() is ~zero and normalize(0) is NaN; NaN written to
-// the shadow term renders geometry BLACK (user-observed in every flight).
-"    float3 g = cross(ddx(P), ddy(P));\n"
-"    float gg = dot(g, g);\n"
-// DEPTH-DISCONTINUITY REJECTION. Straight out of AmbientOcclusion_AO.pix,
-// main(), and we never had it:
+// NORMAL RECONSTRUCTION AND SAMPLE JITTER ARE PER-ESTIMATOR (v25v).
 //
-//     n_C = reconstructNonUnitCSFaceNormal(C);
-//     // if the threshold # is too big you will see black dots where we used
-//     // a bad normal at edges, too small -> white
-//     if (dot(n_C, n_C) > square(C.z * C.z * 0.00006)) { visibility = 1.0; return; }
+// They used to be shared, which was convenient rather than correct: the two
+// references specify different ones, and each is matched to its own
+// estimator's failure mode. SAO reconstructs from ddx/ddy and REJECTS pixels
+// where the cross product explodes; HBAO+ instead reconstructs from four
+// neighbours with MinDiff, which picks the nearer surface at a silhouette
+// and so never forms the bad normal in the first place. Likewise SAO spins
+// per pixel from a hash, HBAO+ jitters from a 4x4 interleaved tile.
 //
-// The un-normalised cross product's LENGTH is the signal: across a smooth
-// surface it is the area of one pixel's worth of surface, but across a
-// silhouette the two derivatives straddle a depth cliff and it explodes.
-// Those pixels have a meaningless normal, and a meaningless normal
-// manufactures occlusion out of nothing - which is the false dark fringe
-// on every silhouette.
-//
-// The reference's 0.00006 is not portable: it is written against ITS
-// projScale and resolution. Ours, derived rather than copied - for a
-// camera-facing plane one pixel spans 2z/(W*projX) by 2z/(H*projY) world
-// units, so |g| = 4z^2 * texelW * texelH / (projX * projY). Evaluating the
-// reference's constant at G3D's own defaults (1080p, 60 deg fovY, so
-// projScale = 935) gives 6e-5 * 935^2 = 52x that flat-surface value, so 50x
-// is the same slack expressed in units that survive a resolution change -
-// which matters here precisely because the AO buffer is 1/1, 1/2 or 1/4.
-"    float nFlat = 4.0 * P.z * P.z * cParam0.x * cParam0.y / (cParam1.x * cParam1.y);\n"
-"    if (gg > (50.0 * nFlat) * (50.0 * nFlat)) return float4(1, 1, 1, 1);\n"
-"    float3 N = (gg > 1e-12) ? g * rsqrt(gg) : float3(0, 0, -1);\n"
-// Rotation noise: WHITE-NOISE hash, not interleaved gradient noise. IGN's
-// iso-value contours are parallel diagonal lines, and since all taps in a
-// pixel rotate by the same angle, the estimator's residual error inherits
-// that structure - user-observed as a diagonal hatch pattern in BOTH
-// estimators, surviving the blur (which is axis-aligned separable and
-// cannot chase correlation along long diagonal runs). White noise turns
-// the lines into per-pixel grain, which a separable gaussian actually
-// removes. vpos is wrapped before the sin-hash: sin() of large arguments
-// loses precision on some GPUs and re-introduces banding.
-// v25j: the sin-hash is GONE. frac(sin(dot(p, k)) * 43758.5453) is the
-// textbook one-liner and it is quietly broken at these magnitudes: after
-// range reduction, sin() of an argument in the tens of thousands keeps only
-// a few good bits, and because consecutive ROWS advance the argument by a
-// near-integer number of periods (78.233 / 2pi = 12.45), neighbouring rows
-// come out CORRELATED rather than independent. At full resolution that is a
-// one-pixel structure nobody can see; at 1/8 the upsample magnifies it 8x
-// into horizontal banding across the ground - user-observed, and it appears
-// only when the AO buffer is smaller, which is the tell.
-// Replacement is Hoskins' hash12: pure frac/dot arithmetic, no
-// transcendentals, no large arguments, no row correlation.
-// v25u: this is now the reference's own hash, verbatim -
-//     float lowPrecisionHash(vec2 p) {
-//         vec3 p3 = fract(vec3(p.xyx) * 0.13);
-//         p3 += dot(p3, p3.yzx + 3.333);
-//         return fract((p3.x + p3.y) * p3.z);
-//     }
-//     randomPatternRotationAngle = lowPrecisionHash(ssC) * 20.1
-// - which is the same Hoskins-family hash we had arrived at, but with the
-// published constants (0.13 / 3.333 rather than 0.1031 / 33.33) and fed the
-// raw pixel coordinate. The fmod(vpos, 1024) wrap went with it: that was
-// defence against sin() precision loss in the hash this replaced, and there
-// is no transcendental left to protect.
-//
-// spin is deliberately NOT reduced to [0,1). The reference uses it twice and
-// wants both halves: mod(spin, 1) jitters the tap RADII per pixel, and the
-// whole value is added to the angle in radians. We only ever used the angle
-// half, so every pixel sampled the same set of radii - the taps rotated but
-// never breathed, which leaves exactly the kind of correlated residual the
-// blur cannot chase.
-"    float3 p3 = frac(float3(vpos.x, vpos.y, vpos.x) * 0.13);\n"
-"    p3 += dot(p3, p3.yzx + 3.333);\n"
-"    float hash = frac((p3.x + p3.y) * p3.z);\n"
-"    float spin = hash * 20.1;\n"
-"    float ca = cos(hash * 6.2831853), sa = sin(hash * 6.2831853);\n"
+// Both are therefore built inside their own branch below. Only the results -
+// N, occ and aoBase - are shared, because the debug views and the term
+// mapping downstream need them under one name.
+"    float3 N;\n"
 "    float occ = 0.0;\n"
 // THE DISC RADIUS, in PIXELS, which is how the reference carries it:
 //     ssDiskRadius = -projScale * radius / C.z
@@ -223,48 +190,156 @@ static const char *g_ssaoHlsl =
 "    float rWorld = ssDiskRadius * P.z / projScale;\n"
 "    float r2 = rWorld * rWorld;\n"
 "#if ESTIMATOR == 1\n"
-// HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
-// direction contributes its HORIZON - the highest elevation above the
-// tangent plane found along the ray - attenuated by how far away that
-// horizon point sits. Rays accumulate monotonically instead of Alchemy's
-// independent per-tap coin flips, which is exactly why it is less noisy at
-// a comparable tap count (16 vs 12).
+// HBAO+ (v25v), transcribed from NVIDIA's own implementation: hbao.frag.glsl
+// in nvpro-samples/gl_ssao, "Based on DeinterleavedTexturing sample by Louis
+// Bavoil", with constants from ssao.cpp in the same sample.
+//
+// NVIDIA's HBAOPlus README states the four differences from HBAO 2008, and
+// they are worth having in front of you because two of them are surprising:
+//   1. no randomisation TEXTURE - interleaved rendering, one jitter per pass
+//   2. a SIMPLER AO approximation than HBAO, to avoid over-occlusion, and
+//      the README names Scalable Ambient Obscurance as what it resembles
+//   3. always full resolution, from full-res depths, to minimise flickering
+//   4. optionally a second depth layer, to cut halos behind foreground
+//
+// So HBAO+ is NOT horizon-based any more. There is no horizon search in the
+// reference at all: ComputeCoarseAO SUMS ComputeAO over every step of every
+// direction. The max-elevation-per-ray formulation this replaces was the
+// 2008 algorithm, and NVIDIA dropped it deliberately - point 2 - because
+// taking the maximum over-occludes.
+//
+// What we implement here is 2 (free), 1's jitter PATTERN without its cache
+// architecture (the 4x4 tile below is the same 16 values; the deinterleaved
+// rendering it was designed to enable is a throughput optimisation that
+// needs texture arrays we do not have in D3D9), and none of 4 - a second
+// depth layer means depth-peeling the scene, a geometry pass an injected
+// proxy does not get to run.
+//
+// Point 3 is a POLICY we deliberately do not enforce: the AO Resolution
+// control still offers Half and Quarter. Worth knowing that at those
+// settings this is no longer HBAO+ by NVIDIA's own definition, and that the
+// flickering point 3 exists to prevent is exactly the shimmer reported here
+// at half res.
+//
+// NORMALS - gl_ssao ReconstructNormal, the non-deinterleaved path (the
+// deinterleaved one reads a G-buffer we do not have):
+//     Pr/Pl/Pt/Pb at +-1 pixel, normalize(cross(MinDiff(P,Pr,Pl), MinDiff(P,Pt,Pb)))
+// Our v axis runs DOWN where GL's runs up, and our view z is positive into
+// the screen where theirs is negative, so "Pt" here is the +texelY neighbour
+// and the cross keeps the operand order that cross(ddx, ddy) was empirically
+// confirmed to need in this engine. Their leading minus is the same fix
+// expressed in their conventions.
+"    float3 Pr = ViewPos(uv + float2(cParam0.x, 0));\n"
+"    float3 Pl = ViewPos(uv - float2(cParam0.x, 0));\n"
+"    float3 Pd = ViewPos(uv + float2(0, cParam0.y));\n"
+"    float3 Pu = ViewPos(uv - float2(0, cParam0.y));\n"
+"    float3 nRaw = cross(MinDiff(P, Pr, Pl), MinDiff(P, Pd, Pu));\n"
+"    float nl2 = dot(nRaw, nRaw);\n"
+"    N = (nl2 > 1e-12) ? nRaw * rsqrt(nl2) : float3(0, 0, -1);\n"
+// JITTER - ssao.cpp initMisc(), which builds a 4x4x(samples) table:
+//     float Rand1 = rmt() / 4294967296.0f;   float Rand2 = rmt() / 4294967296.0f;
+//     // Use random rotation angles in [0,2PI/NUM_DIRECTIONS)
+//     float Angle = two_pi * Rand1 / numDir;
+//     random[i] = vec4(cos(Angle), sin(Angle), Rand2, 0);
+// The angle is deliberately confined to ONE direction-slice: the directions
+// already tile the circle uniformly, so rotating further than 2pi/N only
+// re-covers ground. Rand2 jitters the ray START. We key the same values off
+// the 4x4 tile index rather than a bound texture, which is the one place we
+// substitute arithmetic for their asset.
+"    float2 tile = fmod(floor(vpos), 4.0);\n"
+"    float jr1 = Hash12(tile);\n"
+"    float jr2 = Hash12(tile + float2(17.0, 23.0));\n"
+"    float jang = 6.2831853 * jr1 / (float)(AO_DIRS);\n"
+"    float jc = cos(jang), js = sin(jang);\n"
+// RadiusToScreen = R * 0.5 * projScale in ssao.cpp, against SAO's
+// projScale * radius with no half. Same projScale definition in both
+// (height / (2 tan(fov/2))), so NVIDIA's disc is HALF of McGuire's for the
+// same world radius. Keeping their convention means Radius still reads in
+// world units across both estimators, and the falloff below uses r2, which
+// already tracks the clamped disc - so Max Radius and the attenuation can no
+// longer disagree the way they did.
+"    float radiusPixels = 0.5 * ssDiskRadius;\n"
+// "Divide by NUM_STEPS+1 so that the farthest samples are not fully
+// attenuated" - the reference's own comment. Marching to exactly the radius
+// instead, as this did, puts the last tap where the falloff evaluates to
+// zero: at 4 steps that was a quarter of the samples contributing nothing.
+"    float stepSizePixels = radiusPixels / ((float)(AO_STEPS) + 1.0);\n"
 "    [unroll] for (int di = 0; di < AO_DIRS; di++) {\n"
-"        float ang = (di + 0.5) * (6.2831853 / (float)(AO_DIRS));\n"
+"        float ang = (6.2831853 / (float)(AO_DIRS)) * (float)di;\n"
 "        float2 d0 = float2(cos(ang), sin(ang));\n"
-"        float2 dir = float2(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca);\n"
-"        float sinH = 0.0, wH = 0.0;\n"
-"        [unroll] for (int st = 1; st <= AO_STEPS; st++) {\n"
-// Pixel-space march, then one conversion to UV. HBAO's own estimator is
-// untouched by this file's SAO alignment - only the disc it walks, which was
-// shared code and shared the aspect error. Its Radius therefore shrinks by
-// the same 1.78x and needs the same re-tune.
-"            float2 duv = dir * (ssDiskRadius * (float)st / (float)(AO_STEPS)) * cParam0.xy;\n"
-"            float3 Q = ViewPos(uv + duv);\n"
-"            float3 v = Q - P;\n"
-"            float vl2 = dot(v, v) + 1e-5;\n"
-"            float sinS = dot(v, N) * rsqrt(vl2);\n"
-"            [flatten] if (sinS > sinH) {\n"
-"                sinH = sinS;\n"
-"                wH = saturate(1.0 - vl2 / (cParam0.z * cParam0.z));\n"
-"            }\n"
+"        float2 dir = float2(d0.x * jc - d0.y * js, d0.x * js + d0.y * jc);\n"
+"        float rayPixels = jr2 * stepSizePixels + 1.0;\n"
+"        [unroll] for (int st = 0; st < AO_STEPS; st++) {\n"
+"            float2 sp = round(rayPixels * dir);\n"
+"            float3 S = ViewPos(uv + sp * cParam0.xy);\n"
+"            rayPixels += stepSizePixels;\n"
+// ComputeAO(), verbatim in structure:
+//     V = S - P;  VdotV = dot(V,V);  NdotV = dot(N,V) * 1/sqrt(VdotV);
+//     return clamp(NdotV - NDotVBias, 0, 1) * clamp(VdotV*NegInvR2 + 1.0, 0, 1);
+// Every sample contributes - no max, no horizon. max() on VdotV is ours:
+// the reference guarantees a tap at least 1 pixel out and so never divides
+// by zero, but our texel snap can fold a tap back onto the centre texel at
+// reduced AO resolution, and a NaN here renders geometry solid black.
+"            float3 V = S - P;\n"
+"            float VdotV = dot(V, V);\n"
+"            float NdotV = dot(N, V) * rsqrt(max(VdotV, 1e-12));\n"
+"            occ += saturate(NdotV - cParam1.z) * saturate(VdotV * (-1.0 / r2) + 1.0);\n"
 "        }\n"
-// Sin-space bias (c1.z, ~0.15 here vs Alchemy's 0.02 depth-proportional):
-// suppresses the tangent-plane self-occlusion the ddx/ddy faceted normals
-// would otherwise manufacture on every smooth surface.
-"        occ += saturate(sinH - cParam1.z) * wH;\n"
 "    }\n"
-"    float occN = occ / (float)(AO_DIRS);\n"
-// HBAO keeps its own aggregation - a horizon average mapped by a linear
-// gain. The SAO branch below now uses the reference's, which is a different
-// curve with a different meaning for Intensity, and the two must not be
-// forced to share one line just because they used to.
-"    float aoBase = saturate(1.0 - cParam1.w * occN);\n"
+// AOMultiplier = 1/(1 - NDotVBias), computed CPU-side in the reference; it
+// compensates the bias so raising bias does not simply dim the effect.
+//     AO *= AOMultiplier / (NUM_DIRECTIONS * NUM_STEPS);
+//     return clamp(1.0 - AO * 2.0, 0, 1);
+//     ... outputColor(pow(AO, PowExponent))
+// PowExponent IS the intensity setting (ssao.cpp: PowExponent = intensity),
+// so as with SAO, Intensity became an exponent and its slider range moved.
+"    float occN = occ * ((1.0 / (1.0 - cParam1.z)) / ((float)(AO_DIRS) * (float)(AO_STEPS)));\n"
+"    float aoBase = pow(saturate(1.0 - occN * 2.0), cParam1.w);\n"
 "#else\n"
 // SAO, transcribed from the reference implementation rather than recalled:
 // data-files/shader/AmbientOcclusion/AmbientOcclusion_AO.pix in G3D10, by
 // McGuire, Mara and Luebke (HPG 2012), fetched from casual-effects.com.
 // Everything below is that file; where a line differs, the comment says so.
+//
+// NORMALS. cross(ddx, ddy), NOT (ddy, ddx): view space is x-right/y-up/
+// z-into-screen and screen v runs DOWN, so the other order points normals
+// AWAY from the camera - every dot(v,N) clamps to zero and AO is white
+// everywhere. NaN guard: on flat-depth regions (sky, surfaces parallel to a
+// derivative axis) cross() is ~zero and normalize(0) is NaN, and a NaN in
+// the shadow term renders geometry BLACK.
+"    float3 g = cross(ddx(P), ddy(P));\n"
+"    float gg = dot(g, g);\n"
+// DEPTH-DISCONTINUITY REJECTION, from AmbientOcclusion_AO.pix, main():
+//     n_C = reconstructNonUnitCSFaceNormal(C);
+//     // if the threshold # is too big you will see black dots where we used
+//     // a bad normal at edges, too small -> white
+//     if (dot(n_C, n_C) > square(C.z * C.z * 0.00006)) { visibility = 1.0; return; }
+//
+// The un-normalised cross product's LENGTH is the signal: across a smooth
+// surface it is the area of one pixel's worth of surface, but across a
+// silhouette the two derivatives straddle a depth cliff and it explodes.
+// Those pixels have a meaningless normal, and a meaningless normal
+// manufactures occlusion out of nothing - the false dark fringe on every
+// silhouette. (HBAO+ attacks the same failure differently, with MinDiff.)
+//
+// The reference's 0.00006 is not portable: it is written against ITS
+// projScale and resolution. Ours, derived rather than copied - for a
+// camera-facing plane one pixel spans 2z/(W*projX) by 2z/(H*projY) world
+// units, so |g| = 4z^2 * texelW * texelH / (projX * projY). Evaluating the
+// reference's constant at G3D's own defaults (1080p, 60 deg fovY, so
+// projScale = 935) gives 6e-5 * 935^2 = 52x that flat-surface value, so 50x
+// is the same slack expressed in units that survive a resolution change -
+// which matters here precisely because the AO buffer is 1/1, 1/2 or 1/4.
+"    float nFlat = 4.0 * P.z * P.z * cParam0.x * cParam0.y / (cParam1.x * cParam1.y);\n"
+"    if (gg > (50.0 * nFlat) * (50.0 * nFlat)) return float4(1, 1, 1, 1);\n"
+"    N = (gg > 1e-12) ? g * rsqrt(gg) : float3(0, 0, -1);\n"
+// spin is deliberately NOT reduced to [0,1). The reference uses it twice and
+// wants both halves: mod(spin, 1) jitters the tap RADII per pixel, and the
+// whole value is added to the angle in radians. We only ever used the angle
+// half, so every pixel sampled the same set of radii - the taps rotated but
+// never breathed, which leaves exactly the kind of correlated residual the
+// blur cannot chase.
+"    float spin = Hash12(vpos) * 20.1;\n"
 //
 //     vec2 tapLocation(int sampleNumber, float spinAngle, out float ssR) {
 //         float radius = float(sampleNumber + mod(spinAngle, 1.0) + 0.5) *
@@ -573,22 +648,21 @@ typedef HRESULT (WINAPI *PFN_D3DXCompileShader)(
 #define AO_VARIANTS 6
 static IDirect3DPixelShader9 *g_aoPs[AO_VARIANTS];
 static LONG g_aoPsState[AO_VARIANTS];    // 0 not tried, 1 ok, -1 failed
-// Low / Medium / High. HBAO totals are 12 / 16 / 24 against Alchemy's
-// 8 / 12 / 20 - close enough that switching estimator at a tier is roughly
-// cost-neutral.
+// Low / Medium / High. HBAO+ totals are 16 / 24 / 32 against SAO's
+// 8 / 12 / 20; High is NVIDIA's shipped 8 directions x 4 steps exactly, as
+// High is McGuire's shipped 20 taps / 9 turns exactly.
 //
-// HBAO varies DIRECTIONS ONLY; its step count is fixed at 4 deliberately.
-// The direction loop is a proper average (sum, then divide by AO_DIRS), so
-// changing it does not move the result's magnitude. The step loop is a
-// MAX - it marches outward hunting the highest horizon - so more steps
-// find higher horizons and occlusion rises with step count, which no
-// normalisation can undo (you cannot average away a maximum). Tiering on
-// steps made Low genuinely under-occlude and read as a quality-linked
-// intensity change (user-observed). Alchemy has no such problem: its
-// spiral distributes radii as sqrt((i+0.5)/TAPS), so any tap count samples
-// the same disc uniformly and occ/TAPS is a clean Monte Carlo average.
+// The step count stays fixed at 4 because that is the reference's, not
+// because it has to be. The old reason no longer holds and is worth
+// retiring explicitly: under the 2008 horizon formulation the step loop was
+// a MAX, so more steps found higher horizons and occlusion rose with step
+// count in a way no normalisation could undo (you cannot average away a
+// maximum) - tiering on steps made Low genuinely under-occlude and read as
+// a quality-linked intensity change. HBAO+ SUMS its steps and divides by
+// (AO_DIRS * AO_STEPS), so both loops are now clean Monte Carlo averages and
+// either axis could be tiered safely.
 static const char *g_aoQTaps[3]  = { "8", "12", "20" };
-static const char *g_aoQDirs[3]  = { "3", "4",  "6"  };
+static const char *g_aoQDirs[3]  = { "4", "6",  "8"  };
 static const char *g_aoQSteps[3] = { "4", "4",  "4"  };
 // SAO's spiral-turns constant, per tap count, from the paper's
 // minimum-discrepancy table (entries 8, 12 and 20). Alchemy only - HBAO
@@ -698,8 +772,8 @@ static void AoEnsureShaders(IDirect3DDevice9 *dev, int est, int q)
         defs[3].Name = "AO_STEPS";  defs[3].Definition = g_aoQSteps[q];
         defs[4].Name = "AO_TURNS";  defs[4].Definition = g_aoQTurns[q];
         defs[5].Name = NULL;        defs[5].Definition = NULL;
-        if (est) sprintf(what, "HBAO %s dirs x %s steps", g_aoQDirs[q], g_aoQSteps[q]);
-        else     sprintf(what, "SSAO Alchemy %s taps", g_aoQTaps[q]);
+        if (est) sprintf(what, "HBAO+ %s dirs x %s steps", g_aoQDirs[q], g_aoQSteps[q]);
+        else     sprintf(what, "SSAO SAO %s taps", g_aoQTaps[q]);
         g_aoPs[idx] = AoCompilePs(dev, g_ssaoHlsl, defs, what);
         g_aoPsState[idx] = g_aoPs[idx] ? 1 : -1;
     }
@@ -832,16 +906,19 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c0[3] = (float)g_aoStrengthPctE[est] / 100.0f;
     c1[0] = ((float)g_aoProj100E[est] / 100.0f) * ((float)h / (float)w);
     c1[1] = (float)g_aoProj100E[est] / 100.0f;
-    // Bias units differ per estimator. SAO subtracts a CONSTANT in world
-    // units from v.n; the reference's own default is 0.02 (G3D
-    // AmbientOcclusionSettings ctor: bias(0.02f), alongside radius 0.75m and
-    // intensity 1.0). HBAO compares in sin-of-elevation space instead, where
-    // 0.15 suppresses the self-occlusion the ddx/ddy faceted normals
-    // manufacture on smooth surfaces - a different quantity, left alone.
-    c1[2] = est ? 0.15f : 0.02f;
-    // Intensity means different things per estimator now, by construction:
-    // an EXPONENT for SAO (reference default 1.0, so 100 here) and a linear
-    // gain for HBAO. The slider ranges differ to match - see g_aoRows.
+    // Bias, both from their own reference's shipped default. SAO subtracts a
+    // CONSTANT in world units from v.n: G3D's AmbientOcclusionSettings ctor
+    // reads bias(0.02f), alongside radius 0.75m and intensity 1.0. HBAO+
+    // subtracts NDotVBias from the NORMALISED n.v, a dimensionless cosine,
+    // and gl_ssao's ssao.cpp ships bias = 0.1f with radius 2.0 and
+    // intensity 1.5. Note HBAO+ also derives AOMultiplier = 1/(1 - bias)
+    // from this value - that is applied in the shader, not here.
+    c1[2] = est ? 0.10f : 0.02f;
+    // Intensity is an EXPONENT for BOTH estimators now, but not the same
+    // exponent: SAO raises pow(1 - sqrt(mean), I) with a shipped default of
+    // 1.0, HBAO+ raises pow(1 - 2*mean, I) with a shipped default of 1.5.
+    // Ranges differ to match (see g_aoRows): SAO is capped at 8.0 by its
+    // contrast term, HBAO+ at 4.0 by NVIDIA's own UI slider.
     c1[3] = (float)g_aoIntensityE[est] / 100.0f;
     c2[0] = mode;
     c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
@@ -1333,7 +1410,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         if (g_ssaoDraws == 1) {
             char l[128];
             sprintf(l, "[ssao] first draw: est=%s q=%d path=%s floor=%s",
-                    est ? "HBAO" : "Alchemy", qual,
+                    est ? "HBAO+" : "SAO", qual,
                     !useRt ? "LEGACY direct multiply (no combine shader)"
                            : (useBlur ? "estimator->atrous->combine"
                                       : (g_aoDebug ? "DEBUG bands" : "estimator->combine")),

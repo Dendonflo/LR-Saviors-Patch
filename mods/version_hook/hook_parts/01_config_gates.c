@@ -262,14 +262,18 @@ static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
 // BlurSharp stay shared: they describe the camera and the blur, not the
 // estimator. The tuning panel re-points its sliders to the live slot.
 static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct / AoHbaoStrengthPct
-// Intensity is NOT one quantity across the two estimators. For SSAO it is
-// the reference's exponent in pow(saturate(1 - sqrt(mean)), intensity), whose
-// shipped default is 1.0 -> 100. For HBAO it is still a linear gain, left at
-// its tuned 250. Radius 75 is likewise the reference default (0.75m); it was
-// 60 while the disc was being built 1.78x oversize, so the EFFECTIVE radius
-// was already about 1.07 and the honest number is larger than it looks.
-static volatile LONG g_aoIntensityE[2] = { 100, 250 };    // ini AoIntensity100 / AoHbaoIntensity100
-static volatile LONG g_aoRadiusE[2] = { 75, 75 };         // ini AoRadius100 / AoHbaoRadius100
+// Every default below is its own reference's shipped value, and the two
+// references do not agree - which is fine, because these are two different
+// algorithms that merely share a slider.
+//   SSAO  = SAO: radius 0.75m, intensity 1.0 (exponent), bias 0.02
+//           (G3D AmbientOcclusionSettings constructor)
+//   HBAO+ = NVIDIA: radius 2.0, intensity 1.5 (PowExponent), bias 0.1
+//           (gl_ssao ssao.cpp m_tweak defaults)
+// The HBAO+ radius only looks large next to SAO's: NVIDIA's RadiusToScreen
+// carries an extra 0.5, so the disc it actually walks is half what the same
+// number would give SAO.
+static volatile LONG g_aoIntensityE[2] = { 100, 150 };    // ini AoIntensity100 / AoHbaoIntensity100
+static volatile LONG g_aoRadiusE[2] = { 75, 200 };        // ini AoRadius100 / AoHbaoRadius100
 static volatile LONG g_aoProj100E[2] = { 130, 130 };  // ini AoProj100 / AoHbaoProj100
 // Ceiling on the SCREEN-space sample radius, percent of screen width. The
 // world-space Radius projects larger the closer geometry is, and without a

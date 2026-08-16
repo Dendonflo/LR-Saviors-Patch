@@ -216,13 +216,13 @@ static NumericSetting g_numerics[] = {
     // Per-estimator slots: the unprefixed keys are SSAO's (so values tuned
     // before HBAO existed keep meaning what they meant), AoHbao* are HBAO's.
     { &g_aoStrengthPctE[0], "AoStrengthPct", 0, 200 },
-    // SSAO's Intensity is an exponent now, not a gain: 10..800 (0.1..8.0),
-    // ceiling set by the reference's contrast term going negative past 8.
-    // HBAO keeps the old linear range below.
+    // Intensity is an exponent for both estimators, with different ceilings.
+    // SSAO: 0.1..8.0, capped where SAO's contrast term goes negative.
+    // HBAO+: 0.1..4.0, the top of NVIDIA's own intensity slider.
     { &g_aoIntensityE[0], "AoIntensity100", 10, 800 },
     { &g_aoRadiusE[0],  "AoRadius100",   1, 100000 },
     { &g_aoStrengthPctE[1], "AoHbaoStrengthPct", 0, 200 },
-    { &g_aoIntensityE[1], "AoHbaoIntensity100", 50, 2000 },
+    { &g_aoIntensityE[1], "AoHbaoIntensity100", 10, 400 },
     { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
     { &g_aoProj100E[0], "AoProj100",     10, 1000 },
     { &g_aoProj100E[1], "AoHbaoProj100", 10, 1000 },

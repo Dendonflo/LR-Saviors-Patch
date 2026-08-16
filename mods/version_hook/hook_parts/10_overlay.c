@@ -525,7 +525,7 @@ static void DrawStatusPanel(HDC dc)
         // cleared and not re-latched, shader compile failure, or the pass
         // never reaching its injection point in this scene.
         LONG e = g_aoEnable;
-        sprintf(set, "%s", e == 2 ? "HBAO" : (e == 1 ? "SSAO" : "off"));
+        sprintf(set, "%s", e == 2 ? "HBAO+" : (e == 1 ? "SSAO" : "off"));
         if (!e)                 sprintf(app, "off");
         else if (g_ssaoDraws)   sprintf(app, "%ld draws", g_ssaoDraws);
         else                    sprintf(app, "no draws");
@@ -695,12 +695,13 @@ static HWND g_hAoTweak = NULL;
 // they diverge, one of them is simply mis-set.
 //
 // lo/hi are the ACTIVE range and are re-stamped from loE/hiE whenever the
-// estimator changes, because one row can now legitimately mean two different
-// quantities. Intensity is the case that forced it: after the SAO alignment
-// it is an EXPONENT for SSAO (reference default 1.0) and still a linear gain
-// for HBAO. 0.1..8.0 is not a taste call for the SSAO side - the reference's
+// estimator changes, because one row can legitimately mean two different
+// quantities. Intensity is the case that forced it: it is an exponent for
+// both estimators but not the same one. SSAO raises pow(1 - sqrt(mean), I),
+// shipped default 1.0, and 8.0 is not a taste call for its ceiling - SAO's
 // contrast term is lerp(0.9 + 0.5*I, 1.2 - 0.15*I, ao), whose second
-// endpoint goes negative past I = 8.
+// endpoint goes negative past I = 8. HBAO+ raises pow(1 - 2*mean, I),
+// shipped default 1.5, and 4.0 is the top of NVIDIA's own slider.
 static struct {
     const char *name;
     volatile LONG *val;
@@ -710,7 +711,7 @@ static struct {
     HWND bar;
 } g_aoRows[] = {
     { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, {   0,   0 }, {  200,  200 }, NULL },
-    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   10,  800, 10, {  10,  50 }, {  800, 2000 }, NULL },
+    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   10,  800, 10, {  10,  10 }, {  800,  400 }, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, {  10,  10 }, { 1500, 1500 }, NULL },
     // Projection has NO row: it is measured from the engine's own
     // view-projection matrix every frame (24_ao_recon.c) and there is no
@@ -838,7 +839,7 @@ static void EnsureAoTweakWindow(void)
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
     g_hAoTweak = CreateWindowExA(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName,
-        (g_aoEnable == 2) ? "AO Tuning - HBAO" : "AO Tuning - SSAO",
+        (g_aoEnable == 2) ? "AO Tuning - HBAO+" : "AO Tuning - SSAO",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         120, 120, r.right - r.left, r.bottom - r.top,
         NULL, NULL, wc.hInstance, NULL);
@@ -986,7 +987,7 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                     }
                 }
                 if (g_hAoTweak) {
-                    SetWindowTextA(g_hAoTweak, est ? "AO Tuning - HBAO" : "AO Tuning - SSAO");
+                    SetWindowTextA(g_hAoTweak, est ? "AO Tuning - HBAO+" : "AO Tuning - SSAO");
                     InvalidateRect(g_hAoTweak, NULL, TRUE);
                 }
             }

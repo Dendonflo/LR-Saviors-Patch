@@ -770,7 +770,7 @@ static void GameMenuAppend(void)
                 if (sub) {
                     GameMenuInsertLeaf(sub, 0, id++, L"Off",  MenuH_AoOff);
                     GameMenuInsertLeaf(sub, 1, id++, L"SSAO", MenuH_AoSsao);
-                    GameMenuInsertLeaf(sub, 2, id++, L"HBAO", MenuH_AoHbao);
+                    GameMenuInsertLeaf(sub, 2, id++, L"HBAO+", MenuH_AoHbao);
                     GameMenuInsertLeaf(sub, 3, id++, L"Tuning Panel", MenuH_AoPanel);
                     groups++;
                 }
