@@ -936,11 +936,31 @@ static DWORD WINAPI OverlayThread(LPVOID param)
             // our proc - and the notification not arriving is exactly the
             // failure being chased here. One SendMessage per overlay tick.
             if (g_hAoTweak && IsWindowVisible(g_hAoTweak) && g_hAoRawCheck) {
-                LONG on = (SendMessageA(g_hAoRawCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
-                if (on != g_aoRawView) {
-                    InterlockedExchange(&g_aoRawView, on);
-                    LogLine(on ? "[ssao] raw view: ON (panel checkbox)"
-                               : "[ssao] raw view: off (panel checkbox)");
+                // The raw view draws the ESTIMATOR's output, so with AO off
+                // there is nothing to draw and ticking the box does nothing
+                // at all - silently, which is exactly how it cost a test.
+                // The panel is reachable from the AO group whether or not AO
+                // is on, so the control has to say so itself.
+                static LONG lastEnable = -1;
+                LONG aoOn = (g_aoEnable != 0);
+                if (aoOn != lastEnable) {
+                    lastEnable = aoOn;
+                    EnableWindow(g_hAoRawCheck, aoOn ? TRUE : FALSE);
+                    SetWindowTextA(g_hAoRawCheck,
+                                   aoOn ? "Show raw AO (fullscreen)"
+                                        : "Show raw AO  -  turn AO on first");
+                    if (!aoOn) {
+                        SendMessageA(g_hAoRawCheck, BM_SETCHECK, BST_UNCHECKED, 0);
+                        InterlockedExchange(&g_aoRawView, 0);
+                    }
+                }
+                if (aoOn) {
+                    LONG on = (SendMessageA(g_hAoRawCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    if (on != g_aoRawView) {
+                        InterlockedExchange(&g_aoRawView, on);
+                        LogLine(on ? "[ssao] raw view: ON (panel checkbox)"
+                                   : "[ssao] raw view: off (panel checkbox)");
+                    }
                 }
             }
         } else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
