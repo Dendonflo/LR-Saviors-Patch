@@ -1018,11 +1018,24 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     LONG passes = g_aoBlurPasses;
                     if (passes < 1) passes = 1;
                     if (passes > 4) passes = 4;
-                    // Blur Spread is a SCREEN-pixel figure, so it survives a
-                    // resolution change: divide it into texels here. Clamped
-                    // to one texel, below which the taps all land on the same
-                    // texel and the pass does nothing but cost.
-                    float base = ((float)g_aoBlurStep100 / 100.0f) / aoScale;
+                    // Resolution independence, via PASSES rather than spacing.
+                    // Spacing cannot go below one texel - sub-texel taps land
+                    // back on the same texel and the pass costs without
+                    // blurring - so dividing the spread by aoScale merely hit
+                    // that clamp and left the kernel twice as wide ON SCREEN
+                    // at Half, which is exactly the "already blurrier at half
+                    // res" report. Instead: each a-trous level doubles reach
+                    // in texels, and each halving of resolution doubles a
+                    // texel's screen size, so dropping ONE LEVEL per halving
+                    // holds the screen extent constant. Measured for spread
+                    // 0.99: full res with 3 levels reaches ~18.1 screen px,
+                    // half res with 2 levels ~17.7. It is also cheaper at low
+                    // resolution instead of more expensive.
+                    {
+                        float s = aoScale;
+                        while (s >= 1.9f && passes > 1) { passes--; s *= 0.5f; }
+                    }
+                    float base = (float)g_aoBlurStep100 / 100.0f;
                     for (LONG p = 0; p < passes; p++) {
                         float spacing = base * (float)(1 << p);
                         if (spacing < 1.0f) spacing = 1.0f;
