@@ -293,7 +293,19 @@ static const char *g_aoCombineHlsl =
 "}\n"
 "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
 "    float3 ao;\n"
-"    if (cK1.z > 0.5) {\n"
+// cK1.z: 0 = 1:1 (point), 1 = hardware bilinear, 2 = depth-aware.
+//
+// Bilinear is the DEFAULT because the depth-aware path below resonates at
+// exactly 2:1 (user-measured 2026-08-16: no lines at 1/1, severe at 1/2,
+// mild at 1/4 - a peak, which rules out every magnification explanation).
+// At 1/2 each low-res texel centre lands on an odd full-res pixel, so half
+// the output pixels compare depth against THE SAME texel and score a
+// perfect match at full weight, while the other half compare against a
+// neighbour and get cut. Alternate rows are therefore treated differently
+// by construction, which is the striping. At 1/4 only one pixel in four
+// matches exactly and the other three are treated alike, so the
+// alternation mostly cancels - hence the peak rather than a ramp.
+"    if (cK1.z > 1.5) {\n"
 "        float2 t = cK1.xy;\n"
 "        float2 p = uv / t - 0.5;\n"
 "        float2 fp = frac(p);\n"
@@ -306,6 +318,8 @@ static const char *g_aoCombineHlsl =
 "                 + UpTap(b + t, fp.x * fp.y, z0, cK1.w, w3);\n"
 "        ao = s / (w0 + w1 + w2 + w3);\n"
 "    } else {\n"
+// Point at 1:1, hardware bilinear when upscaling - the filter state is set
+// CPU-side, so this one fetch covers both.
 "        ao = tex2D(aoTex, uv).rgb;\n"
 "    }\n"
 "    if (cK0.y > 0.5) return float4(ao, 1.0);\n"   // raw view / debug bands
@@ -514,6 +528,17 @@ static int AoEnsureRts(IDirect3DDevice9 *dev, UINT w, UINT h)
         LogLine(l);
     }
     return 1;
+}
+
+static void AoBindTexF(IDirect3DDevice9 *dev, DWORD stage,
+                       IDirect3DBaseTexture9 *t, DWORD filter)
+{
+    g_origSetTexture(dev, stage, t);
+    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MINFILTER, filter);
+    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MAGFILTER, filter);
+    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 }
 
 static void AoBindTex(IDirect3DDevice9 *dev, DWORD stage, IDirect3DBaseTexture9 *t)
@@ -925,11 +950,13 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 k0[2] = (float)g_aoFlatTest / 100.0f;   // 0 = off
                 k0[3] = 0.0f;
                 // Upsample only when the AO buffer really is smaller than
-                // what we are writing into - at 1:1 the extra taps would be
-                // pure cost for a filter that resolves to the centre tap.
+                // what we are writing into - at 1:1 any filter resolves to
+                // the centre tap and would just cost more.
+                // 0 = point (1:1), 1 = hardware bilinear, 2 = depth-aware.
+                int upscaling = (rw < d.Width || rh < d.Height);
                 k1[0] = 1.0f / (float)rw;
                 k1[1] = 1.0f / (float)rh;
-                k1[2] = (rw < d.Width || rh < d.Height) ? 1.0f : 0.0f;
+                k1[2] = !upscaling ? 0.0f : (g_aoUpsampleDepth ? 2.0f : 1.0f);
                 // Same screen-space correction as the blur: these taps are one
                 // AO texel apart, which is aoScale screen pixels.
                 k1[3] = (float)g_aoBlurSharp / aoScale;
@@ -963,7 +990,12 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 }
                 if (bis < 1) {
                     if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-                    AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
+                    // LINEAR only for the hardware-bilinear mode: the
+                    // depth-aware path needs exact texel fetches, and at 1:1
+                    // filtering would blur what should be a straight copy.
+                    AoBindTexF(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA,
+                               (k1[2] > 0.5f && k1[2] < 1.5f) ? D3DTEXF_LINEAR
+                                                              : D3DTEXF_POINT);
                     AoBlendOpaque(dev, raw ? 0x0F : 0x07);
                     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, k0, 1);
                     AoDrawFsQuad(dev, d.Width, d.Height);

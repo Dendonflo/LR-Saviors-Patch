@@ -292,6 +292,11 @@ static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside
 // composite, for anyone who actually wants supersampled AO.
 static volatile LONG g_aoResDiv = 1;          // ini AoResDiv: 1 / 2 / 4 / 8
 static volatile LONG g_aoSsaaIndep = 1;       // ini AoSsaaIndep: divide SSAA out
+// Upsample filter for reduced-resolution AO. 0 = hardware bilinear
+// (default), 1 = depth-aware 4-tap. The depth-aware one preserves
+// silhouettes better in principle but STRIPES at exactly 1/2 - see the note
+// in the combine shader - so it is opt-in until that is solved.
+static volatile LONG g_aoUpsampleDepth = 0;
 // Live AO buffer state, defined in 25_ssao.c - tentative definitions here so
 // the status panel (part 10) can read them despite coming earlier in the TU.
 static LONG g_aoRtW, g_aoRtH;

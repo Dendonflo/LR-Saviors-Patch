@@ -238,6 +238,7 @@ static NumericSetting g_numerics[] = {
     // upsamples with a depth-aware filter.
     { &g_aoResDiv,      "AoResDiv",      1, 8 },
     { &g_aoSsaaIndep,   "AoSsaaIndep",   0, 1 },
+    { &g_aoUpsampleDepth, "AoUpsampleDepth", 0, 1 },
     { &g_aoBlur,        "AoBlur",        0, 1 },
     { &g_aoBlurSharp,   "AoBlurSharp",   0, 400 },
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED
