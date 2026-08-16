@@ -143,6 +143,14 @@ static char __cdecl MenuH_AoFloor(char apply)
     if (apply) InterlockedExchange(&g_aoRespectFloor, g_aoRespectFloor ? 0 : 1);
     return (char)(g_aoRespectFloor ? 0 : 1);
 }
+// Black-model bisect levels (see g_aoBisect in 01). A radio group: walk
+// down the levels in the equip menu and note the FIRST one where the
+// newly-selected weapon stops rendering black.
+GAMEMENU_VALUE(MenuH_AoBis0, g_aoBisect, 0)
+GAMEMENU_VALUE(MenuH_AoBis1, g_aoBisect, 1)
+GAMEMENU_VALUE(MenuH_AoBis2, g_aoBisect, 2)
+GAMEMENU_VALUE(MenuH_AoBis3, g_aoBisect, 3)
+GAMEMENU_VALUE(MenuH_AoBis4, g_aoBisect, 4)
 // Dev Tools: opens/closes the live tuning window (10_overlay.c). A toggle,
 // not a button: the checkbox mirrors the window's own close box.
 GAMEMENU_TOGGLE(MenuH_AoTweak,  g_aoTweakOpen)
@@ -525,7 +533,15 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_AoBlur", (void *)MenuH_AoBlur);
         GameMenuFixLabel(mgr, L"AO Blur (bilateral)");
         mAdd(mgr, NULL, "Mod_AoFloor", (void *)MenuH_AoFloor);
-        GameMenuFixLabel(mgr, L"AO Past Engine Floor (blackens geometry)");
+        GameMenuFixLabel(mgr, L"AO Past Engine Floor");
+        mOpen(mgr, NULL, "Mod_AoBisect"); GameMenuFixLabel(mgr, L"AO Bisect (black-model diag)");
+        mBegin(mgr, NULL);
+        mAdd(mgr, NULL, "Mod_AoBis0", (void *)MenuH_AoBis0); GameMenuFixLabel(mgr, L"0 Full Pipeline");
+        mAdd(mgr, NULL, "Mod_AoBis1", (void *)MenuH_AoBis1); GameMenuFixLabel(mgr, L"1 No Composite Write");
+        mAdd(mgr, NULL, "Mod_AoBis2", (void *)MenuH_AoBis2); GameMenuFixLabel(mgr, L"2 + No Snapshot Copy");
+        mAdd(mgr, NULL, "Mod_AoBis3", (void *)MenuH_AoBis3); GameMenuFixLabel(mgr, L"3 + No Blur Draws");
+        mAdd(mgr, NULL, "Mod_AoBis4", (void *)MenuH_AoBis4); GameMenuFixLabel(mgr, L"4 Setup Only");
+        mClose(mgr, NULL);
         mAdd(mgr, NULL, "Mod_AoRaw", (void *)MenuH_AoRaw);
         GameMenuFixLabel(mgr, L"SSAO Raw View (fullscreen)");
         mAdd(mgr, NULL, "Mod_AoDebug", (void *)MenuH_AoDebug);

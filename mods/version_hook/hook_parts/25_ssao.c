@@ -539,6 +539,23 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     else     { if (fr == lastFrame)    return; lastFrame = fr; }
 
     int est = (g_aoEnable == 2) ? 1 : 0;
+    // Bisect level (diagnostic, see 01): peels stages off the END of the
+    // pipeline so the run can name which draw's side effect blackens the
+    // newest-loaded model. Logged on change so sessions self-document.
+    LONG bis = g_aoBisect;
+    {
+        static LONG lastBis = 0;
+        if (bis != lastBis) {
+            char l[96];
+            lastBis = bis;
+            sprintf(l, "[ssao] bisect level %ld (%s)", bis,
+                    bis == 0 ? "full pipeline" :
+                    bis == 1 ? "no composite write" :
+                    bis == 2 ? "+ no snapshot copy" :
+                    bis == 3 ? "+ no blur draws" : "setup only, no draws");
+            LogLine(l);
+        }
+    }
     if (g_aoPsState[est] == 0 || g_aoBlurState == 0 || g_aoCombineState == 0)
         AoEnsureShaders(dev, est);
     if (g_aoPsState[est] != 1) return;
@@ -645,14 +662,14 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             AoBlendOpaque(dev, 0x0F);
             AoSetEstimatorConsts(dev, rw, rh,
                                  raw ? 3.0f : (g_aoDebug ? 1.0f : 0.0f), est);
-            AoDrawFsQuad(dev, rw, rh);
+            if (bis < 4) AoDrawFsQuad(dev, rw, rh);
 
             // A-trous levels: each is a separable H then V with the spacing
             // doubled, ping-ponging A->B->A. Unlike v25b the vertical pass
             // ALWAYS lands back in A: the destination is now written by the
             // combine pass, which needs the finished AO in a texture it can
             // sample alongside the engine's own buffer.
-            if (useBlur) {
+            if (useBlur && bis < 3) {
                 IDirect3DDevice9_SetPixelShader(dev, g_aoBlurPs);
                 AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 {
@@ -688,7 +705,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 k0[0] = g_aoRespectFloor ? 1.0f : 0.0f;
                 k0[1] = (raw || g_aoDebug) ? 1.0f : 0.0f;
                 k0[2] = k0[3] = 0.0f;
-                if (!raw && !g_aoDebug) {
+                if (!raw && !g_aoDebug && bis < 2) {
                     // RT B is still bound at s0 from the last blur pass, and
                     // it is about to be a StretchRect DESTINATION - a texture
                     // that is simultaneously a sampler source and a copy
@@ -700,6 +717,7 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                         // No snapshot means no floor clamp is possible; fall
                         // back to the stacking multiply rather than drawing
                         // an un-combined AO term over the engine's buffer.
+                        if (bis >= 1) goto drew;
                         if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
                         AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
                         IDirect3DDevice9_SetPixelShader(dev, g_aoCombinePs);
@@ -711,11 +729,13 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     }
                     AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoRtB);
                 }
-                if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-                AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
-                AoBlendOpaque(dev, raw ? 0x0F : 0x07);
-                IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
-                AoDrawFsQuad(dev, d.Width, d.Height);
+                if (bis < 1) {
+                    if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
+                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                    AoBlendOpaque(dev, raw ? 0x0F : 0x07);
+                    IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
+                    AoDrawFsQuad(dev, d.Width, d.Height);
+                }
             }
         drew:;
         } else {
