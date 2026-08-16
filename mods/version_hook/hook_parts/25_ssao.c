@@ -569,8 +569,13 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     }
 }
 
+// aoScale = screen pixels per AO texel (1 at full res, 8 at 1/8, and it also
+// picks up any SSAA being divided out). Everything distance-related here has
+// to be expressed in SCREEN terms and converted, or the filter silently
+// changes size with the resolution setting - which is exactly what produced
+// the 2026-08-16 horizontal streaks at low AO res.
 static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
-                            float dx, float dy, float spacing)
+                            float dx, float dy, float spacing, float aoScale)
 {
     float c0[4], c1[4];
     c0[0] = 1.0f / (float)w;
@@ -582,7 +587,17 @@ static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     // on every a-trous level past the first). Dividing by spacing keeps the
     // edge-stop testing "is this the same surface" instead of "is this
     // pixel close in depth", which is the question it is actually for.
-    c1[0] = (float)g_aoBlurSharp / (spacing > 1.0f ? spacing : 1.0f);
+    {
+        // Tolerance tracks the tap's SCREEN separation (spacing x aoScale),
+        // not its texel separation: two taps 1 texel apart at 1/8 res are 8
+        // screen pixels apart and see 8x the depth difference on any sloped
+        // surface. Scaling by texels alone made the edge-stop 8x too tight
+        // there, so it rejected everything vertically (where a ground plane's
+        // depth changes fastest) while the horizontal pass smeared freely -
+        // the streaks.
+        float screenSpan = spacing * aoScale;
+        c1[0] = (float)g_aoBlurSharp / (screenSpan > 1.0f ? screenSpan : 1.0f);
+    }
     c1[1] = spacing;
     c1[2] = c1[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
@@ -833,6 +848,10 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
 
         if (useRt) {
             UINT rw = (UINT)g_aoRtW, rh = (UINT)g_aoRtH;
+            // Screen pixels per AO texel: 1 at full res, 2 at half, and it
+            // also absorbs whatever SSAA was divided out of the buffer size.
+            float aoScale = (rw > 0) ? ((float)d.Width / (float)rw) : 1.0f;
+            if (aoScale < 1.0f) aoScale = 1.0f;
             // Pass 1: estimator -> RT A, opaque. Raw mode writes aoBase
             // (mode 3), debug writes the bands, normal writes the [0.5..1]
             // term (mode 0) - the mapping is linear, so blurring the term
@@ -857,18 +876,23 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                     LONG passes = g_aoBlurPasses;
                     if (passes < 1) passes = 1;
                     if (passes > 4) passes = 4;
-                    float base = (float)g_aoBlurStep100 / 100.0f;
+                    // Blur Spread is a SCREEN-pixel figure, so it survives a
+                    // resolution change: divide it into texels here. Clamped
+                    // to one texel, below which the taps all land on the same
+                    // texel and the pass does nothing but cost.
+                    float base = ((float)g_aoBlurStep100 / 100.0f) / aoScale;
                     for (LONG p = 0; p < passes; p++) {
                         float spacing = base * (float)(1 << p);
+                        if (spacing < 1.0f) spacing = 1.0f;
                         if (!AoTarget(dev, surfB, rw, rh)) goto done;
                         AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
                         AoBlendOpaque(dev, 0x0F);
-                        AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing);
+                        AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing, aoScale);
                         AoDrawFsQuad(dev, rw, rh);
                         if (!AoTarget(dev, surfA, rw, rh)) goto done;
                         AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtB);
                         AoBlendOpaque(dev, 0x0F);
-                        AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing);
+                        AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing, aoScale);
                         AoDrawFsQuad(dev, rw, rh);
                     }
                 }
@@ -893,7 +917,9 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 k1[0] = 1.0f / (float)rw;
                 k1[1] = 1.0f / (float)rh;
                 k1[2] = (rw < d.Width || rh < d.Height) ? 1.0f : 0.0f;
-                k1[3] = (float)g_aoBlurSharp;   // same edge-stop dial as the blur
+                // Same screen-space correction as the blur: these taps are one
+                // AO texel apart, which is aoScale screen pixels.
+                k1[3] = (float)g_aoBlurSharp / aoScale;
                 AoBindTex(dev, 11, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 IDirect3DDevice9_SetPixelShaderConstantF(dev, 221, k1, 1);
                 if (!raw && !g_aoDebug && bis < 2) {
