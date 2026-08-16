@@ -693,16 +693,25 @@ static HWND g_hAoTweak = NULL;
 // tuning: Projection describes the CAMERA (cot(fovY/2)), not the
 // estimator, so the two slots should end up holding the SAME value - if
 // they diverge, one of them is simply mis-set.
+//
+// lo/hi are the ACTIVE range and are re-stamped from loE/hiE whenever the
+// estimator changes, because one row can now legitimately mean two different
+// quantities. Intensity is the case that forced it: after the SAO alignment
+// it is an EXPONENT for SSAO (reference default 1.0) and still a linear gain
+// for HBAO. 0.1..8.0 is not a taste call for the SSAO side - the reference's
+// contrast term is lerp(0.9 + 0.5*I, 1.2 - 0.15*I, ao), whose second
+// endpoint goes negative past I = 8.
 static struct {
     const char *name;
     volatile LONG *val;
     volatile LONG *vals[2];
     LONG lo, hi, step;
+    LONG loE[2], hiE[2];
     HWND bar;
 } g_aoRows[] = {
-    { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, NULL },
-    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
-    { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
+    { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, {   0,   0 }, {  200,  200 }, NULL },
+    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   10,  800, 10, {  10,  50 }, {  800, 2000 }, NULL },
+    { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, {  10,  10 }, { 1500, 1500 }, NULL },
     // Projection has NO row: it is measured from the engine's own
     // view-projection matrix every frame (24_ao_recon.c) and there is no
     // such thing as a preferred value for it - only the camera's actual
@@ -711,13 +720,13 @@ static struct {
     // true 317.
     // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
     // the projection, not an estimator preference.
-    { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   25,  1, NULL },
+    { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   25,  1, {   1,   1 }, {   25,   25 }, NULL },
     // Blur rows (shared; only meaningful with AoBlur=1). Sharp = depth
     // edge-stop, 0 = plain gaussian. Passes = a-trous levels, each doubling
     // reach. Spread = base tap spacing in pixels x100.
-    { "Blur Sharp",  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0,  400, 10, NULL },
-    { "Blur Passes", &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   1,    4,  1, NULL },
-    { "Blur Spread", &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] }, 25,  400, 25, NULL },
+    { "Blur Sharp",  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0,  400, 10, {   0,   0 }, {  400,  400 }, NULL },
+    { "Blur Passes", &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   1,    4,  1, {   1,   1 }, {    4,    4 }, NULL },
+    { "Blur Spread", &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] }, 25,  400, 25, {  25,  25 }, {  400,  400 }, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34
@@ -836,6 +845,12 @@ static void EnsureAoTweakWindow(void)
     if (!g_hAoTweak) return;
     for (size_t i = 0; i < AO_ROWS; i++) {
         int y = 10 + (int)i * AOTW_ROW_H;
+        // The window can be built while either estimator is live, so seed the
+        // range from the live one rather than from whichever pair happens to
+        // be sitting in lo/hi.
+        LONG est0 = (g_aoEnable == 2) ? 1 : 0;
+        g_aoRows[i].lo = g_aoRows[i].loE[est0];
+        g_aoRows[i].hi = g_aoRows[i].hiE[est0];
         g_aoRows[i].bar = CreateWindowExA(
             0, "SCROLLBAR", NULL, WS_CHILD | WS_VISIBLE | SBS_HORZ,
             10 + AOTW_LABEL_W, y, AOTW_BAR_W, 18,
@@ -950,8 +965,25 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 lastEst = est;
                 for (size_t i = 0; i < AO_ROWS; i++) {
                     g_aoRows[i].val = g_aoRows[i].vals[est];
-                    if (g_aoRows[i].bar)
-                        SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
+                    // Re-stamp the RANGE too, not just the binding: Intensity
+                    // is an exponent for SSAO and a linear gain for HBAO, so
+                    // the two slots are not interchangeable scales.
+                    g_aoRows[i].lo = g_aoRows[i].loE[est];
+                    g_aoRows[i].hi = g_aoRows[i].hiE[est];
+                    if (g_aoRows[i].bar) {
+                        SCROLLINFO si;
+                        LONG v = *g_aoRows[i].val;
+                        if (v < g_aoRows[i].lo) { v = g_aoRows[i].lo; InterlockedExchange(g_aoRows[i].val, v); }
+                        if (v > g_aoRows[i].hi) { v = g_aoRows[i].hi; InterlockedExchange(g_aoRows[i].val, v); }
+                        memset(&si, 0, sizeof(si));
+                        si.cbSize = sizeof(si);
+                        si.fMask  = SIF_RANGE | SIF_PAGE | SIF_POS;
+                        si.nMin   = (int)g_aoRows[i].lo;
+                        si.nMax   = (int)g_aoRows[i].hi;
+                        si.nPage  = 1;
+                        si.nPos   = (int)v;
+                        SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
+                    }
                 }
                 if (g_hAoTweak) {
                     SetWindowTextA(g_hAoTweak, est ? "AO Tuning - HBAO" : "AO Tuning - SSAO");

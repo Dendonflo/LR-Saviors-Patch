@@ -108,8 +108,33 @@ static const char *g_ssaoHlsl =
 // derivative axis) cross() is ~zero and normalize(0) is NaN; NaN written to
 // the shadow term renders geometry BLACK (user-observed in every flight).
 "    float3 g = cross(ddx(P), ddy(P));\n"
-"    float gl = length(g);\n"
-"    float3 N = (gl > 1e-6) ? g / gl : float3(0, 0, -1);\n"
+"    float gg = dot(g, g);\n"
+// DEPTH-DISCONTINUITY REJECTION. Straight out of AmbientOcclusion_AO.pix,
+// main(), and we never had it:
+//
+//     n_C = reconstructNonUnitCSFaceNormal(C);
+//     // if the threshold # is too big you will see black dots where we used
+//     // a bad normal at edges, too small -> white
+//     if (dot(n_C, n_C) > square(C.z * C.z * 0.00006)) { visibility = 1.0; return; }
+//
+// The un-normalised cross product's LENGTH is the signal: across a smooth
+// surface it is the area of one pixel's worth of surface, but across a
+// silhouette the two derivatives straddle a depth cliff and it explodes.
+// Those pixels have a meaningless normal, and a meaningless normal
+// manufactures occlusion out of nothing - which is the false dark fringe
+// on every silhouette.
+//
+// The reference's 0.00006 is not portable: it is written against ITS
+// projScale and resolution. Ours, derived rather than copied - for a
+// camera-facing plane one pixel spans 2z/(W*projX) by 2z/(H*projY) world
+// units, so |g| = 4z^2 * texelW * texelH / (projX * projY). Evaluating the
+// reference's constant at G3D's own defaults (1080p, 60 deg fovY, so
+// projScale = 935) gives 6e-5 * 935^2 = 52x that flat-surface value, so 50x
+// is the same slack expressed in units that survive a resolution change -
+// which matters here precisely because the AO buffer is 1/1, 1/2 or 1/4.
+"    float nFlat = 4.0 * P.z * P.z * cParam0.x * cParam0.y / (cParam1.x * cParam1.y);\n"
+"    if (gg > (50.0 * nFlat) * (50.0 * nFlat)) return float4(1, 1, 1, 1);\n"
+"    float3 N = (gg > 1e-12) ? g * rsqrt(gg) : float3(0, 0, -1);\n"
 // Rotation noise: WHITE-NOISE hash, not interleaved gradient noise. IGN's
 // iso-value contours are parallel diagonal lines, and since all taps in a
 // pixel rotate by the same angle, the estimator's residual error inherits
@@ -130,13 +155,46 @@ static const char *g_ssaoHlsl =
 // only when the AO buffer is smaller, which is the tell.
 // Replacement is Hoskins' hash12: pure frac/dot arithmetic, no
 // transcendentals, no large arguments, no row correlation.
-"    float2 np = fmod(vpos, 1024.0);\n"
-"    float3 h3 = frac(float3(np.x, np.y, np.x) * 0.1031);\n"
-"    h3 += dot(h3, h3.yzx + 33.33);\n"
-"    float ign = frac((h3.x + h3.y) * h3.z);\n"
-"    float ca = cos(ign * 6.2831853), sa = sin(ign * 6.2831853);\n"
+// v25u: this is now the reference's own hash, verbatim -
+//     float lowPrecisionHash(vec2 p) {
+//         vec3 p3 = fract(vec3(p.xyx) * 0.13);
+//         p3 += dot(p3, p3.yzx + 3.333);
+//         return fract((p3.x + p3.y) * p3.z);
+//     }
+//     randomPatternRotationAngle = lowPrecisionHash(ssC) * 20.1
+// - which is the same Hoskins-family hash we had arrived at, but with the
+// published constants (0.13 / 3.333 rather than 0.1031 / 33.33) and fed the
+// raw pixel coordinate. The fmod(vpos, 1024) wrap went with it: that was
+// defence against sin() precision loss in the hash this replaced, and there
+// is no transcendental left to protect.
+//
+// spin is deliberately NOT reduced to [0,1). The reference uses it twice and
+// wants both halves: mod(spin, 1) jitters the tap RADII per pixel, and the
+// whole value is added to the angle in radians. We only ever used the angle
+// half, so every pixel sampled the same set of radii - the taps rotated but
+// never breathed, which leaves exactly the kind of correlated residual the
+// blur cannot chase.
+"    float3 p3 = frac(float3(vpos.x, vpos.y, vpos.x) * 0.13);\n"
+"    p3 += dot(p3, p3.yzx + 3.333);\n"
+"    float hash = frac((p3.x + p3.y) * p3.z);\n"
+"    float spin = hash * 20.1;\n"
+"    float ca = cos(hash * 6.2831853), sa = sin(hash * 6.2831853);\n"
 "    float occ = 0.0;\n"
-"    float rPix = cParam0.z * cParam1.y / P.z;\n"      // world radius -> uv
+// THE DISC RADIUS, in PIXELS, which is how the reference carries it:
+//     ssDiskRadius = -projScale * radius / C.z
+// with projScale documented as "the height in pixels of a 1m object if
+// viewed from 1m away", i.e. H * projY / 2. Pixels are square, so one scalar
+// describes the disc on both axes and the aspect ratio takes care of itself
+// when the offset is converted to UV by multiplying by (texelW, texelH).
+//
+// This replaces `rPix = radius * projY / z` in UV, which was wrong on the x
+// axis: x wants projX = projY / aspect. Because the y offset was then scaled
+// by aspect as well, the disc stayed CIRCULAR but came out a uniform 1.78x
+// (16:9) larger than the Radius slider claimed. A pure scale error, and one
+// that eye-tuning had silently absorbed - which is why it never looked like
+// a bug, only like a Radius that read high.
+"    float projScale = 0.5 * cParam1.y / cParam0.y;\n"
+"    float ssDiskRadius = projScale * cParam0.z / P.z;\n"
 // Guard 2, now a real control (cParam2.z, AoRadiusMaxPct). A world-space
 // radius projects to a HUGE screen radius up close, and the hardcoded 0.25
 // this replaces was an emergency stop, not a sane working value: measured
@@ -146,13 +204,23 @@ static const char *g_ssaoHlsl =
 // occlusion, it is distant-geometry occlusion, and its variance is the raw
 // material the low-resolution banding is made of (also why Alchemy's 12
 // independent taps band worse than HBAO's 4 accumulating rays).
-"    rPix = min(rPix, cParam2.z);\n"
+"    ssDiskRadius = min(ssDiskRadius, cParam2.z / cParam0.x);\n"
+// MIN_RADIUS, from the reference:
+//     const float MIN_RADIUS = 1.0; // pixels
+//     if (ssDiskRadius <= MIN_RADIUS) { visibility = 1.0; return; }
+// A disc smaller than a pixel has nothing to sample: every tap lands in the
+// centre texel, v is ~0, and the estimator returns noise about zero. Note
+// this bites sooner at 1/2 and 1/4 AO resolution, and that is correct rather
+// than unfortunate - a quarter-resolution buffer genuinely cannot resolve a
+// sub-pixel disc, and returning "no opinion" is honest where inventing one
+// was the source of distant fizz.
+"    if (ssDiskRadius <= 1.0) return float4(1, 1, 1, 1);\n"
 // The world radius the disc ACTUALLY spans after our screen clamp. The
 // reference has no such clamp - it accepts whatever the projection gives
 // near the camera - but we do, so the falloff below has to be measured
 // against the disc really being sampled or the two disagree by depth.
 // Unclamped this is exactly the Radius setting.
-"    float rWorld = rPix * P.z / cParam1.y;\n"
+"    float rWorld = ssDiskRadius * P.z / projScale;\n"
 "    float r2 = rWorld * rWorld;\n"
 "#if ESTIMATOR == 1\n"
 // HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
@@ -167,8 +235,11 @@ static const char *g_ssaoHlsl =
 "        float2 dir = float2(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca);\n"
 "        float sinH = 0.0, wH = 0.0;\n"
 "        [unroll] for (int st = 1; st <= AO_STEPS; st++) {\n"
-"            float2 duv = dir * (rPix * 0.5 * (float)st / (float)(AO_STEPS));\n"
-"            duv.y *= cParam0.y / cParam0.x;\n"        // aspect-correct
+// Pixel-space march, then one conversion to UV. HBAO's own estimator is
+// untouched by this file's SAO alignment - only the disc it walks, which was
+// shared code and shared the aspect error. Its Radius therefore shrinks by
+// the same 1.78x and needs the same re-tune.
+"            float2 duv = dir * (ssDiskRadius * (float)st / (float)(AO_STEPS)) * cParam0.xy;\n"
 "            float3 Q = ViewPos(uv + duv);\n"
 "            float3 v = Q - P;\n"
 "            float vl2 = dot(v, v) + 1e-5;\n"
@@ -184,51 +255,91 @@ static const char *g_ssaoHlsl =
 "        occ += saturate(sinH - cParam1.z) * wH;\n"
 "    }\n"
 "    float occN = occ / (float)(AO_DIRS);\n"
+// HBAO keeps its own aggregation - a horizon average mapped by a linear
+// gain. The SAO branch below now uses the reference's, which is a different
+// curve with a different meaning for Intensity, and the two must not be
+// forced to share one line just because they used to.
+"    float aoBase = saturate(1.0 - cParam1.w * occN);\n"
 "#else\n"
-// SAO's documented sampling pattern, replacing the Vogel/sunflower disk
-// (golden angle + sqrt radius) that was here. That one is a perfectly
-// standard pattern, but it is not this paper's, and it was chosen from
-// memory rather than from the text:
-//     alpha_i = (i + 0.5) / s
-//     h_i     = r * alpha_i          <- LINEAR in alpha, not sqrt
-//     theta_i = 2*pi * alpha_i * tau + phi
-// The linear radius is the substantive difference: it concentrates
-// samples toward the centre, so near geometry carries more weight than
-// under uniform-area sampling. phi is our per-pixel rotation, applied
-// through the ca/sa matrix below, which is the same thing as adding it
-// to theta. tau is the paper's spiral-turns constant, taken from its
-// minimum-discrepancy table at our tap counts (8 -> 3, 12 -> 5, 20 -> 9).
-"        float alpha = (i + 0.5) / (float)(AO_TAPS);\n"
-"        float ang = 6.2831853 * alpha * (float)(AO_TURNS);\n"
-"        float rad = alpha * rPix * 0.5;\n"
-"        float2 d0 = float2(cos(ang), sin(ang));\n"
-"        float2 duv = float2(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * rad;\n"
-"        duv.y *= cParam0.y / cParam0.x;\n"            // aspect-correct
+// SAO, transcribed from the reference implementation rather than recalled:
+// data-files/shader/AmbientOcclusion/AmbientOcclusion_AO.pix in G3D10, by
+// McGuire, Mara and Luebke (HPG 2012), fetched from casual-effects.com.
+// Everything below is that file; where a line differs, the comment says so.
+//
+//     vec2 tapLocation(int sampleNumber, float spinAngle, out float ssR) {
+//         float radius = float(sampleNumber + mod(spinAngle, 1.0) + 0.5) *
+//                        (1.0 / (NUM_SAMPLES - 0.5));
+//         radius *= radius;
+//         float angle = radius * (NUM_SPIRAL_TURNS * 6.28) + spinAngle;
+//         ssR = radius;
+//         return vec2(cos(angle), sin(angle));
+//     }
+//
+// Three things in five lines that were all wrong here:
+//   - alpha is SQUARED. Not linear (what the previous commit put in on the
+//     strength of the HPG12 paper text) and not sqrt (the Vogel disk before
+//     that). Squaring concentrates taps hard toward the centre, which is
+//     where contact shading lives.
+//   - the divisor is (N - 0.5), not N.
+//   - mod(spin, 1) enters the RADIUS, so the tap ring positions differ per
+//     pixel. Ours rotated but never breathed.
+// The angle takes alpha AFTER squaring, and spin is added in radians rather
+// than applied as a rotation matrix - equivalent for the angle, but only the
+// additive form also feeds the radius, so the matrix had to go.
+//
+// AO_TURNS is checked against the real table, not assumed: G3D's
+// minDiscrepancyArray in AmbientOcclusionSettings.cpp reads 3 at index 8,
+// 5 at index 12 and 9 at index 20 - which is what our quality tiers already
+// used. numSamples 20 / 9 turns is also the shipped default, so our High
+// tier is the reference configuration exactly.
+"    [unroll] for (int i = 0; i < AO_TAPS; i++) {\n"
+"        float alpha = ((float)i + frac(spin) + 0.5) * (1.0 / ((float)(AO_TAPS) - 0.5));\n"
+"        alpha *= alpha;\n"
+"        float ang = alpha * ((float)(AO_TURNS) * 6.28) + spin;\n"
+"        float2 unitOffset = float2(cos(ang), sin(ang));\n"
+// "Ensure that the taps are at least 1 pixel away" - reference, sampleAO():
+//     ssR = max(0.75, ssR * ssDiskRadius);
+// Without it the innermost taps of a squared distribution land inside the
+// centre texel, where v is zero by construction and the tap is spent
+// measuring nothing.
+"        float ssR = max(0.75, alpha * ssDiskRadius);\n"
+"        float2 duv = unitOffset * ssR * cParam0.xy;\n"
 "        float3 Q = ViewPos(uv + duv);\n"
 "        float3 v = Q - P;\n"
-// The SAO reference estimator, transcribed from the published shader
-// rather than recalled:
-//     f = max(radius2 - vv, 0) / radius2
-//     contribution = f*f*f * max(vn / (epsilon + vv), 0)
-// with epsilon = 0.01 and the bias subtracted from vn as a CONSTANT in
-// world units. Three things this settles, each guessed wrong here at some
-// point today:
-//   - there IS a range falloff and it is CUBED. Removing it was wrong;
-//     so was adding a squared one.
-//   - epsilon is 0.01, not 1e-4.
-//   - the bias is a constant subtraction, not the depth-proportional
-//     z*beta of the older Alchemy paper.
 "        float vv = dot(v, v);\n"
-"        float vn = dot(v, N) - cParam1.z;\n"
-"        float fo = saturate(1.0 - vv / r2);\n"
-"        occ += fo * fo * fo * max(vn / (0.01 + vv), 0.0);\n"
+"        float vn = dot(v, N);\n"
+// The estimator, reference fallOffFunction() and aoValueFromPositionsAndNormal():
+//     float f = saturate(vv * negInvRadius2 + 1.0);
+//     return f * saturate(vn - bias) / (epsilon + vv);      // epsilon = 0.015
+//     ...
+//     return f * lerp(0.9 + 0.5 * intensity, 1.2 - intensity * 0.15, f);
+//
+// So the falloff is applied ONCE, linearly. The f*f*f I committed this
+// morning is the OLDER variant - it is the HPG12 form, still present in the
+// 2012 sources and in the third-party gist I had been reading, but it is not
+// what the maintained reference does, and neither is epsilon 0.01. The
+// current file uses 0.015 and saturate() on the biased dot product, which
+// also caps a tap's contribution from above where max() did not.
+//
+// The lerp is the reference's "enhance dark areas" contrast term, and it is
+// parameterised by the tap's own falloff value, not by f. It has no analogue
+// here previously - we had no contrast shaping at all.
+"        float f = saturate(1.0 - vv / r2);\n"
+"        float ao = f * saturate(vn - cParam1.z) / (0.015 + vv);\n"
+"        occ += ao * lerp(0.9 + 0.5 * cParam1.w, 1.2 - cParam1.w * 0.15, ao);\n"
 "    }\n"
 "    float occN = occ / (float)(AO_TAPS);\n"
+// The aggregation, reference main(), last line:
+//     visibility = pow(saturate(1.0 - sqrt(sum * (1.0 / NUM_SAMPLES))), intensity);
+// A sqrt of the mean, then intensity as an EXPONENT. Ours was
+// saturate(1 - intensity * mean): linear, with intensity as a multiplier.
+// That is why Intensity had to sit at 2000 (= 20.0) to show anything - as an
+// exponent the reference's own default is 1.0, and the slider range moves
+// with the meaning (see 10_overlay.c). Note the lerp above also reads
+// intensity, and 1.2 - 0.15 * intensity turns negative past 8.0, which is
+// the hard ceiling on the new range.
+"    float aoBase = pow(saturate(1.0 - sqrt(occN)), cParam1.w);\n"
 "#endif\n"
-// One normalised occlusion for both estimators, so intensity, the debug
-// bands and the occlusion stage view all mean the same thing whichever
-// estimator and tap count are compiled in.
-"    float aoBase = saturate(1.0 - cParam1.w * occN);\n"
 "    if (zRaw > 1500.0) aoBase = 1.0;\n"               // sky/far (far ~2000)
 // The engine's [0.5..1] ENVELOPE, and why staying inside it is the default
 // (v25e). Measured from an A/B dump pair of the same menu frame: with AO
@@ -722,11 +833,16 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c1[0] = ((float)g_aoProj100E[est] / 100.0f) * ((float)h / (float)w);
     c1[1] = (float)g_aoProj100E[est] / 100.0f;
     // Bias units differ per estimator. SAO subtracts a CONSTANT in world
-    // units from v.n ("e.g. 0.01m" in the reference); HBAO compares in
-    // sin-of-elevation space, where 0.15 suppresses the self-occlusion the
-    // ddx/ddy faceted normals manufacture on smooth surfaces.
-    c1[2] = est ? 0.15f : 0.01f;
-    c1[3] = (float)g_aoIntensityE[est] / 100.0f;   // estimator gain, live-tunable
+    // units from v.n; the reference's own default is 0.02 (G3D
+    // AmbientOcclusionSettings ctor: bias(0.02f), alongside radius 0.75m and
+    // intensity 1.0). HBAO compares in sin-of-elevation space instead, where
+    // 0.15 suppresses the self-occlusion the ddx/ddy faceted normals
+    // manufacture on smooth surfaces - a different quantity, left alone.
+    c1[2] = est ? 0.15f : 0.02f;
+    // Intensity means different things per estimator now, by construction:
+    // an EXPONENT for SAO (reference default 1.0, so 100 here) and a linear
+    // gain for HBAO. The slider ranges differ to match - see g_aoRows.
+    c1[3] = (float)g_aoIntensityE[est] / 100.0f;
     c2[0] = mode;
     c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
     c2[2] = (float)g_aoRadiusMaxPctE[est] / 100.0f;   // screen-radius ceiling, UV
