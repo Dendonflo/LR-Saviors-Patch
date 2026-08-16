@@ -223,9 +223,6 @@ static NumericSetting g_numerics[] = {
     { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
     { &g_aoProj100E[0], "AoProj100",     10, 1000 },
     { &g_aoProj100E[1], "AoHbaoProj100", 10, 1000 },
-    // Measured from the engine's own view-projection matrix every frame and
-    // written into both Projection slots. 0 = tune it by hand instead.
-    { &g_aoProjAuto,    "AoProjAuto",    0, 1 },
     // Screen-radius ceiling, % of screen width. Below ~4 the AO becomes
     // contact-only; above ~15 near geometry samples unrelated scenery and
     // the estimator's variance shows up as low-resolution banding.

@@ -895,18 +895,14 @@ static void FovProbeExamine(const float *m, LONG absReg)
         // rather than a sliding search over every constant upload.
         if (g_fovReg < 0) g_fovReg = absReg;
         want = (LONG)(py * 100.0f + 0.5f);
-        // Assert it on EVERY measurement, not only when the measurement
-        // changes. The first version wrote the slots once and then went
-        // quiet because the camera's FOV was constant - so a slider edit
-        // was never overwritten and "auto" silently stopped being auto.
-        // The compares keep this to a load and a branch in the normal case,
-        // which matters because this fires per upload of that register.
-        if (g_aoProjAuto) {
-            // Both slots: Projection describes the camera, so the two
-            // estimators can never legitimately disagree about it.
-            if (g_aoProj100E[0] != want) InterlockedExchange(&g_aoProj100E[0], want);
-            if (g_aoProj100E[1] != want) InterlockedExchange(&g_aoProj100E[1], want);
-        }
+        // Asserted on EVERY measurement, so a FOV change - a cutscene, a
+        // camera with its own lens - is followed within the frame. Both
+        // slots, because Projection describes the camera and the two
+        // estimators cannot legitimately disagree about it. The compares
+        // keep this to a load and a branch in the steady state, which
+        // matters because it fires per upload of that register.
+        if (g_aoProj100E[0] != want) InterlockedExchange(&g_aoProj100E[0], want);
+        if (g_aoProj100E[1] != want) InterlockedExchange(&g_aoProj100E[1], want);
         if (want != g_aoProjMeasured) {
             g_aoProjMeasured = want;
             if (InterlockedIncrement(&g_fovProbeLogged) <= 8) {

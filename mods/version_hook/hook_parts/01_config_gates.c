@@ -308,12 +308,15 @@ static volatile LONG g_aoStageDumpRequest;
 // have been wrong either way. AoProj100 = 317, against a default of 130
 // and a hand-tuned 115: the reconstruction was skewed by 2.75x all along.
 //
-// So it self-calibrates now. AoProjAuto=1 writes the measured value into
-// both estimator slots whenever it changes, which also handles cutscenes
-// and any camera that uses a different FOV. Set it to 0 to tune by hand.
+// So it is measured, always, and there is no setting: a projection scale
+// has one correct value and every other value is simply wrong, so a
+// control could only be used to break the reconstruction - which is what
+// it had been doing at 115 against a true 317. The measurement is
+// re-asserted every frame, so cutscene cameras and any lens change are
+// followed automatically. AoProj100 / AoHbaoProj100 remain in the ini
+// only as the value to start from before the first measurement lands.
 #define ENABLE_FOV_PROBE 1
 static volatile LONG g_fovProbeDone;
-static volatile LONG g_aoProjAuto = 1;        // ini AoProjAuto
 static volatile LONG g_aoProjMeasured = 0;    // last measured cot(fovY/2)*100
 static void InstallFovProbe(void **vtbl);   // 24_ao_recon.c
 // Black-model bisect (2026-08-16): blackness FOLLOWS THE NEWEST-LOADED

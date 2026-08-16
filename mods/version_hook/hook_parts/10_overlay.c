@@ -703,10 +703,12 @@ static struct {
     { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, NULL },
     { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   50, 2000, 25, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, NULL },
-    // Range widened to 500: the measured value for this game is 317
-    // (fovY 35 degrees), which the old 250 ceiling could not even express.
-    // With AoProjAuto on this row is a live readout of the camera.
-    { "Projection",  &g_aoProj100E[0],     { &g_aoProj100E[0],     &g_aoProj100E[1] },     50,  500,  5, NULL },
+    // Projection has NO row: it is measured from the engine's own
+    // view-projection matrix every frame (24_ao_recon.c) and there is no
+    // such thing as a preferred value for it - only the camera's actual
+    // one and wrong ones. A slider here could only be used to break the
+    // reconstruction, which is what it had been doing at 115 against a
+    // true 317.
     // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
     // the projection, not an estimator preference.
     { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   25,  1, NULL },
@@ -775,8 +777,6 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         for (size_t i = 0; i < AO_ROWS; i++) {
             int y = 10 + (int)i * AOTW_ROW_H;
             const char *nm = g_aoRows[i].name;
-            // Say so when a row is not the user's to set.
-            if (g_aoProjAuto && !strcmp(nm, "Projection")) nm = "Projection (auto)";
             TextOutA(dc, 10, y + 4, nm, (int)strlen(nm));
             sprintf(t, "%ld", *g_aoRows[i].val);
             TextOutA(dc, 10 + AOTW_LABEL_W + AOTW_BAR_W + 8, y + 4, t, (int)strlen(t));
@@ -1013,7 +1013,6 @@ static DWORD WINAPI OverlayThread(LPVOID param)
             // panel - the projection auto-calibration sets Projection behind
             // its back, and a thumb that only syncs on open just lies.
             if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
-                static LONG lastProjAuto = -1;
                 int dirty = 0;
                 for (size_t i = 0; i < AO_ROWS; i++) {
                     if (!g_aoRows[i].bar) continue;
@@ -1021,14 +1020,7 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                         SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
                         dirty = 1;
                     }
-                    // Projection is not the user's to set while auto owns it.
-                    if (g_aoProjAuto != lastProjAuto &&
-                        !strcmp(g_aoRows[i].name, "Projection")) {
-                        EnableWindow(g_aoRows[i].bar, g_aoProjAuto ? FALSE : TRUE);
-                        dirty = 1;
-                    }
                 }
-                lastProjAuto = g_aoProjAuto;
                 if (dirty) InvalidateRect(g_hAoTweak, NULL, TRUE);
             }
             // Resolution dropdown, polled for the same reason as the
