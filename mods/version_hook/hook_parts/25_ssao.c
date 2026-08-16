@@ -147,6 +147,13 @@ static const char *g_ssaoHlsl =
 // material the low-resolution banding is made of (also why Alchemy's 12
 // independent taps band worse than HBAO's 4 accumulating rays).
 "    rPix = min(rPix, cParam2.z);\n"
+// The world radius the disc ACTUALLY spans after our screen clamp. The
+// reference has no such clamp - it accepts whatever the projection gives
+// near the camera - but we do, so the falloff below has to be measured
+// against the disc really being sampled or the two disagree by depth.
+// Unclamped this is exactly the Radius setting.
+"    float rWorld = rPix * P.z / cParam1.y;\n"
+"    float r2 = rWorld * rWorld;\n"
 "#if ESTIMATOR == 1\n"
 // HBAO (horizon-based): 4 rotated directions, 4 marching steps each. Each
 // direction contributes its HORIZON - the highest elevation above the
@@ -199,25 +206,22 @@ static const char *g_ssaoHlsl =
 "        duv.y *= cParam0.y / cParam0.x;\n"            // aspect-correct
 "        float3 Q = ViewPos(uv + duv);\n"
 "        float3 v = Q - P;\n"
-// The published estimator, and nothing else:
-//   A = max(0, 1 - (2s/N) * SUM max(0, v.n + z*beta) / (v.v + eps))
-// The 1/(v.v + eps) denominator IS Alchemy's falloff - there is no
-// separate range term in the paper. One was added here on 2026-08-16 to
-// chase halos and removed again the same day: it was not in the reference,
-// it cost a second patch to stop it reading depth-dependent, and it ended
-// up suppressing the effect at every setting. Do not reintroduce it
-// without deciding to deviate from the paper deliberately.
-//
-// Sign note: the paper writes "+ z_C * beta" for a view space with
-// negative z. Ours is positive (3..2000 world units), so the equivalent is
-// a subtraction. This line matches the paper.
-// epsilon 1e-4, the paper's value, replacing 0.01. That mattered at our
-// unit scale: world units run 3..2000 and the sampling disc is under about
-// one unit, so the nearest taps have v.v of the same ORDER as the old
-// epsilon and were being roughly halved before they were summed - exactly
-// the contact-shading samples that matter most, which is the likely reason
-// Intensity had to run at 2000.
-"        occ += max(0.0, dot(v, N) - cParam1.z * P.z) / (dot(v, v) + 0.0001);\n"
+// The SAO reference estimator, transcribed from the published shader
+// rather than recalled:
+//     f = max(radius2 - vv, 0) / radius2
+//     contribution = f*f*f * max(vn / (epsilon + vv), 0)
+// with epsilon = 0.01 and the bias subtracted from vn as a CONSTANT in
+// world units. Three things this settles, each guessed wrong here at some
+// point today:
+//   - there IS a range falloff and it is CUBED. Removing it was wrong;
+//     so was adding a squared one.
+//   - epsilon is 0.01, not 1e-4.
+//   - the bias is a constant subtraction, not the depth-proportional
+//     z*beta of the older Alchemy paper.
+"        float vv = dot(v, v);\n"
+"        float vn = dot(v, N) - cParam1.z;\n"
+"        float fo = saturate(1.0 - vv / r2);\n"
+"        occ += fo * fo * fo * max(vn / (0.01 + vv), 0.0);\n"
 "    }\n"
 "    float occN = occ / (float)(AO_TAPS);\n"
 "#endif\n"
@@ -717,9 +721,11 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     c0[3] = (float)g_aoStrengthPctE[est] / 100.0f;
     c1[0] = ((float)g_aoProj100E[est] / 100.0f) * ((float)h / (float)w);
     c1[1] = (float)g_aoProj100E[est] / 100.0f;
-    // Bias units differ per estimator: Alchemy multiplies by P.z inside the
-    // shader (depth-proportional), HBAO compares in sin-of-elevation space.
-    c1[2] = est ? 0.15f : 0.02f;
+    // Bias units differ per estimator. SAO subtracts a CONSTANT in world
+    // units from v.n ("e.g. 0.01m" in the reference); HBAO compares in
+    // sin-of-elevation space, where 0.15 suppresses the self-occlusion the
+    // ddx/ddy faceted normals manufacture on smooth surfaces.
+    c1[2] = est ? 0.15f : 0.01f;
     c1[3] = (float)g_aoIntensityE[est] / 100.0f;   // estimator gain, live-tunable
     c2[0] = mode;
     c2[1] = g_aoRespectFloor ? 1.0f : 0.0f;
