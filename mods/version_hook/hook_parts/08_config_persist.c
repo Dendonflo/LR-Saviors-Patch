@@ -215,22 +215,24 @@ static NumericSetting g_numerics[] = {
     // floor - deeper-than-stock creases, by user request ("very aggressive").
     // Per-estimator slots: the unprefixed keys are SSAO's (so values tuned
     // before HBAO existed keep meaning what they meant), AoHbao* are HBAO's.
-    { &g_aoStrengthPctE[0], "AoStrengthPct", 0, 200 },
-    // Intensity is an exponent for both estimators, with different ceilings.
-    // SSAO: 0.1..8.0, capped where SAO's contrast term goes negative.
-    // HBAO+: 0.1..4.0, the top of NVIDIA's own intensity slider.
-    { &g_aoIntensityE[0], "AoIntensity100", 10, 800 },
+    { &g_aoStrengthPctE[0], "AoStrengthPct", 0, 400 },
+    // Intensity is an exponent for both estimators. Ranges are deliberately
+    // far wider than either reference ships (SAO 1.0, HBAO+ 1.5) - the point
+    // of a tuning build is to find where a setting stops helping, which you
+    // cannot do from inside the range. SAO's contrast term is clamped in the
+    // shader so the curve cannot invert past 8.0.
+    { &g_aoIntensityE[0], "AoIntensity100", 1, 2000 },
     { &g_aoRadiusE[0],  "AoRadius100",   1, 100000 },
-    { &g_aoStrengthPctE[1], "AoHbaoStrengthPct", 0, 200 },
-    { &g_aoIntensityE[1], "AoHbaoIntensity100", 10, 400 },
+    { &g_aoStrengthPctE[1], "AoHbaoStrengthPct", 0, 400 },
+    { &g_aoIntensityE[1], "AoHbaoIntensity100", 1, 2000 },
     { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
     { &g_aoProj100E[0], "AoProj100",     10, 1000 },
     { &g_aoProj100E[1], "AoHbaoProj100", 10, 1000 },
     // Screen-radius ceiling, % of screen width. Below ~4 the AO becomes
     // contact-only; above ~15 near geometry samples unrelated scenery and
     // the estimator's variance shows up as low-resolution banding.
-    { &g_aoRadiusMaxPctE[0], "AoRadiusMaxPct",     1, 25 },
-    { &g_aoRadiusMaxPctE[1], "AoHbaoRadiusMaxPct", 1, 25 },
+    { &g_aoRadiusMaxPctE[0], "AoRadiusMaxPct",     1, 50 },
+    { &g_aoRadiusMaxPctE[1], "AoHbaoRadiusMaxPct", 1, 50 },
     // Bilateral blur pass (25_ssao.c): Sharp is the depth edge-stop - how
     // hard the blur refuses to smooth across depth discontinuities. 0 turns
     // the edge-stop off (plain gaussian, expect haloes); high values keep
@@ -255,15 +257,15 @@ static NumericSetting g_numerics[] = {
     // Medium tables stay in 25_ssao.c in case a performance tier is ever
     // wanted again. Old inis carrying AoQuality are ignored, as intended.
     { &g_aoBlur,        "AoBlur",        0, 1 },
-    { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 400 },
-    { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 400 },
+    { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
+    { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED
     // spacing, so reach grows 9/17/33/65px for a linear cost. Spread scales
     // the base spacing (100 = 1px between taps).
-    { &g_aoBlurPassesE[0], "AoBlurPasses",     1, 4 },
-    { &g_aoBlurPassesE[1], "AoHbaoBlurPasses", 1, 4 },
-    { &g_aoBlurStep100E[0], "AoBlurStep100",     25, 400 },
-    { &g_aoBlurStep100E[1], "AoHbaoBlurStep100", 25, 400 },
+    { &g_aoBlurPassesE[0], "AoBlurPasses",     0, 8 },
+    { &g_aoBlurPassesE[1], "AoHbaoBlurPasses", 0, 8 },
+    { &g_aoBlurStep100E[0], "AoBlurStep100",     5, 1600 },
+    { &g_aoBlurStep100E[1], "AoHbaoBlurStep100", 5, 1600 },
 #endif
     { &g_compactorDeferEnabled, "CompactorDefer",    0, 1 },
     { &g_compactorBudgetUs,     "CompactorBudgetUs", 100, 20000 },

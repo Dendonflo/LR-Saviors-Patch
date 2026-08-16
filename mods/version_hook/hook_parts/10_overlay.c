@@ -710,9 +710,9 @@ static struct {
     LONG loE[2], hiE[2];
     HWND bar;
 } g_aoRows[] = {
-    { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  200,  5, {   0,   0 }, {  200,  200 }, NULL },
-    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },   10,  800, 10, {  10,  10 }, {  800,  400 }, NULL },
-    { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },      10, 1500, 10, {  10,  10 }, { 1500, 1500 }, NULL },
+    { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  400,  5, {   0,   0 }, {  400,  400 }, NULL },
+    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },    1, 2000, 10, {   1,   1 }, { 2000, 2000 }, NULL },
+    { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },       1, 5000, 10, {   1,   1 }, { 5000, 5000 }, NULL },
     // Projection has NO row: it is measured from the engine's own
     // view-projection matrix every frame (24_ao_recon.c) and there is no
     // such thing as a preferred value for it - only the camera's actual
@@ -721,13 +721,25 @@ static struct {
     // true 317.
     // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
     // the projection, not an estimator preference.
-    { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   25,  1, {   1,   1 }, {   25,   25 }, NULL },
-    // Blur rows (shared; only meaningful with AoBlur=1). Sharp = depth
-    // edge-stop, 0 = plain gaussian. Passes = a-trous levels, each doubling
-    // reach. Spread = base tap spacing in pixels x100.
-    { "Blur Sharp",  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0,  400, 10, {   0,   0 }, {  400,  400 }, NULL },
-    { "Blur Passes", &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   1,    4,  1, {   1,   1 }, {    4,    4 }, NULL },
-    { "Blur Spread", &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] }, 25,  400, 25, {  25,  25 }, {  400,  400 }, NULL },
+    { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   50,  1, {   1,   1 }, {   50,   50 }, NULL },
+    // Blur rows (only meaningful with AoBlur=1). Sharp = depth edge-stop,
+    // 0 = plain gaussian. Passes = a-trous levels, each doubling reach.
+    // Spread = base tap spacing in pixels x100.
+    //
+    // Widened on all three, both ends (user request 2026-08-16), because
+    // HBAO+ landed outside them in BOTH directions: it wants less than the
+    // old one-pass floor and more than the old 400 edge-stop ceiling. That
+    // is not a coincidence - its noise is a structured 4x4 tile rather than
+    // white grain, so it needs less smoothing to resolve and can afford a
+    // much harder edge-stop before grain reappears along silhouettes.
+    //
+    // Passes 0 means NO blur pass, and it is a real value: the estimator
+    // output is left in RT A untouched, which is the texture the combine
+    // binds anyway. It overlaps the AoBlur toggle deliberately - one is a
+    // slider endpoint, the other a switch, and having both costs nothing.
+    { "Blur Sharp",  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0, 4000, 25, {   0,   0 }, { 4000, 4000 }, NULL },
+    { "Blur Passes", &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   0,    8,  1, {   0,   0 }, {    8,    8 }, NULL },
+    { "Blur Spread", &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] },  5, 1600, 25, {   5,   5 }, { 1600, 1600 }, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34

@@ -401,7 +401,14 @@ static const char *g_ssaoHlsl =
 // here previously - we had no contrast shaping at all.
 "        float f = saturate(1.0 - vv / r2);\n"
 "        float ao = f * saturate(vn - cParam1.z) / (0.015 + vv);\n"
-"        occ += ao * lerp(0.9 + 0.5 * cParam1.w, 1.2 - cParam1.w * 0.15, ao);\n"
+// max(..., 0) on the second lerp endpoint is OURS, and it is the one thing
+// that lets Intensity range past 8.0. The reference writes
+// 1.2 - intensity * 0.15 bare, which is fine for its own 0..2-ish intensity
+// but goes NEGATIVE past 8 - and a negative endpoint makes strongly occluded
+// taps subtract, so pushing Intensity up would eventually make creases
+// LIGHTER. Clamping at zero is identical to the reference everywhere the
+// reference is defined and merely stops the curve inverting beyond it.
+"        occ += ao * lerp(0.9 + 0.5 * cParam1.w, max(1.2 - cParam1.w * 0.15, 0.0), ao);\n"
 "    }\n"
 "    float occN = occ / (float)(AO_TAPS);\n"
 // The aggregation, reference main(), last line:
@@ -1263,8 +1270,15 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 AoBindTex(dev, 13, (IDirect3DBaseTexture9 *)g_aoDepthTex);
                 {
                     LONG passes = g_aoBlurPassesE[est];
-                    if (passes < 1) passes = 1;
-                    if (passes > 4) passes = 4;
+                    // 0 is a real setting now, not a floor to be clamped away
+                    // (user request 2026-08-16: HBAO+ wants LESS than one
+                    // pass). It is safe by construction rather than by luck:
+                    // each pass writes X into B then Y back into A, so the
+                    // finished AO always lives in A, and zero iterations
+                    // simply leaves the unblurred estimator output there -
+                    // which is exactly the texture the combine below binds.
+                    if (passes < 0) passes = 0;
+                    if (passes > 8) passes = 8;
                     // Resolution independence, via PASSES rather than spacing.
                     // Spacing cannot go below one texel - sub-texel taps land
                     // back on the same texel and the pass costs without
