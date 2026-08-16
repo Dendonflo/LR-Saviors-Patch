@@ -1797,6 +1797,11 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
 #if ENABLE_AO_RECON
     InstallAoReconHook(vtbl);
 #endif
+#if ENABLE_FOV_PROBE
+    // Only free to take because ENABLE_CASCADE_HUNT is 0 - it owns this slot
+    // when armed. If that ever comes back, one of the two has to give.
+    InstallFovProbe(vtbl);
+#endif
     LogLine("[rt] render-target inventory probe installed (CreateRenderTarget/CreateDepthStencilSurface/SetRenderTarget)");
 
     // GPU vendor, for the alpha-to-coverage backdoor (AMD and NVIDIA spell it

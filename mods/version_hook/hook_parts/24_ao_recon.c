@@ -829,6 +829,82 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
     return g_origSetTexture(dev, stage, tex);
 }
 
+#if ENABLE_FOV_PROBE
+// ---- Projection-scale probe (see the note at ENABLE_FOV_PROBE in 01) -----
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetVSConstF_Fov)(
+    IDirect3DDevice9 *, UINT, const float *, UINT);
+static PFN_SetVSConstF_Fov g_origSetVSConstFov = NULL;
+static volatile LONG g_fovProbeLogged = 0;
+
+// One candidate 4x4. Accepts either upload convention:
+//   row-vector (p * M):  M[2][3] == 1, M[3][3] == 0  -> columns are strided
+//   transposed (M * p):  M[3][2] == 1, M[3][3] == 0  -> columns are rows
+// Either way the two projection scales are the norms of the ORIGINAL
+// matrix's first two columns, because view is a rotation plus translation
+// and a rotation leaves column norms alone.
+static void FovProbeExamine(const float *m)
+{
+    float px = 0.0f, py = 0.0f;
+    const char *how;
+    if (m[11] > 0.99f && m[11] < 1.01f && m[15] > -0.01f && m[15] < 0.01f) {
+        // rows are m[0..3][0..3]; column c = m[0][c], m[1][c], m[2][c]
+        px = (float)sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
+        py = (float)sqrt(m[1] * m[1] + m[5] * m[5] + m[9] * m[9]);
+        how = "row-vector";
+    } else if (m[14] > 0.99f && m[14] < 1.01f && m[15] > -0.01f && m[15] < 0.01f) {
+        px = (float)sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        py = (float)sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+        how = "transposed";
+    } else {
+        return;
+    }
+    if (!(py > 0.4f && py < 6.0f) || !(px > 0.2f && px < 6.0f)) return;
+    {
+        // A perspective matrix's two scales differ by exactly the aspect
+        // ratio. Anything else is some other matrix that happened to carry
+        // a 1 in the right slot.
+        float ratio = px / py;
+        if (ratio < 0.35f || ratio > 1.05f) return;
+        if (InterlockedIncrement(&g_fovProbeLogged) <= 6) {
+            char l[224];
+            double fy = 2.0 * atan(1.0 / py) * 180.0 / 3.14159265358979;
+            double fx = 2.0 * atan(1.0 / px) * 180.0 / 3.14159265358979;
+            sprintf(l, "[fov] %s projX=%.4f projY=%.4f ratio=%.4f -> fovY=%.2f fovX=%.2f deg"
+                       "  ==> AoProj100 = %d",
+                    how, px, py, ratio, fy, fx, (int)(py * 100.0f + 0.5f));
+            LogLine(l);
+            LogFlushNow();
+        }
+        if (g_fovProbeLogged >= 6) g_fovProbeDone = 1;
+    }
+}
+
+static HRESULT STDMETHODCALLTYPE HookedSetVSConstFov(
+    IDirect3DDevice9 *This, UINT reg, const float *data, UINT count)
+{
+    // Hot path: one load and a branch once the probe has said its piece.
+    if (!g_fovProbeDone && data && count >= 4) {
+        __try {
+            for (UINT i = 0; i + 4 <= count; i++)
+                FovProbeExamine(data + i * 4);
+        } __except (EXCEPTION_EXECUTE_HANDLER) { g_fovProbeDone = 1; }
+    }
+    return g_origSetVSConstFov(This, reg, data, count);
+}
+
+static void InstallFovProbe(void **vtbl)
+{
+    DWORD oldProtect;
+    int slot = offsetof(IDirect3DDevice9Vtbl, SetVertexShaderConstantF) / sizeof(void *);
+    g_origSetVSConstFov = (PFN_SetVSConstF_Fov)ResolveOrigSlot(vtbl[slot]);
+    if (VirtualProtect(&vtbl[slot], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+        vtbl[slot] = (void *)HookedSetVSConstFov;
+        VirtualProtect(&vtbl[slot], sizeof(void *), oldProtect, &oldProtect);
+    }
+    LogLine("[fov] projection probe installed (reads viewProjMatrix column norms)");
+}
+#endif // ENABLE_FOV_PROBE
+
 // Called from the device-vtable install block in 16_output_res_cascade.c
 // (forward-declared in 01_config_gates.c) - same pattern, same timing as
 // every other device hook.

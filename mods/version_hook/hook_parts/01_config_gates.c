@@ -282,6 +282,28 @@ static volatile LONG g_aoDebugStage = 0;
 // the VIEW regardless - only the numbers can tell a real staircase from a
 // quantisation artifact of the visualisation.
 static volatile LONG g_aoStageDumpRequest;
+
+// ENABLE_FOV_PROBE - one-run calibration for AoProj100 (24_ao_recon.c).
+// The projection scale is NOT recoverable from the depth buffer: for any
+// plane 1/z comes out linear in screen position whatever scale you assume,
+// so no amount of looking at depth or normals constrains it. It has to
+// come from the engine.
+//
+// Static RE got most of the way: the script natives Camera::getCurrentFov
+// (0x009AA700) and Camera::getFieldDefaultFov (0x009AA810) show the camera
+// stores HALF-fov in RADIANS - the native multiplies by 180/pi and doubles
+// it - with a field default of 80 degrees and a 60 degree fallback. What
+// that cannot settle is whether 80 is vertical or horizontal, which is a
+// 1.8x difference in the answer (119 vs 212).
+//
+// So take it from the matrix instead. The engine uploads a constant it
+// names "viewProjMatrix", and for M = view * projection with an orthonormal
+// view part, the projection scales are exactly the norms of M's first two
+// columns - the rotation contributes nothing to a column norm. That yields
+// projX and projY directly, no FOV convention to guess at.
+#define ENABLE_FOV_PROBE 1
+static volatile LONG g_fovProbeDone;
+static void InstallFovProbe(void **vtbl);   // 24_ao_recon.c
 // Black-model bisect (2026-08-16): blackness FOLLOWS THE NEWEST-LOADED
 // MODEL (user-observed: switching weapons blackens the newly shown one),
 // while the dumped composite is unremarkable over the black object - so
