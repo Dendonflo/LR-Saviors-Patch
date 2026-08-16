@@ -774,7 +774,10 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         char t[64];
         for (size_t i = 0; i < AO_ROWS; i++) {
             int y = 10 + (int)i * AOTW_ROW_H;
-            TextOutA(dc, 10, y + 4, g_aoRows[i].name, (int)strlen(g_aoRows[i].name));
+            const char *nm = g_aoRows[i].name;
+            // Say so when a row is not the user's to set.
+            if (g_aoProjAuto && !strcmp(nm, "Projection")) nm = "Projection (auto)";
+            TextOutA(dc, 10, y + 4, nm, (int)strlen(nm));
             sprintf(t, "%ld", *g_aoRows[i].val);
             TextOutA(dc, 10 + AOTW_LABEL_W + AOTW_BAR_W + 8, y + 4, t, (int)strlen(t));
         }
@@ -1005,6 +1008,28 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                                    : "[ssao] raw view: off (panel checkbox)");
                     }
                 }
+            }
+            // Keep the sliders honest about values written from OUTSIDE the
+            // panel - the projection auto-calibration sets Projection behind
+            // its back, and a thumb that only syncs on open just lies.
+            if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
+                static LONG lastProjAuto = -1;
+                int dirty = 0;
+                for (size_t i = 0; i < AO_ROWS; i++) {
+                    if (!g_aoRows[i].bar) continue;
+                    if (GetScrollPos(g_aoRows[i].bar, SB_CTL) != (int)*g_aoRows[i].val) {
+                        SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
+                        dirty = 1;
+                    }
+                    // Projection is not the user's to set while auto owns it.
+                    if (g_aoProjAuto != lastProjAuto &&
+                        !strcmp(g_aoRows[i].name, "Projection")) {
+                        EnableWindow(g_aoRows[i].bar, g_aoProjAuto ? FALSE : TRUE);
+                        dirty = 1;
+                    }
+                }
+                lastProjAuto = g_aoProjAuto;
+                if (dirty) InvalidateRect(g_hAoTweak, NULL, TRUE);
             }
             // Resolution dropdown, polled for the same reason as the
             // checkbox. CB_GETCURSEL reports the COMMITTED selection, not
