@@ -920,7 +920,12 @@ static void AoSetEstimatorConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     // and gl_ssao's ssao.cpp ships bias = 0.1f with radius 2.0 and
     // intensity 1.5. Note HBAO+ also derives AOMultiplier = 1/(1 - bias)
     // from this value - that is applied in the shader, not here.
-    c1[2] = est ? 0.10f : 0.02f;
+    // Live-tunable since 2026-08-16: this was two hardcoded constants, which
+    // made the one control designed for false occlusion on smooth ground the
+    // only thing in either estimator you could not reach. Defaults are
+    // unchanged (0.020 / 0.100), so exposing it moves nothing on its own.
+    c1[2] = (float)g_aoBiasE[est] / 1000.0f;
+    if (est && c1[2] > 0.95f) c1[2] = 0.95f;   // HBAO+ divides by (1 - bias)
     // Intensity is an EXPONENT for BOTH estimators now, but not the same
     // exponent: SAO raises pow(1 - sqrt(mean), I) with a shipped default of
     // 1.0, HBAO+ raises pow(1 - 2*mean, I) with a shipped default of 1.5.

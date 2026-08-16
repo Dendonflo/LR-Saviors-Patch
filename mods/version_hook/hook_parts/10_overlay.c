@@ -713,6 +713,11 @@ static struct {
     { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  400,  5, {   0,   0 }, {  400,  400 }, NULL },
     { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },    1, 2000, 10, {   1,   1 }, { 2000, 2000 }, NULL },
     { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },       1, 5000, 10, {   1,   1 }, { 5000, 5000 }, NULL },
+    // Bias x1000 - the lever for false shading on smooth sloping ground.
+    // Reads as a world-space distance for SSAO and as an angle above the
+    // tangent plane for HBAO+ (500 = 30 deg, the angle bias the 2008 HBAO
+    // talk illustrates). Same slider, genuinely different units.
+    { "Bias",        &g_aoBiasE[0],        { &g_aoBiasE[0],        &g_aoBiasE[1] },         0,  950,  5, {   0,   0 }, {  950,  950 }, NULL },
     // Projection has NO row: it is measured from the engine's own
     // view-projection matrix every frame (24_ao_recon.c) and there is no
     // such thing as a preferred value for it - only the camera's actual

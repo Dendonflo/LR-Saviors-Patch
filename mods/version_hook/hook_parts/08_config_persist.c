@@ -226,6 +226,11 @@ static NumericSetting g_numerics[] = {
     { &g_aoStrengthPctE[1], "AoHbaoStrengthPct", 0, 400 },
     { &g_aoIntensityE[1], "AoHbaoIntensity100", 1, 2000 },
     { &g_aoRadiusE[1],  "AoHbaoRadius100", 1, 100000 },
+    // Bias x1000. See g_aoBiasE: a world-space distance for SSAO, an angle
+    // cosine for HBAO+. Capped short of 1000 because HBAO+ derives
+    // 1/(1 - bias) from it.
+    { &g_aoBiasE[0], "AoBias1000",     0, 950 },
+    { &g_aoBiasE[1], "AoHbaoBias1000", 0, 950 },
     { &g_aoProj100E[0], "AoProj100",     10, 1000 },
     { &g_aoProj100E[1], "AoHbaoProj100", 10, 1000 },
     // Screen-radius ceiling, % of screen width. Below ~4 the AO becomes

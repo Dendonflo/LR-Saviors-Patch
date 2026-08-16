@@ -274,6 +274,22 @@ static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct /
 // number would give SAO.
 static volatile LONG g_aoIntensityE[2] = { 100, 150 };    // ini AoIntensity100 / AoHbaoIntensity100
 static volatile LONG g_aoRadiusE[2] = { 75, 200 };        // ini AoRadius100 / AoHbaoRadius100
+// Bias x1000. The knob for false occlusion on smooth, gently curving ground
+// - the HBAO talk's "low-tessellation problem", where the tangent plane does
+// not match the coarse surface and the estimator invents shading that is not
+// there. It is NOT the same quantity in the two estimators:
+//   SSAO  (SAO): subtracted from v.n in WORLD UNITS, so it is a distance -
+//                "increasing bias increases the maximum concavity that can
+//                occur before AO begins". Shipped default 0.02.
+//   HBAO+ (NVIDIA): subtracted from the NORMALISED n.v, a dimensionless
+//                cosine, so it reads directly as an angle above the tangent
+//                plane: 0.1 ~ 5.7 deg, 0.5 = 30 deg - which is the angle
+//                bias the 2008 talk illustrates as its own default. Shipped
+//                default 0.1, and AOMultiplier = 1/(1 - bias) compensates in
+//                the shader so raising it does not merely dim the effect.
+// Ceiling 950 rather than NVIDIA's 0.9999: that multiplier is 1/(1 - bias),
+// and this codebase has learned twice what one INF in the shadow term does.
+static volatile LONG g_aoBiasE[2] = { 20, 100 };      // ini AoBias1000 / AoHbaoBias1000
 static volatile LONG g_aoProj100E[2] = { 130, 130 };  // ini AoProj100 / AoHbaoProj100
 // Ceiling on the SCREEN-space sample radius, percent of screen width. The
 // world-space Radius projects larger the closer geometry is, and without a
