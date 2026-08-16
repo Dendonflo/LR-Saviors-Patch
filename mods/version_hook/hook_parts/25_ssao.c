@@ -428,12 +428,23 @@ typedef HRESULT (WINAPI *PFN_D3DXCompileShader)(
 #define AO_VARIANTS 6
 static IDirect3DPixelShader9 *g_aoPs[AO_VARIANTS];
 static LONG g_aoPsState[AO_VARIANTS];    // 0 not tried, 1 ok, -1 failed
-// Low / Medium / High. HBAO counts are dirs x steps, so its totals are
-// 8 / 16 / 24 against Alchemy's 8 / 12 / 20 - deliberately close, so
-// switching estimator at a given tier is roughly cost-neutral.
+// Low / Medium / High. HBAO totals are 12 / 16 / 24 against Alchemy's
+// 8 / 12 / 20 - close enough that switching estimator at a tier is roughly
+// cost-neutral.
+//
+// HBAO varies DIRECTIONS ONLY; its step count is fixed at 4 deliberately.
+// The direction loop is a proper average (sum, then divide by AO_DIRS), so
+// changing it does not move the result's magnitude. The step loop is a
+// MAX - it marches outward hunting the highest horizon - so more steps
+// find higher horizons and occlusion rises with step count, which no
+// normalisation can undo (you cannot average away a maximum). Tiering on
+// steps made Low genuinely under-occlude and read as a quality-linked
+// intensity change (user-observed). Alchemy has no such problem: its
+// spiral distributes radii as sqrt((i+0.5)/TAPS), so any tap count samples
+// the same disc uniformly and occ/TAPS is a clean Monte Carlo average.
 static const char *g_aoQTaps[3]  = { "8", "12", "20" };
-static const char *g_aoQDirs[3]  = { "4", "4",  "6"  };
-static const char *g_aoQSteps[3] = { "2", "4",  "4"  };
+static const char *g_aoQDirs[3]  = { "3", "4",  "6"  };
+static const char *g_aoQSteps[3] = { "4", "4",  "4"  };
 static IDirect3DPixelShader9 *g_aoBlurPs = NULL;
 static LONG g_aoBlurState = 0;
 static IDirect3DPixelShader9 *g_aoCombinePs = NULL;
