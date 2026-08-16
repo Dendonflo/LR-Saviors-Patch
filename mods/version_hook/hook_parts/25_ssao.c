@@ -247,6 +247,35 @@ static const char *g_aoBlurHlsl =
 "    return float4(v, v, v, 1.0);\n"
 "}\n";
 
+// Combine pass (v25f). THE reason this exists: a blend cannot read its own
+// destination, so "multiply, but never below the engine's floor" is not
+// expressible as blend state. Measured with an A/B dump pair: the engine's
+// own composite minimum is EXACTLY 128 (0.5) frame-wide, and dst*src drove
+// it to 64 - engine floor 0.5 times our floor 0.5 - because a MULTIPLY
+// STACKS. Clamping our own term (v25e) could not fix that; the product is
+// what has to be clamped, so the destination has to be readable. It is
+// copied into RT B first and this pass writes the clamped result back.
+//
+// Alpha is protected here by the WRITE MASK (COLORWRITEENABLE = RGB only)
+// rather than by pinned blend factors - strictly safer, since it cannot be
+// defeated by whatever the engine left in the blend state.
+static const char *g_aoCombineHlsl =
+"sampler2D aoTex  : register(s0);\n"
+"sampler2D engTex : register(s1);\n"   // copy of the engine's own composite
+"float4 cK0 : register(c0);\n"         // x=respect floor  y=passthrough
+"float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+"    float3 ao = tex2D(aoTex, uv).rgb;\n"
+"    if (cK0.y > 0.5) return float4(ao, 1.0);\n"   // raw view / debug bands
+"    float3 eng = tex2D(engTex, uv).rgb;\n"
+"    float3 outc = eng * ao.r;\n"
+// Where the engine is already at its maximum darkness, AO adds nothing;
+// where it is lit, AO may darken it to that same maximum and no further.
+// The two occlusions merge instead of stacking - which was the original
+// v24 MIN-blend intent, finally expressible now that dst is readable.
+"    if (cK0.x > 0.5) outc = max(outc, 0.5);\n"
+"    return float4(outc, 1.0);\n"
+"}\n";
+
 typedef struct ID3DXBuffer ID3DXBuffer;   // vtable slots used: 3 GetBufferPointer, 4 GetBufferSize
 typedef struct { const char *Name, *Definition; } AoHlslMacro;   // D3DXMACRO layout
 typedef HRESULT (WINAPI *PFN_D3DXCompileShader)(
@@ -260,6 +289,8 @@ static IDirect3DPixelShader9 *g_aoPs[2] = { NULL, NULL };
 static LONG g_aoPsState[2] = { 0, 0 };   // 0 not tried, 1 ok, -1 failed
 static IDirect3DPixelShader9 *g_aoBlurPs = NULL;
 static LONG g_aoBlurState = 0;
+static IDirect3DPixelShader9 *g_aoCombinePs = NULL;
+static LONG g_aoCombineState = 0;
 static volatile LONG g_ssaoDraws = 0;
 
 // The blur ping-pong pair, sized to the composite. D3DPOOL_DEFAULT: released
@@ -338,6 +369,11 @@ static void AoEnsureShaders(IDirect3DDevice9 *dev, int est)
         g_aoBlurPs = AoCompilePs(dev, g_aoBlurHlsl, NULL,
                                  "bilateral blur (9-tap separable)");
         g_aoBlurState = g_aoBlurPs ? 1 : -1;
+    }
+    if (g_aoCombineState == 0) {
+        g_aoCombinePs = AoCompilePs(dev, g_aoCombineHlsl, NULL,
+                                    "combine (floor-clamped merge)");
+        g_aoCombineState = g_aoCombinePs ? 1 : -1;
     }
 }
 
@@ -503,13 +539,18 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
     else     { if (fr == lastFrame)    return; lastFrame = fr; }
 
     int est = (g_aoEnable == 2) ? 1 : 0;
-    if (g_aoPsState[est] == 0 || (g_aoBlur && g_aoBlurState == 0))
+    if (g_aoPsState[est] == 0 || g_aoBlurState == 0 || g_aoCombineState == 0)
         AoEnsureShaders(dev, est);
     if (g_aoPsState[est] != 1) return;
     if (!g_aoDepthTex) return;
 
-    // Debug bands are a pipeline diagnostic - never blurred. Blur also
-    // degrades to direct if its shader or RTs failed.
+    // The RT path is now used for EVERY mode, not just blurred ones: the
+    // floor clamp needs the engine's own buffer readable, which means our
+    // AO has to live in a texture and the destination has to be written by
+    // a shader rather than by blend state. Debug bands still skip the blur
+    // (they are a pipeline diagnostic, and smoothing them hides exactly
+    // what they exist to show).
+    int useRt = (g_aoCombineState == 1) ? 1 : 0;
     int useBlur = (g_aoBlur && !g_aoDebug && g_aoBlurState == 1) ? 1 : 0;
 
     IDirect3DSurface9 *dstSurf = NULL, *oldRt = NULL;
@@ -562,23 +603,24 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         }
         if (FAILED(IDirect3DDevice9_CreateStateBlock(dev, D3DSBT_ALL, &sb)) || !sb) goto done;
 
-        if (useBlur) {
+        if (useRt) {
             if (raw) {
                 // The raw view rides the RT pair the normal path owns (it
                 // only draws while AoEnable is on, so the pair exists at
                 // composite size). Creating a second pair at backbuffer
                 // size would thrash recreation every frame under SSAA.
-                if (!g_aoRtA || !g_aoRtB) useBlur = 0;
+                if (!g_aoRtA || !g_aoRtB) useRt = 0;
             } else {
-                if (!AoEnsureRts(dev, d.Width, d.Height)) useBlur = 0;
+                if (!AoEnsureRts(dev, d.Width, d.Height)) useRt = 0;
             }
         }
-        if (useBlur) {
+        if (useRt) {
             if (FAILED(IDirect3DTexture9_GetSurfaceLevel(g_aoRtA, 0, &surfA)) || !surfA)
-                useBlur = 0;
+                useRt = 0;
             else if (FAILED(IDirect3DTexture9_GetSurfaceLevel(g_aoRtB, 0, &surfB)) || !surfB)
-                useBlur = 0;
+                useRt = 0;
         }
+        if (!useRt) useBlur = 0;
 
         // States shared by every pass.
         IDirect3DDevice9_SetVertexShader(dev, NULL);
@@ -591,54 +633,91 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         g_origSetRenderState(dev, D3DRS_STENCILENABLE, FALSE);
         g_origSetRenderState(dev, D3DRS_SCISSORTESTENABLE, FALSE);
 
-        if (useBlur) {
+        if (useRt) {
             UINT rw = (UINT)g_aoRtW, rh = (UINT)g_aoRtH;
             // Pass 1: estimator -> RT A, opaque. Raw mode writes aoBase
-            // (mode 3), normal writes the [0.5..1] term (mode 0) - the
-            // mapping is linear, so blurring the term equals blurring ao.
+            // (mode 3), debug writes the bands, normal writes the [0.5..1]
+            // term (mode 0) - the mapping is linear, so blurring the term
+            // equals blurring ao.
             if (!AoTarget(dev, surfA, rw, rh)) goto done;
             IDirect3DDevice9_SetPixelShader(dev, g_aoPs[est]);
             AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoDepthTex);
             AoBlendOpaque(dev, 0x0F);
-            AoSetEstimatorConsts(dev, rw, rh, raw ? 3.0f : 0.0f, est);
+            AoSetEstimatorConsts(dev, rw, rh,
+                                 raw ? 3.0f : (g_aoDebug ? 1.0f : 0.0f), est);
             AoDrawFsQuad(dev, rw, rh);
 
             // A-trous levels: each is a separable H then V with the spacing
-            // doubled, ping-ponging A->B->A. The LAST vertical pass targets
-            // the destination directly, so the extra levels cost two draws
-            // each and no extra buffer.
-            IDirect3DDevice9_SetPixelShader(dev, g_aoBlurPs);
-            AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoDepthTex);
-            {
-                LONG passes = g_aoBlurPasses;
-                if (passes < 1) passes = 1;
-                if (passes > 4) passes = 4;
-                float base = (float)g_aoBlurStep100 / 100.0f;
-                for (LONG p = 0; p < passes; p++) {
-                    float spacing = base * (float)(1 << p);
-                    int last = (p == passes - 1);
-                    // Horizontal: A -> B, always opaque and at RT size.
-                    if (!AoTarget(dev, surfB, rw, rh)) goto done;
-                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
-                    AoBlendOpaque(dev, 0x0F);
-                    AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing);
-                    AoDrawFsQuad(dev, rw, rh);
-                    // Vertical: B -> A, or on the last level B -> the
-                    // destination (multiply with the alpha pin into the
-                    // composite; opaque overwrite for the raw view).
-                    if (last) {
-                        if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
-                        if (raw) AoBlendOpaque(dev, 0x0F);
-                        else     AoBlendMultiply(dev);
-                    } else {
-                        if (!AoTarget(dev, surfA, rw, rh)) goto done;
+            // doubled, ping-ponging A->B->A. Unlike v25b the vertical pass
+            // ALWAYS lands back in A: the destination is now written by the
+            // combine pass, which needs the finished AO in a texture it can
+            // sample alongside the engine's own buffer.
+            if (useBlur) {
+                IDirect3DDevice9_SetPixelShader(dev, g_aoBlurPs);
+                AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoDepthTex);
+                {
+                    LONG passes = g_aoBlurPasses;
+                    if (passes < 1) passes = 1;
+                    if (passes > 4) passes = 4;
+                    float base = (float)g_aoBlurStep100 / 100.0f;
+                    for (LONG p = 0; p < passes; p++) {
+                        float spacing = base * (float)(1 << p);
+                        if (!AoTarget(dev, surfB, rw, rh)) goto done;
+                        AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
                         AoBlendOpaque(dev, 0x0F);
+                        AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, spacing);
+                        AoDrawFsQuad(dev, rw, rh);
+                        if (!AoTarget(dev, surfA, rw, rh)) goto done;
+                        AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtB);
+                        AoBlendOpaque(dev, 0x0F);
+                        AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing);
+                        AoDrawFsQuad(dev, rw, rh);
                     }
-                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtB);
-                    AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, spacing);
-                    AoDrawFsQuad(dev, last ? d.Width : rw, last ? d.Height : rh);
                 }
             }
+
+            // Final pass. Passthrough for the raw view (onto the backbuffer,
+            // all channels) and for the debug bands (into the composite, RGB
+            // only). Otherwise the combine: snapshot the engine's own buffer
+            // into RT B, then write eng*ao clamped to its floor. Alpha is
+            // never written in either composite case - the write mask, not
+            // blend factors, is what protects the sun-shadow mask now.
+            IDirect3DDevice9_SetPixelShader(dev, g_aoCombinePs);
+            {
+                float k0[4];
+                k0[0] = g_aoRespectFloor ? 1.0f : 0.0f;
+                k0[1] = (raw || g_aoDebug) ? 1.0f : 0.0f;
+                k0[2] = k0[3] = 0.0f;
+                if (!raw && !g_aoDebug) {
+                    // RT B is still bound at s0 from the last blur pass, and
+                    // it is about to be a StretchRect DESTINATION - a texture
+                    // that is simultaneously a sampler source and a copy
+                    // target is exactly the hazard D3D9 leaves undefined.
+                    // Bind the finished AO (A) first, which displaces it.
+                    AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                    if (FAILED(IDirect3DDevice9_StretchRect(
+                            dev, dstSurf, NULL, surfB, NULL, D3DTEXF_NONE))) {
+                        // No snapshot means no floor clamp is possible; fall
+                        // back to the stacking multiply rather than drawing
+                        // an un-combined AO term over the engine's buffer.
+                        if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
+                        AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                        IDirect3DDevice9_SetPixelShader(dev, g_aoCombinePs);
+                        k0[1] = 1.0f;
+                        IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
+                        AoBlendMultiply(dev);
+                        AoDrawFsQuad(dev, d.Width, d.Height);
+                        goto drew;
+                    }
+                    AoBindTex(dev, 1, (IDirect3DBaseTexture9 *)g_aoRtB);
+                }
+                if (!AoTarget(dev, dstSurf, d.Width, d.Height)) goto done;
+                AoBindTex(dev, 0, (IDirect3DBaseTexture9 *)g_aoRtA);
+                AoBlendOpaque(dev, raw ? 0x0F : 0x07);
+                IDirect3DDevice9_SetPixelShaderConstantF(dev, 0, k0, 1);
+                AoDrawFsQuad(dev, d.Width, d.Height);
+            }
+        drew:;
         } else {
             // Single-pass direct path (AoBlur=0, debug bands, or blur infra
             // unavailable) - the v24 behavior, unchanged.
@@ -666,10 +745,12 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
         InterlockedIncrement(&g_ssaoDraws);
         if (g_ssaoDraws == 1) {
             char l[128];
-            sprintf(l, "[ssao] first draw: est=%s path=%s",
+            sprintf(l, "[ssao] first draw: est=%s path=%s floor=%s",
                     est ? "HBAO" : "Alchemy",
-                    useBlur ? "estimator->blurH->blurV->composite"
-                            : (g_aoDebug ? "DEBUG bands direct" : "direct multiply"));
+                    !useRt ? "LEGACY direct multiply (no combine shader)"
+                           : (useBlur ? "estimator->atrous->combine"
+                                      : (g_aoDebug ? "DEBUG bands" : "estimator->combine")),
+                    g_aoRespectFloor ? "clamped to engine 0.5" : "unclamped");
             LogLine(l);
         }
     done:;
