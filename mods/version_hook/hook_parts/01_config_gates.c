@@ -261,7 +261,7 @@ static volatile LONG g_aoDebug = 0;           // ini AoDebug: raw AO view
 // estimators' scales don't translate, Intensity especially. Projection and
 // BlurSharp stay shared: they describe the camera and the blur, not the
 // estimator. The tuning panel re-points its sliders to the live slot.
-static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct / AoHbaoStrengthPct
+static volatile LONG g_aoStrengthPctE[2] = { 149, 149 };  // ini AoStrengthPct / AoHbaoStrengthPct
 // Every default below is its own reference's shipped value, and the two
 // references do not agree - which is fine, because these are two different
 // algorithms that merely share a slider.
@@ -272,8 +272,8 @@ static volatile LONG g_aoStrengthPctE[2] = { 100, 100 };  // ini AoStrengthPct /
 // The HBAO+ radius only looks large next to SAO's: NVIDIA's RadiusToScreen
 // carries an extra 0.5, so the disc it actually walks is half what the same
 // number would give SAO.
-static volatile LONG g_aoIntensityE[2] = { 100, 150 };    // ini AoIntensity100 / AoHbaoIntensity100
-static volatile LONG g_aoRadiusE[2] = { 75, 200 };        // ini AoRadius100 / AoHbaoRadius100
+static volatile LONG g_aoIntensityE[2] = { 522, 400 };    // ini AoIntensity100 / AoHbaoIntensity100
+static volatile LONG g_aoRadiusE[2] = { 40, 169 };        // ini AoRadius100 / AoHbaoRadius100
 // Bias x1000. The knob for false occlusion on smooth, gently curving ground
 // - the HBAO talk's "low-tessellation problem", where the tangent plane does
 // not match the coarse surface and the estimator invents shading that is not
@@ -289,13 +289,13 @@ static volatile LONG g_aoRadiusE[2] = { 75, 200 };        // ini AoRadius100 / A
 //                the shader so raising it does not merely dim the effect.
 // Ceiling 950 rather than NVIDIA's 0.9999: that multiplier is 1/(1 - bias),
 // and this codebase has learned twice what one INF in the shadow term does.
-static volatile LONG g_aoBiasE[2] = { 20, 100 };      // ini AoBias1000 / AoHbaoBias1000
+static volatile LONG g_aoBiasE[2] = { 101, 300 };      // ini AoBias1000 / AoHbaoBias1000
 static volatile LONG g_aoProj100E[2] = { 130, 130 };  // ini AoProj100 / AoHbaoProj100
 // Ceiling on the SCREEN-space sample radius, percent of screen width. The
 // world-space Radius projects larger the closer geometry is, and without a
 // sane ceiling near-camera pixels sample a quarter of the screen - distant
 // unrelated geometry, huge variance, banding. 10 = 10% of screen width.
-static volatile LONG g_aoRadiusMaxPctE[2] = { 10, 10 };
+static volatile LONG g_aoRadiusMaxPctE[2] = { 10, 8 };
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
@@ -360,7 +360,7 @@ static volatile LONG g_aoBisect = 0;
 // influence. 0 = off. Session-only, same non-persistence rule as bisect.
 static volatile LONG g_aoFlatTest = 0;
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
-static volatile LONG g_aoBlurSharpE[2] = { 40, 40 };  // ini AoBlurSharp / AoHbaoBlurSharp
+static volatile LONG g_aoBlurSharpE[2] = { 681, 915 };  // ini AoBlurSharp / AoHbaoBlurSharp
 static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside the
                                               //   engine's [0.5..1] shadow envelope
 // AO buffer resolution. The DIVISOR is applied to the DISPLAY resolution,
@@ -386,8 +386,8 @@ static volatile LONG g_aoUpsampleDepth = 1;
 // the status panel (part 10) can read them despite coming earlier in the TU.
 static LONG g_aoRtW, g_aoRtH;
 static volatile LONG g_ssaoDraws;
-static volatile LONG g_aoBlurPassesE[2] = { 2, 2 };   // ini AoBlurPasses / AoHbaoBlurPasses
-static volatile LONG g_aoBlurStep100E[2] = { 100, 100 };  // ini AoBlurStep100 / AoHbaoBlurStep100
+static volatile LONG g_aoBlurPassesE[2] = { 4, 1 };   // ini AoBlurPasses / AoHbaoBlurPasses
+static volatile LONG g_aoBlurStep100E[2] = { 75, 5 };  // ini AoBlurStep100 / AoHbaoBlurStep100
 static void SsaoReleaseRts(void);             // 25_ssao.c - the blur RT pair is
                                               //   D3DPOOL_DEFAULT; AoReconReset calls this
 #endif
