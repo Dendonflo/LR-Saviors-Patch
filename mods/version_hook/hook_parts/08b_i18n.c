@@ -49,6 +49,10 @@ typedef enum {
     S_RES_NATIVE,
     S_RES_HALF,
     S_RES_QUARTER,
+    S_RESET_ALL,
+    S_RESET_AO,
+    S_RESET_ASK_ALL,
+    S_RESET_ASK_AO,
     S_COUNT
 } ModStr;
 
@@ -356,6 +360,46 @@ static const wchar_t *const g_i18n[S_COUNT][LANG_COUNT] = {
         /* ja */ L"1/4",
         /* zh */ L"\u56DB\u5206\u4E4B\u4E00",
         /* ko */ L"1/4",
+    },
+    /* S_RESET_ALL */ {
+        /* en */ L"Reset all settings",
+        /* fr */ L"R\u00E9initialiser tous les r\u00E9glages",
+        /* de */ L"Alle Einstellungen zur\u00FCcksetzen",
+        /* it */ L"Reimposta tutte le impostazioni",
+        /* es */ L"Restablecer todos los ajustes",
+        /* ja */ L"\u3059\u3079\u3066\u306E\u8A2D\u5B9A\u3092\u30EA\u30BB\u30C3\u30C8",
+        /* zh */ L"\u91CD\u8A2D\u6240\u6709\u8A2D\u5B9A",
+        /* ko */ L"\uBAA8\uB4E0 \uC124\uC815 \uCD08\uAE30\uD654",
+    },
+    /* S_RESET_AO */ {
+        /* en */ L"Reset AO settings",
+        /* fr */ L"R\u00E9initialiser les r\u00E9glages AO",
+        /* de */ L"AO-Einstellungen zur\u00FCcksetzen",
+        /* it */ L"Reimposta le impostazioni AO",
+        /* es */ L"Restablecer los ajustes de AO",
+        /* ja */ L"AO\u8A2D\u5B9A\u3092\u30EA\u30BB\u30C3\u30C8",
+        /* zh */ L"\u91CD\u8A2D AO \u8A2D\u5B9A",
+        /* ko */ L"AO \uC124\uC815 \uCD08\uAE30\uD654",
+    },
+    /* S_RESET_ASK_ALL */ {
+        /* en */ L"Reset every setting to its default value?",
+        /* fr */ L"R\u00E9initialiser tous les r\u00E9glages \u00E0 leur valeur par d\u00E9faut ?",
+        /* de */ L"Alle Einstellungen auf ihre Standardwerte zur\u00FCcksetzen?",
+        /* it */ L"Reimpostare tutte le impostazioni ai valori predefiniti?",
+        /* es */ L"\u00BFRestablecer todos los ajustes a sus valores predeterminados?",
+        /* ja */ L"\u3059\u3079\u3066\u306E\u8A2D\u5B9A\u3092\u521D\u671F\u5024\u306B\u623B\u3057\u307E\u3059\u304B?",
+        /* zh */ L"\u8981\u5C07\u6240\u6709\u8A2D\u5B9A\u91CD\u8A2D\u70BA\u9810\u8A2D\u503C\u55CE?",
+        /* ko */ L"\uBAA8\uB4E0 \uC124\uC815\uC744 \uAE30\uBCF8\uAC12\uC73C\uB85C \uB418\uB3CC\uB9B4\uAE4C\uC694?",
+    },
+    /* S_RESET_ASK_AO */ {
+        /* en */ L"Reset the AO tuning values to their defaults?",
+        /* fr */ L"R\u00E9initialiser les r\u00E9glages AO \u00E0 leurs valeurs par d\u00E9faut ?",
+        /* de */ L"Die AO-Feineinstellungen auf ihre Standardwerte zur\u00FCcksetzen?",
+        /* it */ L"Reimpostare i valori di regolazione AO ai predefiniti?",
+        /* es */ L"\u00BFRestablecer los valores de ajuste de AO a sus predeterminados?",
+        /* ja */ L"AO\u306E\u8ABF\u6574\u5024\u3092\u521D\u671F\u5024\u306B\u623B\u3057\u307E\u3059\u304B?",
+        /* zh */ L"\u8981\u5C07 AO \u8ABF\u6574\u503C\u91CD\u8A2D\u70BA\u9810\u8A2D\u503C\u55CE?",
+        /* ko */ L"AO \uC870\uC815 \uAC12\uC744 \uAE30\uBCF8\uAC12\uC73C\uB85C \uB418\uB3CC\uB9B4\uAE4C\uC694?",
     },
 };
 

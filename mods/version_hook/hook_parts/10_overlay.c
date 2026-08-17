@@ -762,6 +762,7 @@ static HWND g_hAoRawCheck = NULL;
 // upsample both key off it - and a dropdown states the three choices
 // better than a radio group buried a menu level away.
 #define AOTW_COMBO_ID 4002
+#define AOTW_RESET_ID 4003
 static HWND g_hAoResCombo = NULL;
 static const LONG g_aoResDivs[3] = { 1, 2, 4 };
 static int AoResIndexOf(LONG div)
@@ -827,6 +828,28 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InterlockedExchange(&g_aoRawView, on);
             return 0;   // not persisted, so nothing to save
         }
+        // Restores only what this window shows - the eight sliders for BOTH
+        // estimators plus the resolution - never AoEnable, so the effect does
+        // not switch itself off under the button that was pressed. Confirmed:
+        // it discards tuning that can represent a lot of work.
+        if (LOWORD(wp) == AOTW_RESET_ID && HIWORD(wp) == BN_CLICKED) {
+            if (MessageBoxW(h, TR(S_RESET_ASK_AO), MOD_NAME_W,
+                            MB_YESNO | MB_ICONWARNING) == IDYES) {
+                size_t i;
+                CfgResetDefaults(1);
+                // Re-seed the controls from the restored values; the poll loop
+                // would get there eventually but the window is in front of the
+                // user right now.
+                for (i = 0; i < AO_ROWS; i++)
+                    if (g_aoRows[i].bar)
+                        SetScrollPos(g_aoRows[i].bar, SB_CTL, (int)*g_aoRows[i].val, TRUE);
+                if (g_hAoResCombo)
+                    SendMessageW(g_hAoResCombo, CB_SETCURSEL,
+                                 (WPARAM)AoResIndexOf(g_aoResDiv), 0);
+                InvalidateRect(h, NULL, TRUE);
+            }
+            return 0;
+        }
         break;
     case WM_CLOSE:
         // Hide, don't destroy: reopening keeps positions, and the menu
@@ -865,7 +888,7 @@ static void EnsureAoTweakWindow(void)
     RegisterClassW(&wc);
     int cw = 10 + AOTW_LABEL_W + AOTW_BAR_W + 8 + AOTW_VAL_W + 10;
     // rows + the raw-view checkbox + the resolution dropdown
-    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 28 + 30;
+    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 28 + 30 + 28;   // + reset button
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
     g_hAoTweak = CreateWindowExW(
@@ -924,8 +947,18 @@ static void EnsureAoTweakWindow(void)
         SendMessageW(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)TR(S_RES_NATIVE));
         SendMessageW(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)TR(S_RES_HALF));
         SendMessageW(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)TR(S_RES_QUARTER));
-        SendMessageA(g_hAoResCombo, CB_SETCURSEL,
+        SendMessageW(g_hAoResCombo, CB_SETCURSEL,
                      (WPARAM)AoResIndexOf(g_aoResDiv), 0);
+    }
+    {
+        // "Reset AO settings", under the dropdown, aligned with the controls
+        // column so it reads as the last row of the list.
+        HWND b = CreateWindowExW(
+            0, L"BUTTON", TR(S_RESET_AO), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + 56,
+            AOTW_BAR_W + 8 + AOTW_VAL_W, 24,
+            g_hAoTweak, (HMENU)(UINT_PTR)AOTW_RESET_ID, wc.hInstance, NULL);
+        if (b) SendMessageW(b, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
     }
 }
 #endif // ENABLE_AO_SSAO

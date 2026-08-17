@@ -163,6 +163,35 @@ TABLE = [
     ("S_RES_QUARTER", [
         "Quarter", "Quart", "Viertel", "Quarto",
         "Cuarto", "1/4", "四分之一", "1/4"]),
+    # ---- reset actions ----
+    ("S_RESET_ALL", [
+        "Reset all settings", "Réinitialiser tous les réglages",
+        "Alle Einstellungen zurücksetzen", "Reimposta tutte le impostazioni",
+        "Restablecer todos los ajustes", "すべての設定をリセット",
+        "重設所有設定", "모든 설정 초기화"]),
+    ("S_RESET_AO", [
+        "Reset AO settings", "Réinitialiser les réglages AO",
+        "AO-Einstellungen zurücksetzen", "Reimposta le impostazioni AO",
+        "Restablecer los ajustes de AO", "AO設定をリセット",
+        "重設 AO 設定", "AO 설정 초기화"]),
+    ("S_RESET_ASK_ALL", [
+        "Reset every setting to its default value?",
+        "Réinitialiser tous les réglages à leur valeur par défaut ?",
+        "Alle Einstellungen auf ihre Standardwerte zurücksetzen?",
+        "Reimpostare tutte le impostazioni ai valori predefiniti?",
+        "¿Restablecer todos los ajustes a sus valores predeterminados?",
+        "すべての設定を初期値に戻しますか?",
+        "要將所有設定重設為預設值嗎?",
+        "모든 설정을 기본값으로 되돌릴까요?"]),
+    ("S_RESET_ASK_AO", [
+        "Reset the AO tuning values to their defaults?",
+        "Réinitialiser les réglages AO à leurs valeurs par défaut ?",
+        "Die AO-Feineinstellungen auf ihre Standardwerte zurücksetzen?",
+        "Reimpostare i valori di regolazione AO ai predefiniti?",
+        "¿Restablecer los valores de ajuste de AO a sus predeterminados?",
+        "AOの調整値を初期値に戻しますか?",
+        "要將 AO 調整值重設為預設值嗎?",
+        "AO 조정 값을 기본값으로 되돌릴까요?"]),
 ]
 
 

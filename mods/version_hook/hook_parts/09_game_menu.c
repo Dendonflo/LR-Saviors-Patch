@@ -211,6 +211,19 @@ GAMEMENU_VALUE(MenuH_AoStage3, g_aoDebugStage, 3)
 // player who never reads the log has no use for it.
 static volatile LONG g_markCount = 0;
 
+// Momentary. Confirmed, because it is destructive and not undoable - the ini
+// is rewritten immediately - and because a mis-click here would silently undo
+// a player's whole configuration.
+static char __cdecl MenuH_ResetAll(char apply)
+{
+    if (apply) {
+        if (MessageBoxW(NULL, TR(S_RESET_ASK_ALL), MOD_NAME_W,
+                        MB_YESNO | MB_ICONWARNING | MB_TASKMODAL) == IDYES)
+            CfgResetDefaults(0);
+    }
+    return 0;
+}
+
 static char __cdecl MenuH_LogMark(char apply)
 {
     if (apply) {
@@ -634,6 +647,9 @@ static void GameMenuAppend(void)
     // cutscene/gameplay state. Sits next to the graph deliberately: same
     // "show me what is happening" family, different question.
     mAdd(mgr, NULL, "Mod_Status", (void *)MenuH_Status); GameMenuFixLabel(mgr, TR(S_STATUS_PANEL));
+    // The way back from a bad configuration for players who have been told not
+    // to touch the ini. Restores the compile-time defaults, AO included.
+    mAdd(mgr, NULL, "Mod_ResetAll", (void *)MenuH_ResetAll); GameMenuFixLabel(mgr, TR(S_RESET_ALL));
     // "Overlay Position" (four corners) retired: both windows are dragged
     // directly now, which places them exactly rather than approximately.
     // The MenuH_Ovl* handlers are kept above but no longer reachable.

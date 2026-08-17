@@ -424,9 +424,79 @@ static NumericSetting g_numerics[] = {
 // discarded at exit and it read back 0 on the next boot. Hand-maintained
 // parallel lists of the same flags in three places will keep producing that
 // bug; one list cannot.
+// ---- Defaults snapshot and reset ------------------------------------------
+// Players are told not to hand-edit the ini, so there has to be a way back
+// from a bad set of values that does not involve them opening it. Both reset
+// actions restore from a snapshot taken before the ini is first read, so the
+// values restored are exactly the compile-time defaults - there is no second
+// table to keep in sync, and a default changed in 01_config_gates.c is
+// automatically what "reset" means from then on.
+static LONG g_defTog[NUM_TOGGLES];
+static LONG g_defNum[NUM_NUMERICS];
+static volatile LONG g_defCaptured = 0;
+
+static void CfgCaptureDefaults(void)
+{
+    size_t i;
+    // Before the FIRST read, and only then: LoadConfig runs twice (early and
+    // deferred) and the second pass would otherwise snapshot the ini's values
+    // as if they were defaults.
+    if (InterlockedCompareExchange(&g_defCaptured, 1, 0) != 0) return;
+    for (i = 0; i < NUM_TOGGLES; i++)  g_defTog[i] = *g_toggles[i].flag;
+    for (i = 0; i < NUM_NUMERICS; i++) g_defNum[i] = *g_numerics[i].val;
+}
+
+// The AO tuning window's own contents, and nothing else. Deliberately NOT
+// every key beginning with "Ao": resetting AoEnable from a button inside the
+// AO panel would switch the effect off, which is not what "reset the tuning
+// values" means to anyone pressing it. AoProj100 is excluded too - it is
+// measured from the engine every frame, not chosen.
+static const char *const g_aoTweakKeys[] = {
+    "AoStrengthPct",  "AoHbaoStrengthPct",
+    "AoIntensity100", "AoHbaoIntensity100",
+    "AoRadius100",    "AoHbaoRadius100",
+    "AoBias1000",     "AoHbaoBias1000",
+    "AoRadiusMaxPct", "AoHbaoRadiusMaxPct",
+    "AoBlurSharp",    "AoHbaoBlurSharp",
+    "AoBlurPasses",   "AoHbaoBlurPasses",
+    "AoBlurStep100",  "AoHbaoBlurStep100",
+    "AoResDiv",
+};
+
+static int CfgIsAoTweakKey(const char *key)
+{
+    size_t i;
+    for (i = 0; i < sizeof(g_aoTweakKeys) / sizeof(g_aoTweakKeys[0]); i++)
+        if (strcmp(key, g_aoTweakKeys[i]) == 0) return 1;
+    return 0;
+}
+
+static void SaveConfig(void);
+
+// aoOnly = 0 resets everything persisted, = 1 only the AO tuning values.
+static void CfgResetDefaults(int aoOnly)
+{
+    size_t i;
+    if (!g_defCaptured) return;          // nothing to restore to yet
+    if (!aoOnly)
+        for (i = 0; i < NUM_TOGGLES; i++)
+            InterlockedExchange(g_toggles[i].flag, g_defTog[i]);
+    for (i = 0; i < NUM_NUMERICS; i++) {
+        if (aoOnly && !CfgIsAoTweakKey(g_numerics[i].key)) continue;
+        InterlockedExchange(g_numerics[i].val, g_defNum[i]);
+    }
+    SaveConfig();
+    {
+        char l[96];
+        sprintf(l, "[config] reset to defaults (%s)", aoOnly ? "AO tuning only" : "everything");
+        LogLine(l);
+    }
+}
+
 static void LoadConfig(void)
 {
     char path[MAX_PATH];
+    CfgCaptureDefaults();                // must precede the early return below
     GetConfigPath(path, sizeof(path));
     FILE *f = fopen(path, "r");
     if (!f) return;
