@@ -368,7 +368,13 @@ static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside
 // and AO at 8K is pure waste (the effect is low-frequency and gets blurred
 // anyway). AoSsaaIndep=0 restores the old behaviour of following the
 // composite, for anyone who actually wants supersampled AO.
-static volatile LONG g_aoResDiv = 1;          // ini AoResDiv: 1 / 2 / 4 / 8
+// Half by default. HBAO+'s jitter is a structured 4x4 interleaved tile
+// rather than white noise, so a half-resolution buffer still resolves
+// cleanly once blurred - verified in play - and it is the cheaper half of
+// the cost. Note this is a deliberate departure from HBAO+'s own spec, which
+// mandates full resolution to minimise flicker; the option is still there
+// for anyone who wants it.
+static volatile LONG g_aoResDiv = 2;          // ini AoResDiv: 1 / 2 / 4 / 8
 static volatile LONG g_aoSsaaIndep = 1;       // ini AoSsaaIndep: divide SSAA out
 // Upsample filter for reduced-resolution AO. 1 = depth-aware 4-tap
 // (default), 0 = plain hardware bilinear. The depth-aware one used to
