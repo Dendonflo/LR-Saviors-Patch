@@ -527,6 +527,13 @@ static void GameMenuAppend(void)
     mgr = *(void **)(base + MENU_RVA_MGR_PTR);
     if (!mgr) return;
     root = *(HMENU *)((char *)mgr + MENUMGR_ROOT_HMENU);
+    // Resolve the menu language BEFORE inserting anything: the vanilla tree
+    // has just been built, so its own localised popup labels are sitting on
+    // the bar waiting to be read, and every label we add below goes through
+    // TR() using the result. This is the whole detection mechanism - see
+    // 08c_lang_detect.c for why the game's own menu is the only trustworthy
+    // source.
+    LangDetectFromMenu(root);
     mOpen  = (MenuOpenFn)(base + MENU_RVA_OPEN);
     mBegin = (MenuVoidFn)(base + MENU_RVA_BEGINSUB);
     mAdd   = (MenuAddFn)(base + MENU_RVA_ADDITEM);
