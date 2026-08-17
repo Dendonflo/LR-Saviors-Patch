@@ -1270,6 +1270,54 @@ static int LogAppendRequested(void)
     return 0;
 }
 
+// ---- Release log filter (2026-08-17) --------------------------------------
+// A shipping build should write a log a user can actually send: what version
+// is running, what settings it loaded, and anything that went wrong. One
+// measured session before this filter produced 1801 lines / 166 KB, of which
+// 425 were [probe], 236 [fxaa] and 178 [draws] - all instrumentation from
+// investigations that have long since concluded.
+//
+// The filter lives HERE, at the single choke point, rather than being spread
+// across 338 call sites. That keeps every diagnostic line intact in the source
+// (the project rule is to gate, not delete) and makes the whole thing revert
+// with one ini key: LogVerbose=1 restores the full firehose for bug reports.
+//
+// Two things always survive, whatever the setting:
+//   - the tags below, which are the ones a support reply is written from
+//   - anything that looks like a failure. Shipping a filter that can swallow
+//     an error is worse than shipping no filter, so the test is deliberately
+//     loose and a little over-keeping.
+static const char *const g_logKeepTags[] = {
+    "[boot]",    // version, install progress
+    "[config]",  // the full settings dump - the single most useful line
+    "[menu]",    // whether the in-game menu attached at all
+    "[i18n]",    // resolved language, and the no-match warning
+    "[fov]",     // AO projection calibration, silent-failure-prone
+    "[swap]",    // backbuffer format/size
+    "[crash]",
+    "[stutter]", // the watchdog is a user-facing feature, not a diagnostic
+    "[log]",     // the size-cap notice must never filter itself out
+};
+
+static int LogLineWanted(const char *msg)
+{
+    size_t i;
+    if (g_logVerbose) return 1;
+    for (i = 0; i < sizeof(g_logKeepTags) / sizeof(g_logKeepTags[0]); i++) {
+        size_t n = strlen(g_logKeepTags[i]);
+        if (strncmp(msg, g_logKeepTags[i], n) == 0) return 1;
+    }
+    // Failure markers. Uppercase FAILED/ERROR deliberately, so the "fail=0"
+    // and "linearFails=0" counters in healthy [ssaa] lines do not match.
+    // "NOTE:" lines explain a limitation rather than report a fault, and one
+    // of them legitimately contains the word "cannot".
+    if (strstr(msg, "NOTE:")) return 0;
+    if (strstr(msg, "FAILED") || strstr(msg, "ERROR") ||
+        strstr(msg, "cannot") || strstr(msg, "not loaded") ||
+        strstr(msg, "not found") || strstr(msg, "unable")) return 1;
+    return 0;
+}
+
 static void LogLine(const char *msg)
 {
     if (InterlockedCompareExchange(&g_logLockState, 1, 0) == 0) {
@@ -1295,6 +1343,7 @@ static void LogLine(const char *msg)
         while (g_logLockState != 2) Sleep(0);
     }
     if (!g_logFile) return;
+    if (!LogLineWanted(msg)) return;
     EnterCriticalSection(&g_logLock);
     // Size cap. Truncating per run bounds the file across a playthrough, but
     // NOT within a single long session with a diagnostic armed - LogPassRts

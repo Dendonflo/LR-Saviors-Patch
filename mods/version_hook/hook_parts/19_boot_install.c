@@ -530,6 +530,15 @@ void InstallEarlyHooks(void)
     // flag is consulted inside HookedIDirect3D9CreateDevice, which can fire
     // before that thread has had a chance to run. LoadConfig is idempotent
     // (it only re-reads the same file), so the deferred call is harmless.
+    {
+        // First line of every log, before anything can fail. A bug report is
+        // only actionable if the log says which build produced it, and the
+        // build stamp distinguishes two DLLs carrying the same version.
+        char b[160];
+        sprintf(b, "[boot] %s %s (%s) - built %s %s",
+                MOD_NAME, MOD_VERSION, MOD_TAGLINE, __DATE__, __TIME__);
+        LogLine(b);
+    }
     LoadConfig();
     LogLine("[boot] early: config loaded, installing present hook");
     InstallForceImmediatePresentHook();

@@ -411,7 +411,8 @@ static NumericSetting g_numerics[] = {
     // it: normal users get the fixes silently, and there is no visible
     // switch inviting them to turn fixes off. Testers set AdvancedMenu=1
     // by hand.
-    { &g_langCfg, "Language", 0, 9 },
+    { &g_logVerbose, "LogVerbose", 0, 1 },
+    { &g_langCfg, "Language", 0, 8 },
     { &g_advancedMenu, "AdvancedMenu", 0, 1 },
 };
 #define NUM_NUMERICS (sizeof(g_numerics) / sizeof(g_numerics[0]))

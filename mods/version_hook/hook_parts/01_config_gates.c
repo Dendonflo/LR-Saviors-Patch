@@ -462,6 +462,12 @@ static void LogLine(const char *msg);
 // A playthrough here produced a ~2 GB version_hook.log. Two independent
 // bounds now: the file is recreated per run (LogAppend=1 restores appending
 // for cross-run debugging), and growth within a run is capped.
+// Release builds write a short log: version, settings, failures. 1 restores
+// every diagnostic line ever added, which is what a bug report wants. Must be
+// declared HERE rather than beside the other config entries: LogLine lives in
+// 06_io_alloc.c and this is one translation unit, so the flag has to exist
+// before the file that reads it. See LogLineWanted().
+static volatile LONG g_logVerbose = 0;
 static volatile LONG g_logMaxMB = 64;   // 0 = unlimited
 // 0 = flush only during boot (shipping). 1 = flush every line, so a crash
 // leaves its last lines on disk instead of losing them in the buffer.

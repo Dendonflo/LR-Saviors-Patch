@@ -28,6 +28,9 @@
 // the proxy the game loads. The name lives in these files and in the menu.
 #define MOD_NAME        "Savior's Patch"
 #define MOD_TAGLINE     "Performance & graphics"
+// Bump for each release. Logged in the boot banner, which is the first line of
+// every log and the one that makes a user's bug report actionable.
+#define MOD_VERSION     "1.0"
 #define MOD_CONFIG_FILE "SaviorsPatch.ini"
 #define MOD_LOG_FILE    "SaviorsPatch.log"
 

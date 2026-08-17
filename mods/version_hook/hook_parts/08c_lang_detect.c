@@ -36,30 +36,74 @@
 // label of ours is inserted before it, because insertion happens immediately
 // after the same vanilla build.
 
-// Compare a menu label against an anchor. Exact match: the anchors come from
-// the same exe that renders the menu, so there is nothing to normalise.
+// Trim leading/trailing spaces and menu accelerators in place.
+//
+// NOT cosmetic: the exe's localisation block is a line-based text blob, not a
+// table of terminated strings -
+//
+//   'Graphics                             = Graphismes                          \n'
+//
+// so every value is space-padded to a fixed column width. Whatever survives
+// that into the live menu may keep the padding, and the first version of this
+// used wcscmp, which failed on exactly that and fell through to the OS
+// language. It then "worked" for anyone whose desktop language happened to
+// match their game - i.e. it looked correct here and was not.
+static void LangTrim(wchar_t *s)
+{
+    wchar_t *r = s, *w = s;
+    size_t n;
+    while (*r == L' ' || *r == L'\t') r++;
+    while (*r) { if (*r != L'&') *w++ = *r; r++; }   // '&' = keyboard mnemonic
+    *w = 0;
+    n = wcslen(s);
+    while (n && (s[n - 1] == L' ' || s[n - 1] == L'\t' ||
+                 s[n - 1] == L'\r' || s[n - 1] == L'\n')) s[--n] = 0;
+}
+
+// Case-insensitive after trimming. Prefix rather than equality so a label that
+// carries a suffix the engine appended still resolves.
 static int LangMatchAnchor(const wchar_t *label)
 {
     int i;
-    for (i = 0; i < LANG_COUNT; i++)
-        if (wcscmp(label, g_langAnchor[i]) == 0)
+    for (i = 0; i < LANG_COUNT; i++) {
+        size_t n = wcslen(g_langAnchor[i]);
+        if (n && _wcsnicmp(label, g_langAnchor[i], n) == 0)
             return i;
+    }
     return -1;
 }
 
-// Walk the menu bar's top-level popups looking for the Graphics one.
+// Walk the menu bar's top-level popups looking for the Graphics one. On a miss
+// the labels actually read are logged once - the failure mode here is silent
+// by nature (a wrong language still renders), so it has to announce itself.
 static int LangFromMenuBar(HMENU bar)
 {
     int n, i;
+    char seen[256];
+    size_t used = 0;
     if (!bar || !IsMenu(bar)) return -1;
+    seen[0] = 0;
     n = GetMenuItemCount(bar);
     for (i = 0; i < n; i++) {
         wchar_t buf[128];
         int got = GetMenuStringW(bar, (UINT)i, buf, 128, MF_BYPOSITION);
         if (got > 0) {
-            int lang = LangMatchAnchor(buf);
+            int lang;
+            LangTrim(buf);
+            lang = LangMatchAnchor(buf);
             if (lang >= 0) return lang;
+            if (used < sizeof(seen) - 40) {
+                char a[64];
+                int k = WideCharToMultiByte(CP_UTF8, 0, buf, -1, a, sizeof(a) - 1, NULL, NULL);
+                a[(k > 0 && k < (int)sizeof(a)) ? k - 1 : 0] = 0;
+                used += (size_t)sprintf(seen + used, used ? " | %s" : "%s", a);
+            }
         }
+    }
+    {
+        char l[320];
+        sprintf(l, "[i18n] no menu label matched (%d top-level items: %s)", n, seen);
+        LogLine(l);
     }
     return -1;
 }
