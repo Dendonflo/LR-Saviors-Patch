@@ -139,6 +139,10 @@ typedef struct {
 
 // See the AdvancedMenu table entry below. Lives here (not in g_toggles) so
 // the GUI panel never grows a checkbox for it.
+// Menu language for the mod's own labels. 0 = auto (Steam app manifest, then
+// the OS UI language - see 08c_lang_detect.c); 1..9 force one, in LANG_*
+// order: 1 en  2 fr  3 de  4 it  5 es  6 ja  7 zh-Hans  8 zh-Hant  9 ko.
+static volatile LONG g_langCfg = 0;
 static volatile LONG g_advancedMenu = 0;
 
 static NumericSetting g_numerics[] = {
@@ -407,6 +411,7 @@ static NumericSetting g_numerics[] = {
     // it: normal users get the fixes silently, and there is no visible
     // switch inviting them to turn fixes off. Testers set AdvancedMenu=1
     // by hand.
+    { &g_langCfg, "Language", 0, 9 },
     { &g_advancedMenu, "AdvancedMenu", 0, 1 },
 };
 #define NUM_NUMERICS (sizeof(g_numerics) / sizeof(g_numerics[0]))

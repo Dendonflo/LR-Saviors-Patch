@@ -43,6 +43,8 @@
 #include "hook_parts/06_io_alloc.c"
 #include "hook_parts/07_timing_watchdog.c"
 #include "hook_parts/08_config_persist.c"
+#include "hook_parts/08b_i18n.c"
+#include "hook_parts/08c_lang_detect.c"
 #include "hook_parts/09_game_menu.c"
 #include "hook_parts/10_overlay.c"
 #include "hook_parts/11_monitor.c"

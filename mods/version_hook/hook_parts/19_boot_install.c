@@ -531,6 +531,7 @@ void InstallEarlyHooks(void)
     // before that thread has had a chance to run. LoadConfig is idempotent
     // (it only re-reads the same file), so the deferred call is harmless.
     LoadConfig();
+    LangDetect();
     LogLine("[boot] early: config loaded, installing present hook");
     InstallForceImmediatePresentHook();
     LogLine("[boot] early: present hook done");
@@ -557,6 +558,7 @@ void InstallPrefetchHook(void)
 
     CalibrateTsc();
     LoadConfig();
+    LangDetect();
     // The "write the config back so every key is visible" step deliberately
     // does NOT happen here. This runs moments after DllMain, while the game's
     // own startup and any other proxy DLL (the HD GUI mod loads from

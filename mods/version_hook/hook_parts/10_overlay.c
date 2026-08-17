@@ -703,21 +703,21 @@ static HWND g_hAoTweak = NULL;
 // endpoint goes negative past I = 8. HBAO+ raises pow(1 - 2*mean, I),
 // shipped default 1.5, and 4.0 is the top of NVIDIA's own slider.
 static struct {
-    const char *name;
+    int nameId;                 // ModStr index; resolved through TR() at paint
     volatile LONG *val;
     volatile LONG *vals[2];
     LONG lo, hi, step;
     LONG loE[2], hiE[2];
     HWND bar;
 } g_aoRows[] = {
-    { "Strength %",  &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  400,  5, {   0,   0 }, {  400,  400 }, NULL },
-    { "Intensity",   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },    1, 2000, 10, {   1,   1 }, { 2000, 2000 }, NULL },
-    { "Radius",      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },       1, 5000, 10, {   1,   1 }, { 5000, 5000 }, NULL },
+    { S_STRENGTH,    &g_aoStrengthPctE[0], { &g_aoStrengthPctE[0], &g_aoStrengthPctE[1] },  0,  400,  5, {   0,   0 }, {  400,  400 }, NULL },
+    { S_INTENSITY,   &g_aoIntensityE[0],   { &g_aoIntensityE[0],   &g_aoIntensityE[1] },    1, 2000, 10, {   1,   1 }, { 2000, 2000 }, NULL },
+    { S_RADIUS,      &g_aoRadiusE[0],      { &g_aoRadiusE[0],      &g_aoRadiusE[1] },       1, 5000, 10, {   1,   1 }, { 5000, 5000 }, NULL },
     // Bias x1000 - the lever for false shading on smooth sloping ground.
     // Reads as a world-space distance for SSAO and as an angle above the
     // tangent plane for HBAO+ (500 = 30 deg, the angle bias the 2008 HBAO
     // talk illustrates). Same slider, genuinely different units.
-    { "Bias",        &g_aoBiasE[0],        { &g_aoBiasE[0],        &g_aoBiasE[1] },         0,  950,  5, {   0,   0 }, {  950,  950 }, NULL },
+    { S_BIAS,        &g_aoBiasE[0],        { &g_aoBiasE[0],        &g_aoBiasE[1] },         0,  950,  5, {   0,   0 }, {  950,  950 }, NULL },
     // Projection has NO row: it is measured from the engine's own
     // view-projection matrix every frame (24_ao_recon.c) and there is no
     // such thing as a preferred value for it - only the camera's actual
@@ -726,7 +726,7 @@ static struct {
     // true 317.
     // Screen-radius ceiling (% of width). Shared: it is a sanity bound on
     // the projection, not an estimator preference.
-    { "Max Radius %", &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   50,  1, {   1,   1 }, {   50,   50 }, NULL },
+    { S_MAX_RADIUS,   &g_aoRadiusMaxPctE[0], { &g_aoRadiusMaxPctE[0], &g_aoRadiusMaxPctE[1] }, 1,   50,  1, {   1,   1 }, {   50,   50 }, NULL },
     // Blur rows (only meaningful with AoBlur=1). Sharp = depth edge-stop,
     // 0 = plain gaussian. Passes = a-trous levels, each doubling reach.
     // Spread = base tap spacing in pixels x100.
@@ -742,9 +742,9 @@ static struct {
     // output is left in RT A untouched, which is the texture the combine
     // binds anyway. It overlaps the AoBlur toggle deliberately - one is a
     // slider endpoint, the other a switch, and having both costs nothing.
-    { "Blur Sharp",  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0, 4000, 25, {   0,   0 }, { 4000, 4000 }, NULL },
-    { "Blur Passes", &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   0,    8,  1, {   0,   0 }, {    8,    8 }, NULL },
-    { "Blur Spread", &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] },  5, 1600, 25, {   5,   5 }, { 1600, 1600 }, NULL },
+    { S_BLUR_SHARP,  &g_aoBlurSharpE[0],   { &g_aoBlurSharpE[0],   &g_aoBlurSharpE[1] },    0, 4000, 25, {   0,   0 }, { 4000, 4000 }, NULL },
+    { S_BLUR_PASSES, &g_aoBlurPassesE[0],  { &g_aoBlurPassesE[0],  &g_aoBlurPassesE[1] },   0,    8,  1, {   0,   0 }, {    8,    8 }, NULL },
+    { S_BLUR_SPREAD, &g_aoBlurStep100E[0], { &g_aoBlurStep100E[0], &g_aoBlurStep100E[1] },  5, 1600, 25, {   5,   5 }, { 1600, 1600 }, NULL },
 };
 #define AO_ROWS (sizeof(g_aoRows) / sizeof(g_aoRows[0]))
 #define AOTW_ROW_H   34
@@ -800,19 +800,22 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         HFONT f = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         HFONT old = (HFONT)SelectObject(dc, f);
         SetBkMode(dc, TRANSPARENT);
-        char t[64];
+        // Wide throughout: the labels come from the translation table and
+        // Japanese/Chinese/Korean cannot survive the ANSI codepage.
+        wchar_t t[64];
         for (size_t i = 0; i < AO_ROWS; i++) {
             int y = 10 + (int)i * AOTW_ROW_H;
-            const char *nm = g_aoRows[i].name;
-            TextOutA(dc, 10, y + 4, nm, (int)strlen(nm));
-            sprintf(t, "%ld", *g_aoRows[i].val);
-            TextOutA(dc, 10 + AOTW_LABEL_W + AOTW_BAR_W + 8, y + 4, t, (int)strlen(t));
+            const wchar_t *nm = TR(g_aoRows[i].nameId);
+            TextOutW(dc, 10, y + 4, nm, (int)wcslen(nm));
+            _snwprintf(t, 64, L"%ld", *g_aoRows[i].val);
+            t[63] = 0;
+            TextOutW(dc, 10 + AOTW_LABEL_W + AOTW_BAR_W + 8, y + 4, t, (int)wcslen(t));
         }
         {
             // Label for the resolution dropdown, in the same column as the
             // slider labels so the two read as one list.
-            static const char *rl = "AO Resolution";
-            TextOutA(dc, 10, 10 + (int)AO_ROWS * AOTW_ROW_H + 32, rl, (int)strlen(rl));
+            const wchar_t *rl = TR(S_AO_RES);
+            TextOutW(dc, 10, 10 + (int)AO_ROWS * AOTW_ROW_H + 32, rl, (int)wcslen(rl));
         }
         SelectObject(dc, old);
         EndPaint(h, &ps);
@@ -835,28 +838,39 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ShowWindow(h, SW_HIDE);
         return 0;
     }
-    return DefWindowProcA(h, msg, wp, lp);
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+// "<AO Tuning> - SSAO" / " - HBAO+". The estimator names are acronyms and
+// stay as they are in every language; only the leading phrase is translated.
+static const wchar_t *AoTweakTitle(void)
+{
+    static wchar_t buf[96];
+    _snwprintf(buf, 96, L"%s - %s", TR(S_AO_TUNING),
+               (g_aoEnable == 2) ? L"HBAO+" : L"SSAO");
+    buf[95] = 0;
+    return buf;
 }
 
 static void EnsureAoTweakWindow(void)
 {
     if (g_hAoTweak) return;
-    WNDCLASSA wc;
+    WNDCLASSW wc;
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = AoTweakProc;
-    wc.hInstance = GetModuleHandleA(NULL);
-    wc.lpszClassName = "LRSaviorAoTweak";
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.lpszClassName = L"LRSaviorAoTweak";
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
-    RegisterClassA(&wc);
+    wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
+    RegisterClassW(&wc);
     int cw = 10 + AOTW_LABEL_W + AOTW_BAR_W + 8 + AOTW_VAL_W + 10;
     // rows + the raw-view checkbox + the resolution dropdown
     int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 28 + 30;
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
-    g_hAoTweak = CreateWindowExA(
+    g_hAoTweak = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName,
-        (g_aoEnable == 2) ? "AO Tuning - HBAO+" : "AO Tuning - SSAO",
+        AoTweakTitle(),
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         120, 120, r.right - r.left, r.bottom - r.top,
         NULL, NULL, wc.hInstance, NULL);
@@ -869,8 +883,8 @@ static void EnsureAoTweakWindow(void)
         LONG est0 = (g_aoEnable == 2) ? 1 : 0;
         g_aoRows[i].lo = g_aoRows[i].loE[est0];
         g_aoRows[i].hi = g_aoRows[i].hiE[est0];
-        g_aoRows[i].bar = CreateWindowExA(
-            0, "SCROLLBAR", NULL, WS_CHILD | WS_VISIBLE | SBS_HORZ,
+        g_aoRows[i].bar = CreateWindowExW(
+            0, L"SCROLLBAR", NULL, WS_CHILD | WS_VISIBLE | SBS_HORZ,
             10 + AOTW_LABEL_W, y, AOTW_BAR_W, 18,
             g_hAoTweak, NULL, wc.hInstance, NULL);
         SCROLLINFO si;
@@ -883,8 +897,8 @@ static void EnsureAoTweakWindow(void)
         si.nPage = 1;
         SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
     }
-    g_hAoRawCheck = CreateWindowExA(
-        0, "BUTTON", "Show raw AO",
+    g_hAoRawCheck = CreateWindowExW(
+        0, L"BUTTON", TR(S_SHOW_RAW),
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         10, 10 + (int)AO_ROWS * AOTW_ROW_H + 2, cw - 20, 20,
         g_hAoTweak, (HMENU)(UINT_PTR)AOTW_CHECK_ID, wc.hInstance, NULL);
@@ -898,8 +912,8 @@ static void EnsureAoTweakWindow(void)
     }
     // The height passed here is the DROPPED-DOWN height, not the closed
     // one - a combo box sized to its row shows an empty list.
-    g_hAoResCombo = CreateWindowExA(
-        0, "COMBOBOX", NULL,
+    g_hAoResCombo = CreateWindowExW(
+        0, L"COMBOBOX", NULL,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
         10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + 28,
         AOTW_BAR_W + 8 + AOTW_VAL_W, 120,
@@ -907,10 +921,9 @@ static void EnsureAoTweakWindow(void)
     if (g_hAoResCombo) {
         SendMessageA(g_hAoResCombo, WM_SETFONT,
                      (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
-        SendMessageA(g_hAoResCombo, CB_ADDSTRING, 0,
-                     (LPARAM)"Native (expensive at high res)");
-        SendMessageA(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)"Half");
-        SendMessageA(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)"Quarter");
+        SendMessageW(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)TR(S_RES_NATIVE));
+        SendMessageW(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)TR(S_RES_HALF));
+        SendMessageW(g_hAoResCombo, CB_ADDSTRING, 0, (LPARAM)TR(S_RES_QUARTER));
         SendMessageA(g_hAoResCombo, CB_SETCURSEL,
                      (WPARAM)AoResIndexOf(g_aoResDiv), 0);
     }
@@ -1004,7 +1017,7 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                     }
                 }
                 if (g_hAoTweak) {
-                    SetWindowTextA(g_hAoTweak, est ? "AO Tuning - HBAO+" : "AO Tuning - SSAO");
+                    SetWindowTextW(g_hAoTweak, AoTweakTitle());
                     InvalidateRect(g_hAoTweak, NULL, TRUE);
                 }
             }
@@ -1042,9 +1055,8 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 if (aoOn != lastEnable) {
                     lastEnable = aoOn;
                     EnableWindow(g_hAoRawCheck, aoOn ? TRUE : FALSE);
-                    SetWindowTextA(g_hAoRawCheck,
-                                   aoOn ? "Show raw AO"
-                                        : "Show raw AO  -  turn AO on first");
+                    SetWindowTextW(g_hAoRawCheck,
+                                   aoOn ? TR(S_SHOW_RAW) : TR(S_SHOW_RAW_OFF));
                     if (!aoOn) {
                         SendMessageA(g_hAoRawCheck, BM_SETCHECK, BST_UNCHECKED, 0);
                         InterlockedExchange(&g_aoRawView, 0);

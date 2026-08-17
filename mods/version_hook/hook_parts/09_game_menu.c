@@ -604,7 +604,7 @@ static void GameMenuAppend(void)
         mAdd(mgr, NULL, "Mod_StdD3D9",   (void *)MenuH_StdD3D9);   GameMenuFixLabel(mgr, L"Force Plain D3D9 (restart)");
         mOpen(mgr, NULL, "Mod_Watchdog"); GameMenuFixLabel(mgr, L"Stutter Watchdog");
         mBegin(mgr, NULL);
-        mAdd(mgr, NULL, "Mod_WdOff", (void *)MenuH_WdOff); GameMenuFixLabel(mgr, L"Off");
+        mAdd(mgr, NULL, "Mod_WdOff", (void *)MenuH_WdOff); GameMenuFixLabel(mgr, TR(S_OFF));
         mAdd(mgr, NULL, "Mod_Wd4",   (void *)MenuH_Wd4);   GameMenuFixLabel(mgr, L"4 ms");
         mAdd(mgr, NULL, "Mod_Wd8",   (void *)MenuH_Wd8);   GameMenuFixLabel(mgr, L"8 ms");
         mAdd(mgr, NULL, "Mod_Wd16",  (void *)MenuH_Wd16);  GameMenuFixLabel(mgr, L"16 ms");
@@ -620,13 +620,13 @@ static void GameMenuAppend(void)
     // -- 1b. top-level "Other" popup - always visible. Home of the frametime
     //        overlay, which ships as a user feature (the only honest view of
     //        the engine tick), separate from the advanced-only fix toggles.
-    mOpen(mgr, NULL, "Mod_Other"); GameMenuFixLabel(mgr, L"Other");
+    mOpen(mgr, NULL, "Mod_Other"); GameMenuFixLabel(mgr, TR(S_OTHER));
     mBegin(mgr, NULL);
-    mAdd(mgr, NULL, "Mod_Overlay", (void *)MenuH_Overlay); GameMenuFixLabel(mgr, L"Frametime Overlay");
+    mAdd(mgr, NULL, "Mod_Overlay", (void *)MenuH_Overlay); GameMenuFixLabel(mgr, TR(S_FRAMETIME));
     // Every setting beside what is actually in force, including the live
     // cutscene/gameplay state. Sits next to the graph deliberately: same
     // "show me what is happening" family, different question.
-    mAdd(mgr, NULL, "Mod_Status", (void *)MenuH_Status); GameMenuFixLabel(mgr, L"Status Panel");
+    mAdd(mgr, NULL, "Mod_Status", (void *)MenuH_Status); GameMenuFixLabel(mgr, TR(S_STATUS_PANEL));
     // "Overlay Position" (four corners) retired: both windows are dragged
     // directly now, which places them exactly rather than approximately.
     // The MenuH_Ovl* handlers are kept above but no longer reachable.
@@ -654,13 +654,13 @@ static void GameMenuAppend(void)
             int lo = pStd < pAdv ? pStd : pAdv;
             DeleteMenu(mShadPop, (UINT)(pStd > pAdv ? pStd : pAdv), MF_BYPOSITION);
             DeleteMenu(mShadPop, (UINT)lo, MF_BYPOSITION);
-            GameMenuInsertLeaf(mShadPop, lo + 0, id++, L"Standard (1024)", MenuH_Shadow1024);
-            GameMenuInsertLeaf(mShadPop, lo + 1, id++, L"Advanced (2048)", MenuH_Shadow2048);
-            GameMenuInsertLeaf(mShadPop, lo + 2, id++, L"High (4096)",     MenuH_Shadow4096);
+            GameMenuInsertLeaf(mShadPop, lo + 0, id++, TrSuffix(S_STANDARD, L"(1024)"), MenuH_Shadow1024);
+            GameMenuInsertLeaf(mShadPop, lo + 1, id++, TrSuffix(S_ADVANCED, L"(2048)"), MenuH_Shadow2048);
+            GameMenuInsertLeaf(mShadPop, lo + 2, id++, TrSuffix(S_HIGH,     L"(4096)"),     MenuH_Shadow4096);
             // The oscillating stutter once blamed on 8192 was the per-frame
             // GPU fence serialising CPU and GPU (user, 2026-08-11) - fixed
             // by GpuSyncSkip, so 8192 carries no warning label.
-            GameMenuInsertLeaf(mShadPop, lo + 3, id++, L"Ultra (8192)", MenuH_Shadow8192);
+            GameMenuInsertLeaf(mShadPop, lo + 3, id++, TrSuffix(S_ULTRA,    L"(8192)"), MenuH_Shadow8192);
             repShadow = 1;
         }
 
@@ -676,7 +676,7 @@ static void GameMenuAppend(void)
             // constantly - SimDeltaFix covers the two confirmed bugs but the
             // residual risk is real, so the label says so plainly.
             GameMenuInsertLeaf(mFratePop, lo + 2, id++,
-                               L"Unlimited (unstable, WILL cause bugs)", MenuH_FrUnlimited);
+                               TR(S_UNLIMITED), MenuH_FrUnlimited);
             repFrate = 1;
         }
 
@@ -706,7 +706,7 @@ static void GameMenuAppend(void)
                 memset(&mii, 0, sizeof(mii));
                 mii.cbSize = sizeof(mii);
                 mii.fMask = MIIM_STRING;
-                mii.dwTypeData = (LPWSTR)L"Shadows";
+                mii.dwTypeData = (LPWSTR)TR(S_SHADOWS);
                 SetMenuItemInfoW(gfx, (UINT)shadPos, TRUE, &mii);
             }
 
@@ -715,9 +715,9 @@ static void GameMenuAppend(void)
                 int at;
 
                 at = (shadPos >= 0) ? shadPos + 1 : endPos;
-                sub = GameMenuInsertGroup(gfx, at, L"Shadow Distance");
+                sub = GameMenuInsertGroup(gfx, at, TR(S_SHADOW_DIST));
                 if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Standard", MenuH_DistStd);
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_STANDARD), MenuH_DistStd);
                     GameMenuInsertLeaf(sub, 1, id++, L"150%",     MenuH_Dist150);
                     GameMenuInsertLeaf(sub, 2, id++, L"200%",     MenuH_Dist200);
                     GameMenuInsertLeaf(sub, 3, id++, L"300%",     MenuH_Dist300);
@@ -745,7 +745,7 @@ static void GameMenuAppend(void)
                 // people will search for rather than a description.
                 sub = GameMenuInsertGroup(gfx, at, L"SSAA");
                 if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Off",   MenuH_Ssaa100);
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_OFF),   MenuH_Ssaa100);
                     GameMenuInsertLeaf(sub, 1, id++, L"1.25x", MenuH_Ssaa125);
                     GameMenuInsertLeaf(sub, 2, id++, L"1.5x",  MenuH_Ssaa150);
                     GameMenuInsertLeaf(sub, 3, id++, L"2x",    MenuH_Ssaa200);
@@ -753,7 +753,7 @@ static void GameMenuAppend(void)
                 }
                 sub = GameMenuInsertGroup(gfx, at + 1, L"MSAA");
                 if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Off", MenuH_Msaa0);
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_OFF), MenuH_Msaa0);
                     GameMenuInsertLeaf(sub, 1, id++, L"2x",  MenuH_Msaa2);
                     GameMenuInsertLeaf(sub, 2, id++, L"4x",  MenuH_Msaa4);
                     GameMenuInsertLeaf(sub, 3, id++, L"8x",  MenuH_Msaa8);
@@ -761,26 +761,26 @@ static void GameMenuAppend(void)
                 }
                 sub = GameMenuInsertGroup(gfx, at + 2, L"FXAA");
                 if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"On",  MenuH_FxaaOn);
-                    GameMenuInsertLeaf(sub, 1, id++, L"Off", MenuH_FxaaOff);
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_ON),  MenuH_FxaaOn);
+                    GameMenuInsertLeaf(sub, 1, id++, TR(S_OFF), MenuH_FxaaOff);
                     groups++;
                 }
 #if ENABLE_AO_SSAO
-                sub = GameMenuInsertGroup(gfx, at + 3, L"Ambient Occlusion");
+                sub = GameMenuInsertGroup(gfx, at + 3, TR(S_AO));
                 if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"Off",  MenuH_AoOff);
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_OFF),  MenuH_AoOff);
                     GameMenuInsertLeaf(sub, 1, id++, L"SSAO", MenuH_AoSsao);
                     GameMenuInsertLeaf(sub, 2, id++, L"HBAO+", MenuH_AoHbao);
-                    GameMenuInsertLeaf(sub, 3, id++, L"Tuning Panel", MenuH_AoPanel);
+                    GameMenuInsertLeaf(sub, 3, id++, TR(S_TUNING_PANEL), MenuH_AoPanel);
                     groups++;
                 }
 #endif
 
                 at = (presPos >= 0) ? presPos + 1 : endPos;
-                sub = GameMenuInsertGroup(gfx, at, L"VSync");
+                sub = GameMenuInsertGroup(gfx, at, TR(S_VSYNC));
                 if (sub) {
-                    GameMenuInsertLeaf(sub, 0, id++, L"On",  MenuH_VsyncOn);
-                    GameMenuInsertLeaf(sub, 1, id++, L"Off", MenuH_VsyncOff);
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_ON),  MenuH_VsyncOn);
+                    GameMenuInsertLeaf(sub, 1, id++, TR(S_OFF), MenuH_VsyncOff);
                     groups++;
                 }
             }
