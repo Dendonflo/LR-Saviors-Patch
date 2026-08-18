@@ -51,8 +51,15 @@
 #define IG_TRACK_W  230
 #define IG_VAL_W    50
 #define IG_PAD      10
-// rows + raw checkbox + resolution button + reset button + bottom pad
+// rows + raw checkbox + resolution row + reset button + bottom pad
 #define IG_H (IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 22 + 26 + 26 + IG_PAD)
+// The open dropdown extends PAST the panel's normal bottom, exactly as a real
+// one does. The texture is always allocated tall enough for that; only the
+// drawn height changes, so opening the list costs nothing but a taller quad.
+#define IG_DROP_ITEM_H 22
+#define IG_DROP_N      3
+#define IG_DROP_EXTRA  (IG_DROP_ITEM_H * IG_DROP_N + 12)
+#define IG_TEX_H       (IG_H + IG_DROP_EXTRA)
 // The white patch the cursor quads sample: bottom-right corner, drawn last so
 // nothing paints over it. 8x8 so bilinear can never bleed an edge in.
 #define IG_WHITE_X  (IG_W - 8)
@@ -77,7 +84,7 @@ static LONG g_igOpenLogged = 0;
 // GDI side.
 static HDC     g_igDc = NULL;
 static HBITMAP g_igBmp = NULL;
-static void   *g_igBits = NULL;    // 32bpp top-down, IG_W x IG_H
+static void   *g_igBits = NULL;    // 32bpp top-down, IG_W x IG_TEX_H
 static HFONT   g_igFont = NULL, g_igFontBold = NULL;
 
 // D3D side.
@@ -100,27 +107,36 @@ static void IgCheckRect(RECT *r)
     r->left = IG_PAD; r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 2;
     r->right = IG_W - IG_PAD; r->bottom = r->top + 20;
 }
-// AO resolution as a SEGMENTED control: three buttons, the active one lit.
-// The cycle button it replaces made the current value readable but the
-// alternatives invisible, and reaching Quarter from Native meant two clicks
-// through a state you did not want. Three segments show the whole choice and
-// cost one click to any of it.
+// AO resolution: a REAL dropdown. Two earlier shapes were wrong for the same
+// underlying reason - I kept treating "dropdown" as a Win32 combo box, which
+// needs a popup, which is a window, which is the species this panel exists to
+// escape. That constraint does not exist here. In an immediate-mode UI drawn
+// into our own texture, an open list is just more pixels painted later and
+// hit-tested first; ReShade's ImGui does exactly this. A cycle button, then
+// three ratio segments, were both workarounds for a limit that was imagined.
 //
-// Labels are ratio glyphs (1:1, 1/2, 1/4) rather than TR(S_RES_*): they are
-// language-independent, and S_RES_NATIVE is "Native (expensive at high res)",
-// which no 93px segment will ever hold. The translated name lives in the
-// label column at the left, where every other row's name is.
-#define IG_RES_SEGS 3
-static void IgResSegRect(int i, RECT *r)
+// It matters beyond tidiness: the segments could only fit "1:1", which threw
+// away TR(S_RES_NATIVE) - "Native (expensive at high res)" - and that warning
+// is the single most useful thing on this control, since Native at 4K is the
+// setting most likely to cost someone their framerate. The list shows every
+// option at full translated length.
+static int g_igDropOpen = 0;
+
+static void IgResRect(RECT *r)
 {
-    const int total = IG_TRACK_W + 8 + IG_VAL_W;
-    const int gap = 4;
-    const int w = (total - gap * (IG_RES_SEGS - 1)) / IG_RES_SEGS;
-    r->left = IG_PAD + IG_LABEL_W + i * (w + gap);
-    r->right = r->left + w;
+    r->left = IG_PAD + IG_LABEL_W;
+    r->right = r->left + IG_TRACK_W + 8 + IG_VAL_W;
     r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 24;
     r->bottom = r->top + 22;
 }
+static void IgDropItemRect(int i, RECT *r)
+{
+    IgResRect(r);
+    r->top = r->bottom + 2 + i * IG_DROP_ITEM_H;
+    r->bottom = r->top + IG_DROP_ITEM_H;
+}
+// Drawn height: the list extends past the normal bottom while open.
+static int IgPanelH(void) { return IG_H + (g_igDropOpen ? IG_DROP_EXTRA : 0); }
 static void IgResetRect(RECT *r)
 {
     r->left = IG_PAD + IG_LABEL_W;
@@ -141,7 +157,7 @@ static int IgEnsureGdi(void)
     memset(&bi, 0, sizeof(bi));
     bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
     bi.bmiHeader.biWidth = IG_W;
-    bi.bmiHeader.biHeight = -IG_H;          // top-down, so rows match the lock copy
+    bi.bmiHeader.biHeight = -IG_TEX_H;          // top-down, so rows match the lock copy
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
@@ -188,7 +204,7 @@ static void IgPaint(int mx, int my)
     LONG est = (g_aoEnable == 2) ? 1 : 0;
 
     SetBkMode(g_igDc, TRANSPARENT);
-    r.left = 0; r.top = 0; r.right = IG_W; r.bottom = IG_H;
+    r.left = 0; r.top = 0; r.right = IG_W; r.bottom = IgPanelH();
     IgFill(&r, RGB(28, 30, 34));
     r.bottom = IG_TITLE_H;
     IgFill(&r, RGB(46, 50, 58));
@@ -233,23 +249,20 @@ static void IgPaint(int mx, int my)
                RGB(210, 210, 210), g_igFont, DT_LEFT);
     }
 
-    // Resolution: three segments, active one lit. A real dropdown needs a
-    // popup and a popup is a WINDOW - the species this panel exists to escape.
+    // Resolution: closed dropdown here; the open list is painted LAST, below,
+    // so it overlays whatever it covers by simple painter's order.
     {
-        static const wchar_t *const seg[IG_RES_SEGS] = { L"1:1", L"1/2", L"1/4" };
         int active = AoResIndexOf(g_aoResDiv);
-        IgText(IG_PAD, IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 25,
-               IG_LABEL_W - 4, TR(S_AO_RES), RGB(210, 210, 210), g_igFont, DT_LEFT);
-        for (int i = 0; i < IG_RES_SEGS; i++) {
-            int hot;
-            IgResSegRect(i, &r);
-            hot = (mx >= r.left && mx < r.right && my >= r.top && my < r.bottom);
-            IgFill(&r, (i == active) ? RGB(58, 108, 178)
-                                     : hot ? RGB(66, 72, 84) : RGB(46, 50, 58));
-            IgText(r.left, r.top + 1, r.right - r.left, seg[i],
-                   (i == active) ? RGB(255, 255, 255) : RGB(150, 154, 162),
-                   (i == active) ? g_igFontBold : g_igFont, DT_CENTER);
-        }
+        IgResRect(&r);
+        IgText(IG_PAD, r.top + 1, IG_LABEL_W - 4, TR(S_AO_RES),
+               RGB(210, 210, 210), g_igFont, DT_LEFT);
+        IgFill(&r, (mx >= r.left && mx < r.right && my >= r.top && my < r.bottom)
+                       ? RGB(66, 72, 84) : RGB(52, 56, 64));
+        IgText(r.left + 6, r.top + 1, r.right - r.left - 24,
+               TR(active == 0 ? S_RES_NATIVE : active == 1 ? S_RES_HALF : S_RES_QUARTER),
+               RGB(225, 225, 225), g_igFont, DT_LEFT);
+        IgText(r.right - 20, r.top + 1, 14, g_igDropOpen ? L"\x25B2" : L"\x25BC",
+               RGB(180, 184, 192), g_igFont, DT_CENTER);
     }
 
     // Reset, double-click armed: a MessageBox is a window AND a modal loop on
@@ -269,7 +282,34 @@ static void IgPaint(int mx, int my)
                RGB(225, 225, 225), g_igFont, DT_CENTER);
     }
 
-    // The cursor's white patch, painted last so nothing covers it.
+    // The open dropdown list, painted after everything else so it overlays the
+    // reset button beneath it - painter's order IS the Z-order here, which is
+    // the whole reason an in-frame UI can do this at all.
+    if (g_igDropOpen) {
+        int active = AoResIndexOf(g_aoResDiv);
+        RECT box;
+        IgDropItemRect(0, &box);
+        box.top -= 2;
+        IgDropItemRect(IG_DROP_N - 1, &r);
+        box.bottom = r.bottom + 2;
+        box.left -= 2; box.right += 2;
+        IgFill(&box, RGB(70, 76, 88));                 // 2px border
+        for (int i = 0; i < IG_DROP_N; i++) {
+            int hot;
+            IgDropItemRect(i, &r);
+            hot = (mx >= r.left && mx < r.right && my >= r.top && my < r.bottom);
+            IgFill(&r, hot ? RGB(58, 108, 178)
+                           : (i == active) ? RGB(44, 62, 88) : RGB(38, 41, 47));
+            IgText(r.left + 6, r.top + 1, r.right - r.left - 10,
+                   TR(i == 0 ? S_RES_NATIVE : i == 1 ? S_RES_HALF : S_RES_QUARTER),
+                   (hot || i == active) ? RGB(255, 255, 255) : RGB(200, 200, 205),
+                   (i == active) ? g_igFontBold : g_igFont, DT_LEFT);
+        }
+    }
+
+    // The cursor's white patch, painted last so nothing covers it. Inside the
+    // ALWAYS-drawn region (above IG_H), so the cursor still has a source when
+    // the dropdown is shut and the quad is short.
     r.left = IG_WHITE_X; r.top = IG_WHITE_Y; r.right = IG_W; r.bottom = IG_H;
     IgFill(&r, RGB(255, 255, 255));
 }
@@ -342,7 +382,31 @@ static void IgInput(LONG mx, LONG my)
         return;
     }
 
-    if (click && lx >= 0 && lx < IG_W && ly >= 0 && ly < IG_H) {
+    // An open list swallows the next click wherever it lands - selecting an
+    // item, or closing without changing anything. Handled BEFORE the controls
+    // below so a click on the list cannot also fall through to whatever it is
+    // drawn over (the reset button sits under it, which would be a nasty
+    // accident).
+    if (g_igDropOpen && click) {
+        g_igDropOpen = 0;
+        for (int i = 0; i < IG_DROP_N; i++) {
+            IgDropItemRect(i, &r);
+            if (lx >= r.left && lx < r.right && ly >= r.top && ly < r.bottom) {
+                if (g_aoResDivs[i] != g_aoResDiv) {
+                    char l[64];
+                    InterlockedExchange(&g_aoResDiv, g_aoResDivs[i]);
+                    sprintf(l, "[ssao] AO resolution: 1/%ld (panel)", g_aoResDiv);
+                    LogLine(l);
+                    SaveConfig();
+                }
+                break;
+            }
+        }
+        g_igPrevDown = down;
+        return;
+    }
+
+    if (click && lx >= 0 && lx < IG_W && ly >= 0 && ly < IgPanelH()) {
         IgCloseRect(&r);
         if (lx >= r.left && ly < r.bottom) {
             // Same contract as the Win32 WM_CLOSE: the raw view must never
@@ -374,19 +438,11 @@ static void IgInput(LONG mx, LONG my)
             g_igPrevDown = down;
             return;
         }
-        for (int i = 0; i < IG_RES_SEGS; i++) {
-            IgResSegRect(i, &r);
-            if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {
-                if (g_aoResDivs[i] != g_aoResDiv) {
-                    char l[64];
-                    InterlockedExchange(&g_aoResDiv, g_aoResDivs[i]);
-                    sprintf(l, "[ssao] AO resolution: 1/%ld (panel)", g_aoResDiv);
-                    LogLine(l);
-                    SaveConfig();
-                }
-                g_igPrevDown = down;
-                return;
-            }
+        IgResRect(&r);
+        if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {
+            g_igDropOpen = 1;
+            g_igPrevDown = down;
+            return;
         }
         IgResetRect(&r);
         if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {
@@ -426,9 +482,9 @@ static int IgEnsureGpu(IDirect3DDevice9 *dev)
         // and there DEFAULT+DYNAMIC ALSO survives Reset (ResetEx keeps
         // resources). Either way no release-before-Reset plumbing is needed,
         // and a failed draw path recreates lazily as the last resort.
-        if (FAILED(IDirect3DDevice9_CreateTexture(dev, IG_W, IG_H, 1, 0,
+        if (FAILED(IDirect3DDevice9_CreateTexture(dev, IG_W, IG_TEX_H, 1, 0,
                        D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_igTex, NULL)) &&
-            FAILED(IDirect3DDevice9_CreateTexture(dev, IG_W, IG_H, 1,
+            FAILED(IDirect3DDevice9_CreateTexture(dev, IG_W, IG_TEX_H, 1,
                        D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
                        &g_igTex, NULL))) {
             g_igTex = NULL;
@@ -444,7 +500,7 @@ static int IgUpload(void)
     if (FAILED(IDirect3DTexture9_LockRect(g_igTex, 0, &lr, NULL, D3DLOCK_DISCARD)))
         if (FAILED(IDirect3DTexture9_LockRect(g_igTex, 0, &lr, NULL, 0)))
             return 0;
-    for (int y = 0; y < IG_H; y++) {
+    for (int y = 0; y < IG_TEX_H; y++) {
         const unsigned int *src = (const unsigned int *)g_igBits + (size_t)y * IG_W;
         unsigned int *dst = (unsigned int *)((char *)lr.pBits + (size_t)y * lr.Pitch);
         // GDI leaves the alpha byte 0; the panel is opaque, so force it.
@@ -585,8 +641,15 @@ static void IgPresent(IDirect3DDevice9 *dev)
             IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
             IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 
-            IgQuad(dev, (float)g_igX, (float)g_igY, (float)IG_W, (float)IG_H,
-                   0.0f, 0.0f, 1.0f, 1.0f);
+            // Only the LIVE height: the texture is always allocated tall
+            // enough for an open dropdown, but the quad shows just the part
+            // that is currently painted, so a closed panel has no dead strip
+            // hanging off its bottom.
+            {
+                float ph = (float)IgPanelH();
+                IgQuad(dev, (float)g_igX, (float)g_igY, (float)IG_W, ph,
+                       0.0f, 0.0f, 1.0f, ph / (float)IG_TEX_H);
+            }
             // Cursor: crosshair from the white patch. Drawn only when the
             // mapping succeeded - a wrong cursor is worse than none.
             if (haveMouse) {
