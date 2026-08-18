@@ -98,25 +98,18 @@ static DWORD WINAPI MonitorThread(LPVOID param)
     (void)param;
     for (;;) {
         Sleep(500);
-        // Heartbeat. Every log across four sessions of very different lengths
-        // ends at roughly the same size, and the i18n probe added to this loop
-        // produced nothing at all - which has two possible causes that no
-        // amount of reading can separate: this thread stops running, or the
-        // log stops being written. This says which. It also reports the engine
-        // frame counter, which is the other open measurement (the frame tick
-        // fired once and never appeared again).
-        //
-        // Note the coupling that makes the pair diagnostic: g_bootFlush is
-        // cleared from THIS thread's report, so if the thread dies early every
-        // later line stays in the stdio buffer and the log ends mid-session -
-        // exactly what the truncation looks like.
+        // Heartbeat, kept after the investigation it was built for (see
+        // GameMenuLangProbe). Four ticks is enough to be useful and cheap
+        // enough to ship: it proves this thread is alive and, because the
+        // engine frame counter rides along, gives a framerate sample from the
+        // first two seconds of every session. Both were guessed at - wrongly -
+        // during that hunt, and neither was observable in a release log.
         {
             static volatile LONG mtTicks = 0;
             LONG t = InterlockedIncrement(&mtTicks);
-            if (t <= 8 || (t % 20) == 0) {
+            if (t <= 4) {
                 char hb[160];
-                sprintf(hb, "[boot] monitor tick #%ld (engine frames=%ld, bootFlush=%ld)",
-                        t, g_msFrameSeq, g_bootFlush);
+                sprintf(hb, "[boot] monitor tick #%ld (engine frames=%ld)", t, g_msFrameSeq);
                 LogLine(hb);
             }
         }

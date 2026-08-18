@@ -107,10 +107,19 @@ static int LangFromMenuBarEx(HMENU bar, int logMiss)
             }
         }
     }
-    if (logMiss) {
-        char l[320];
-        sprintf(l, "[i18n] no menu label matched (%d top-level items: %s)", n, seen);
-        LogLine(l);
+    // Only while still unresolved, and only the first couple of times. The
+    // vanilla labels are the builder's "*" fallback for the first menu builds
+    // and become real a build or two later, so this fires on the way to a
+    // SUCCESS - logging it every rebuild reads like a permanent failure and
+    // sent a whole investigation after a bug that was not there.
+    if (logMiss && !g_langFromLabel) {
+        static volatile LONG missLogged = 0;
+        if (InterlockedIncrement(&missLogged) <= 2) {
+            char l[320];
+            sprintf(l, "[i18n] menu labels not ready yet (%d top-level items: %s)"
+                       " - retrying on the next rebuild", n, seen);
+            LogLine(l);
+        }
     }
     return -1;
 }
@@ -179,7 +188,15 @@ static void LangDetectFromMenu(HMENU bar)
         lang = LangFromMenuBar(bar);
         how = "game menu label";
         if (lang >= 0) {
-            InterlockedExchange(&g_langFromLabel, 1);
+            // Announce the MATCH itself, once, independently of `announced`
+            // below. That only speaks when the language CHANGES, so a match
+            // that confirms what the OS fallback already guessed was
+            // completely silent - which is why the log appeared to show
+            // nothing but failures while detection was in fact working.
+            if (InterlockedExchange(&g_langFromLabel, 1) == 0)
+                LogLine("[i18n] menu label matched - language now read from the"
+                        " game's own menu (earlier lines were the labels not"
+                        " being ready yet)");
         } else {
             lang = LangFromOsUi();
             how = "OS UI language (menu label not matched)";

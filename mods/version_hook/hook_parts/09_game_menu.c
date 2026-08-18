@@ -977,23 +977,44 @@ static HWND GameMenuFindWindow(void)
     return s.withMenu ? s.withMenu : s.anyVisible;
 }
 
-// Runs from the MONITOR thread (11_monitor.c), twice a second.
+// Watchdog deadline in monitor ticks (2 per second).
+#define LANG_WATCHDOG_TICKS 20
+
+// WATCHDOG, not a detector - detection itself works. It runs from the MONITOR
+// thread (11_monitor.c) twice a second and stays silent unless the labels
+// never resolve at all.
 //
-// It used to ride the engine frame tick, and that flight returned exactly one
-// sample: frame=1 and nothing at 30, 60 or 120. Truncation was ruled out (the
-// logs end at unaligned sizes, and the log is flushed per line until the first
-// monitor window and every 500ms after), so the tick itself is not the
-// reliable per-frame clock it was assumed to be. That is worth knowing on its
-// own - g_msFrameSeq is reported below so the next run measures it - but the
-// probe does not need to depend on it: reading menu labels is pure Win32 and
-// is safe from any thread, unlike the framerate handlers, which stay on the
-// main thread.
+// The investigation that produced this is worth recording, because every step
+// of it was a misread of the log rather than a bug in the code:
 //
-// What the one sample DID establish: at frame 1 the manager's menu reads
-// "* | * | * | Autre" - our own inserted label is correct while all three
-// vanilla ones are still the builder's "*" fallback. So either they are
-// filled in later, or that HMENU is not the one on screen. Both menus are read
-// here, every attempt, until one of them yields a real label.
+//   "the language detection is failing" - it was not. The vanilla labels are
+//   the builder's "*" fallback for the first menu builds and become real a
+//   build or two later, at which point detection matches them. The success was
+//   INVISIBLE because the announcement only fires when the language CHANGES,
+//   and here the OS fallback had already guessed the same answer. Three
+//   miss lines and no success line read as a permanent failure. Both sides of
+//   that are now logged explicitly.
+//
+//   "the frame tick fires once and stops" - it does not. It runs at a clean
+//   60fps (measured: ~30 engine frames per 500ms monitor tick). The probe
+//   logged at frame 1 and never again because the match landed at the third
+//   menu build, a moment later, and closed the gate above - the later samples
+//   were correctly skipped, not lost.
+//
+//   "the log is being truncated" - it is not. That was the next wrong theory,
+//   from four sessions ending at a similar size; the ending is just where the
+//   deduped first-occurrence lines run out. Measured with LogFlush=1 against
+//   LogFlush=0: 22 non-heartbeat lines either way, byte for byte the same
+//   content.
+//
+// The lesson for anything added here later: three separate "it never ran"
+// conclusions were all absence-of-evidence about code that ran exactly as
+// written. Before believing that one, make the code state its own case - an
+// entry line ahead of every early return is what finally settled it, in one
+// run, after several spent guessing.
+//
+// Reading menu labels is pure Win32 and safe from any thread; the framerate
+// handlers are not, and stay on the main thread.
 static void GameMenuLangProbe(void)
 {
     static volatile LONG attempts = 0;
@@ -1005,22 +1026,16 @@ static void GameMenuLangProbe(void)
     LONG n;
     void *mgr;
 
-    // Entry report BEFORE the gates. The probe has now produced nothing from
-    // two different clocks while every check said it should run, and the three
-    // conditions below are the only way out of this function that leaves no
-    // trace. Static reading cannot tell "not called" from "called and gated",
-    // so the function says so itself.
-    n = InterlockedIncrement(&attempts);
-    if (n <= 3) {
-        char g[192];
-        sprintf(g, "[i18n] probe entered #%ld: langCfg=%ld fromLabel=%ld base=%p",
-                n, g_langCfg, g_langFromLabel, (void *)base);
-        LogLine(g);
-    }
-
     if (g_langCfg > 0) return;              // forced by ini - nothing to detect
-    if (g_langFromLabel) return;            // already resolved from a real label
+    if (g_langFromLabel) return;            // resolved - the normal outcome
     if (!base) return;
+
+    // Only two moments are worth a line: the deadline passing with no match,
+    // and a match arriving after it. Everything before that is the labels
+    // simply not being populated yet, which is normal and was already logged
+    // twice by the detection path.
+    n = InterlockedIncrement(&attempts);
+    if (n < LANG_WATCHDOG_TICKS) return;
     mgr = *(void **)(base + MENU_RVA_MGR_PTR);
     if (mgr) mMgr = *(HMENU *)((char *)mgr + MENUMGR_ROOT_HMENU);
     wnd = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
@@ -1030,13 +1045,15 @@ static void GameMenuLangProbe(void)
     lWnd = LangProbeMenuBar(mWnd, fromWnd, sizeof(fromWnd));
     lang = (lMgr >= 0) ? lMgr : lWnd;
 
-    // First few attempts whatever they say (that is the evidence), plus the
-    // one that resolves it. g_msFrameSeq rides along to settle the tick
-    // question without a separate instrument.
-    if (n <= 6 || lang >= 0) {
+    // One line at the deadline, naming what both candidate menus actually
+    // contain. This is the case that matters to a player: the mod's labels are
+    // stuck on the OS-language guess, which is wrong for anyone playing in a
+    // language other than their desktop.
+    if (n == LANG_WATCHDOG_TICKS) {
         char l[576];
-        sprintf(l, "[i18n] probe #%ld (tick=%ld)  mgr[%p]: %s  |  hwnd %p menu[%p]: %s",
-                n, g_msFrameSeq, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
+        sprintf(l, "[i18n] labels still unmatched after %d seconds - using the OS"
+                   " language as a guess. mgr[%p]: %s | hwnd %p menu[%p]: %s",
+                LANG_WATCHDOG_TICKS / 2, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
                 (void *)wnd, (void *)mWnd, fromWnd[0] ? fromWnd : "(empty)");
         LogLine(l);
     }
