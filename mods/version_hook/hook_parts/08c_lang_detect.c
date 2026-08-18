@@ -60,6 +60,11 @@ static void LangTrim(wchar_t *s)
                  s[n - 1] == L'\r' || s[n - 1] == L'\n')) s[--n] = 0;
 }
 
+// Set once a real localised label has actually been matched, as opposed to the
+// OS-language fallback. The deferred retry in 09_game_menu.c stops as soon as
+// this is 1 - the fallback is a guess and must never end the search.
+static volatile LONG g_langFromLabel = 0;
+
 // Case-insensitive after trimming. Prefix rather than equality so a label that
 // carries a suffix the engine appended still resolves.
 static int LangMatchAnchor(const wchar_t *label)
@@ -76,7 +81,9 @@ static int LangMatchAnchor(const wchar_t *label)
 // Walk the menu bar's top-level popups looking for the Graphics one. On a miss
 // the labels actually read are logged once - the failure mode here is silent
 // by nature (a wrong language still renders), so it has to announce itself.
-static int LangFromMenuBar(HMENU bar)
+// logMiss=0 is for the deferred retry, which calls this repeatedly and must
+// not write a line per attempt.
+static int LangFromMenuBarEx(HMENU bar, int logMiss)
 {
     int n, i;
     char seen[256];
@@ -100,12 +107,45 @@ static int LangFromMenuBar(HMENU bar)
             }
         }
     }
-    {
+    if (logMiss) {
         char l[320];
         sprintf(l, "[i18n] no menu label matched (%d top-level items: %s)", n, seen);
         LogLine(l);
     }
     return -1;
+}
+
+// Same, but reports what it saw to the caller so the deferred probe can say
+// WHICH menu carried real labels and when they appeared. Returns the language
+// or -1; `out`/`outSz` receive the observed labels.
+static int LangProbeMenuBar(HMENU bar, char *out, size_t outSz)
+{
+    int n, i, hit = -1;
+    size_t used = 0;
+    if (out && outSz) out[0] = 0;
+    if (!bar || !IsMenu(bar)) {
+        if (out && outSz) sprintf(out, "(not a menu)");
+        return -1;
+    }
+    n = GetMenuItemCount(bar);
+    for (i = 0; i < n; i++) {
+        wchar_t buf[128];
+        if (GetMenuStringW(bar, (UINT)i, buf, 128, MF_BYPOSITION) <= 0) continue;
+        LangTrim(buf);
+        if (hit < 0) hit = LangMatchAnchor(buf);
+        if (out && used < outSz - 40) {
+            char a[64];
+            int k = WideCharToMultiByte(CP_UTF8, 0, buf, -1, a, sizeof(a) - 1, NULL, NULL);
+            a[(k > 0 && k < (int)sizeof(a)) ? k - 1 : 0] = 0;
+            used += (size_t)sprintf(out + used, used ? " | %s" : "%s", a);
+        }
+    }
+    return hit;
+}
+
+static int LangFromMenuBar(HMENU bar)
+{
+    return LangFromMenuBarEx(bar, 1);
 }
 
 static int LangFromOsUi(void)
@@ -138,7 +178,9 @@ static void LangDetectFromMenu(HMENU bar)
     } else {
         lang = LangFromMenuBar(bar);
         how = "game menu label";
-        if (lang < 0) {
+        if (lang >= 0) {
+            InterlockedExchange(&g_langFromLabel, 1);
+        } else {
             lang = LangFromOsUi();
             how = "OS UI language (menu label not matched)";
         }

@@ -440,6 +440,10 @@ static volatile LONG g_shadowPassUsec = 0;
 // Previous-frame bases for the delta columns above (main thread only).
 static LONG g_ftPrevAllocs = 0, g_ftPrevReads = 0, g_ftPrevWfso = 0;
 
+// Defined in 09_game_menu.c (later in the single translation unit): the
+// once-a-second re-check of things that are not settled at menu-build time.
+static void GameMenuDeferredPoll(LONG frame);
+
 __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
 {
     if (!g_mainThreadId) g_mainThreadId = (LONG)GetCurrentThreadId();
@@ -453,6 +457,11 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     // the new frame's full overdraw re-founds the MS accumulation.
     g_msSuppressFrame = 0;
     g_msFrameSeq++;
+    // Deferred menu/settings poll (defined in 09_game_menu.c, which is later in
+    // the TU). THIS is the main thread by definition - g_mainThreadId is
+    // established right above - which is why the poll lives here and not on the
+    // monitor thread: it calls the game's own setting handlers.
+    GameMenuDeferredPoll(g_msFrameSeq);
     unsigned __int64 now = __rdtsc();
     if (g_lastFrameTsc != 0 && g_cyclesPerUsec > 0.0) {
         LONG usec = (LONG)((double)(now - g_lastFrameTsc) / g_cyclesPerUsec);

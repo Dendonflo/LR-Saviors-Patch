@@ -431,7 +431,9 @@ static char __cdecl MenuH_FrUnlimited(char apply)
     return (char)(g_unlockFramerateEnabled && g_targetFpsX100 == 0);
 }
 
-// ---- engine framerate mode: force Dynamic once per session -----------------
+static volatile LONG g_fdfForces = 0, g_fdfLogged = 0;
+
+// ---- engine framerate mode: force Dynamic -----------------------------------
 // The vanilla FrameRate popup is replaced wholesale below, so "Variable" and
 // "Stability" are no longer clickable - but the ENGINE's own setting lives in
 // the game's own storage and survives that. Sitting on Stability halves the
@@ -443,30 +445,35 @@ static char __cdecl MenuH_FrUnlimited(char apply)
 // handler(1) applies AND persists through the game's own path - so this is the
 // engine changing its own setting, not us writing a field behind its back.
 //
-// Deliberately conditional and one-shot: a session already on Variable
-// performs no write at all, and the result is VERIFIED by re-querying rather
-// than assumed, because "we called the handler" and "the mode changed" are not
-// the same claim. Runs from GameMenuAppend, which is the proven context - the
-// manager exists, it is the main thread, and it is the same subsystem that
-// dispatches these handlers on a click.
-static void GameMenuForceDynamicFps(unsigned char *base)
+// Deliberately conditional: a session already on Variable performs no write at
+// all. The result is checked by re-querying, but note what that check is worth
+// - see the Nova finding below.
+//
+// NOT one-shot, and that is the 2026-08-18 correction. The first version fired
+// once at the first menu build, logged "forced to Dynamic" on a verified
+// re-query, and the game still wrote `Graphics_FrameRate = Stability` to
+// Configuration.ini on exit. The verification was not wrong, it was EARLY:
+// the user launches through Nova Launcher, which applies its own settings
+// after the game is up, so our force landed first and was overwritten
+// afterwards. A single shot at boot cannot win a race it does not know it is
+// in - hence the deferred poll below, which simply keeps checking.
+static int GameMenuForceDynamicNow(const char *when)
 {
-    static volatile LONG done = 0;
+    unsigned char *base = (unsigned char *)g_mainModBase;
     GameMenuHandler var, stab;
-    if (!g_forceDynamicFps || !base) return;
-    if (InterlockedCompareExchange(&done, 1, 0) != 0) return;
+    if (!g_forceDynamicFps || !base) return 0;
     var  = (GameMenuHandler)(base + MENU_RVA_FRATE_VAR);
     stab = (GameMenuHandler)(base + MENU_RVA_FRATE_STAB);
-    if (!stab(0)) {
-        LogLine("[menu] engine framerate mode already Dynamic - not touched");
-        return;
-    }
+    if (!stab(0)) return 0;                  // already Dynamic - nothing to do
     var(1);
-    LogLine(stab(0)
-        ? "[menu] engine framerate mode was Fixed - force to Dynamic FAILED"
-          " (still reads Fixed; set ForceDynamicFramerate=0 if this repeats)"
-        : "[menu] engine framerate mode was Fixed - forced to Dynamic"
-          " (Fixed halves the mod's framerate target)");
+    InterlockedIncrement(&g_fdfForces);
+    if (InterlockedIncrement(&g_fdfLogged) <= 4) {
+        char l[224];
+        sprintf(l, "[menu] engine framerate mode was Fixed - forced to Dynamic (%s)%s",
+                when, stab(0) ? "  *** STILL READS FIXED ***" : "");
+        LogLine(l);
+    }
+    return 1;
 }
 
 // ---- tree construction helpers --------------------------------------------
@@ -851,8 +858,9 @@ static void GameMenuAppend(void)
     // Function level, not inside the anchor-surgery block above: the force is
     // about the ENGINE's setting and must still happen on a build where the
     // vanilla popups were not found (a stale RVA would skip the surgery but
-    // says nothing about the handlers themselves).
-    GameMenuForceDynamicFps(base);
+    // says nothing about the handlers themselves). The deferred poll repeats
+    // this - see its comment for why once at boot is not enough.
+    GameMenuForceDynamicNow("menu build");
 
     if (InterlockedIncrement(&g_menuBuilds) == 1) {
         char line[256];
@@ -915,5 +923,88 @@ static void InstallGameMenuHook(void)
     g_menuHookInstalled = 1;
     LogLine("[menu] game-menu build hook installed (call site 0x6BC32E)");
 }
+
+// ---- deferred poll: things that are not settled at menu-build time ---------
+// Both of the problems this exists for have the SAME shape: the mod acts at
+// the first menu build, and the state it acts on is not final yet.
+//
+//   framerate - Nova Launcher applies its own settings after the game is up,
+//               so a boot-time force is silently reverted (confirmed: the log
+//               said "forced to Dynamic" and the game still wrote Stability to
+//               Configuration.ini on exit).
+//   language  - every top-level menu label reads "*" at build time (the
+//               builder's own lookup fallback) while the window plainly shows
+//               localised names later, so detection falls through to the OS
+//               language every session. TWO candidate explanations, and this
+//               probe separates them rather than picking one: either the
+//               labels are filled in after the build, or mgr[+0x08] is not the
+//               menu the window actually shows. Both menus are read, both are
+//               logged with a timestamp in frames, and the answer decides the
+//               fix.
+//
+// Main thread only - called from the frame tick, which is where g_mainThreadId
+// is established. Once per second, for the first minute; the framerate check
+// is two calls into the game's own handler and the language probe stops
+// entirely once a real label has matched.
+#define GAMEMENU_POLL_FRAMES 3600
+#define GAMEMENU_POLL_EVERY  60
+
+static void GameMenuLangProbe(LONG sec)
+{
+    unsigned char *base = (unsigned char *)g_mainModBase;
+    char fromMgr[192], fromWnd[192];
+    HMENU mMgr = NULL, mWnd = NULL;
+    int lMgr, lWnd, lang;
+    void *mgr;
+
+    if (g_langCfg > 0) return;              // forced by ini - nothing to detect
+    if (g_langFromLabel) return;            // already resolved from a real label
+    if (!base) return;
+
+    mgr = *(void **)(base + MENU_RVA_MGR_PTR);
+    if (mgr) mMgr = *(HMENU *)((char *)mgr + MENUMGR_ROOT_HMENU);
+    if (g_gameHwnd) mWnd = GetMenu(g_gameHwnd);
+
+    lMgr = LangProbeMenuBar(mMgr, fromMgr, sizeof(fromMgr));
+    lWnd = LangProbeMenuBar(mWnd, fromWnd, sizeof(fromWnd));
+    lang = (lMgr >= 0) ? lMgr : lWnd;
+
+    // Report the first few attempts whatever they say (that is the evidence),
+    // and always report the attempt that finally resolves it.
+    if (sec <= 3 || lang >= 0) {
+        char l[512];
+        sprintf(l, "[i18n] probe t=%lds  mgr[%p]: %s  |  window[%p]: %s",
+                sec, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
+                (void *)mWnd, fromWnd[0] ? fromWnd : "(empty)");
+        LogLine(l);
+    }
+    if (lang < 0) return;
+
+    InterlockedExchange(&g_langFromLabel, 1);
+    if (lang != g_langIdx) {
+        char l[224];
+        InterlockedExchange(&g_langIdx, lang);
+        sprintf(l, "[i18n] language corrected to index %d from the %s menu at t=%lds"
+                   " - labels already inserted keep the old language until the"
+                   " next menu rebuild", lang,
+                (lMgr >= 0) ? "manager" : "window", sec);
+        LogLine(l);
+    } else {
+        char l[160];
+        sprintf(l, "[i18n] label match at t=%lds confirms the current language"
+                   " (the OS fallback had guessed right)", sec);
+        LogLine(l);
+    }
+}
+
+static void GameMenuDeferredPoll(LONG frame)
+{
+    if (frame <= 0 || frame > GAMEMENU_POLL_FRAMES) return;
+    if ((frame % GAMEMENU_POLL_EVERY) != 0) return;
+    GameMenuForceDynamicNow("runtime poll");
+    GameMenuLangProbe(frame / GAMEMENU_POLL_EVERY);
+}
+#else
+static void GameMenuDeferredPoll(LONG frame) { (void)frame; }
 #endif // ENABLE_GAME_MENU
 
