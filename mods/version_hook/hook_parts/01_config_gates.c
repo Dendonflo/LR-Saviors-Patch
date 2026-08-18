@@ -361,6 +361,13 @@ static volatile LONG g_aoBisect = 0;
 static volatile LONG g_aoFlatTest = 0;
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
 static volatile LONG g_aoBlurSharpE[2] = { 681, 915 };  // ini AoBlurSharp / AoHbaoBlurSharp
+// ini AoBlurMode / AoHbaoBlurMode: 0 = our a-trous bilateral, 1 = NVIDIA's own
+// HBAO+ blur (fixed 3-tap radius, one texel spacing, separable X then Y).
+// Both default to 0 so nothing changes for an existing install until the
+// toggle is used - this ships to be COMPARED, not to replace anything yet.
+// Passes and Spread do not apply to mode 1; Sharp does, rescaled (see
+// AoSetBlurConsts in 25_ssao.c).
+static volatile LONG g_aoBlurModeE[2] = { 0, 0 };
 // ini AoRespectFloor: stay inside the engine's [0.5..1] shadow envelope.
 // Ships as 0 since 1.1. At 1 the composite is clamped at the engine's own 0.5
 // floor, which caps AO at half strength in lit areas and cancels it almost

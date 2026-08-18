@@ -537,6 +537,62 @@ static const char *g_aoBlurHlsl =
 "    return float4(v, v, v, 1.0);\n"
 "}\n";
 
+// ---- NVIDIA's own HBAO+ blur (AoBlurMode=1) --------------------------------
+// Transcribed from gl_ssao/hbao_blur.frag.glsl (Apache-2.0), the blur shipped
+// alongside the estimator our HBAO+ path already matches. Offered as a toggle
+// so the two can be judged against each other on the same image.
+//
+// Faithful parts: KERNEL_RADIUS 3, so 3 taps each side plus centre, at ONE
+// TEXEL spacing; separable X then Y; weight
+//     exp2(-r*r*BlurFalloff - ddiff*ddiff)
+// with BlurSigma = KERNEL_RADIUS*0.5 = 1.5 and BlurFalloff = 1/(2*sigma^2),
+// which is 1/4.5 = 0.2222222 (folded in as a literal - it is compile-time
+// constant in the original too).
+//
+// The ONE deliberate divergence, and it is not optional: theirs weights the
+// ABSOLUTE depth difference, (d - center_d) * g_Sharpness, because their depth
+// is a linear view depth in a range their sharpness default of 40 was chosen
+// against. This game's depth spans roughly 4..2000 world units, so an absolute
+// threshold that stops edges at arm's length ignores them across a courtyard,
+// and one tuned for the courtyard erases everything near. The delta is
+// normalised by centre depth instead - the same relative measure the a-trous
+// blur above uses - so one slider value means the same thing at every
+// distance.
+//
+// Because of that, Sharp does NOT carry the same numbers between the two
+// modes; AoSetBlurConsts scales it for this one (see there).
+//
+// Depth comes from our own depth texture on s13. The original packs AO and
+// depth into two channels of one target and reads both from a single fetch;
+// we already bind a full depth buffer for the a-trous blur, so this samples
+// that instead of changing the estimator's output format.
+static const char *g_aoBlurNvHlsl =
+"sampler2D aoTex    : register(s12);\n"
+"sampler2D depthTex : register(s13);\n"
+"float4 cB0 : register(c220);\n"   // x=texelW y=texelH z=dirX w=dirY
+"float4 cB1 : register(c221);\n"   // x=sharpness (pre-scaled CPU-side)
+"float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+"    float z0 = tex2Dlod(depthTex, float4(uv, 0, 0)).r;\n"
+"    float2 dir = cB0.zw * cB0.xy;\n"
+"    float sum = tex2Dlod(aoTex, float4(uv, 0, 0)).r;\n"
+"    float wsum = 1.0;\n"
+"    [unroll] for (int i = 1; i <= 3; i++) {\n"
+"        float r = (float)i;\n"
+"        [unroll] for (int s = 0; s < 2; s++) {\n"
+"            float sgn = (s == 0) ? -1.0 : 1.0;\n"
+"            float2 u2 = uv + dir * (r * sgn);\n"
+"            float zi = tex2Dlod(depthTex, float4(u2, 0, 0)).r;\n"
+"            float dd = ((zi - z0) / max(z0, 0.001)) * cB1.x;\n"
+"            float w = exp2(-r * r * 0.2222222 - dd * dd);\n"
+"            sum += tex2Dlod(aoTex, float4(u2, 0, 0)).r * w;\n"
+"            wsum += w;\n"
+"        }\n"
+"    }\n"
+"    float v = sum / wsum;\n"
+"    v = (v > -1000.0 && v < 1000.0) ? v : 1.0;\n"
+"    return float4(v, v, v, 1.0);\n"
+"}\n";
+
 // Combine pass (v25f). THE reason this exists: a blend cannot read its own
 // destination, so "multiply, but never below the engine's floor" is not
 // expressible as blend state. Measured with an A/B dump pair: the engine's
@@ -677,6 +733,11 @@ static const char *g_aoQSteps[3] = { "4", "4",  "4"  };
 static const char *g_aoQTurns[3] = { "3", "5",  "9"  };
 static IDirect3DPixelShader9 *g_aoBlurPs = NULL;
 static LONG g_aoBlurState = 0;
+// NVIDIA's blur (AoBlurMode=1). Compiled alongside ours rather than on demand:
+// the toggle is meant to be flicked back and forth while comparing, and a
+// first-use compile would stall the frame it is switched on.
+static IDirect3DPixelShader9 *g_aoBlurNvPs = NULL;
+static LONG g_aoBlurNvState = 0;
 static IDirect3DPixelShader9 *g_aoCombinePs = NULL;
 static LONG g_aoCombineState = 0;
 static volatile LONG g_ssaoDraws = 0;
@@ -788,6 +849,11 @@ static void AoEnsureShaders(IDirect3DDevice9 *dev, int est, int q)
         g_aoBlurPs = AoCompilePs(dev, g_aoBlurHlsl, NULL,
                                  "bilateral blur (9-tap separable)");
         g_aoBlurState = g_aoBlurPs ? 1 : -1;
+    }
+    if (g_aoBlurNvState == 0) {
+        g_aoBlurNvPs = AoCompilePs(dev, g_aoBlurNvHlsl, NULL,
+                                   "NVIDIA HBAO+ blur (7-tap separable)");
+        g_aoBlurNvState = g_aoBlurNvPs ? 1 : -1;
     }
     if (g_aoCombineState == 0) {
         g_aoCombinePs = AoCompilePs(dev, g_aoCombineHlsl, NULL,
@@ -989,7 +1055,18 @@ static void AoSetBlurConsts(IDirect3DDevice9 *dev, UINT w, UINT h,
     // edge threshold: half weight at a relative depth difference of
     // 1/sqrt(sharp) - 16% at 40, 5% at 400.
     (void)aoScale;
-    c1[0] = (float)g_aoBlurSharpE[est];
+    // Sharp means different things to the two kernels, so it is scaled here
+    // rather than asking the user to remember two number ranges for one
+    // slider. Ours is a reciprocal quadratic, w = 1/(1 + sharp*r^2): half
+    // weight at r = 1/sqrt(sharp), i.e. 4% relative depth at the shipped 681.
+    // NVIDIA's is a gaussian in (r*sharp), w = exp2(-(r*sharp)^2): half weight
+    // at r = 1/sharp, so the same 681 would reject every tap on a flat floor
+    // and switch the blur off entirely. Dividing by 100 puts the shipped
+    // values where they behave: 681 -> 6.81, half weight at 15% relative
+    // depth, which is a silhouette rather than a slope.
+    c1[0] = (g_aoBlurModeE[est] == 1)
+                ? (float)g_aoBlurSharpE[est] / 100.0f
+                : (float)g_aoBlurSharpE[est];
     c1[1] = spacing;
     c1[2] = c1[3] = 0.0f;
     IDirect3DDevice9_SetPixelShaderConstantF(dev, 220, c0, 1);
@@ -1271,9 +1348,32 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
             // combine pass, which needs the finished AO in a texture it can
             // sample alongside the engine's own buffer.
             if (useBlur && bis < 3) {
-                AoSetPs(dev, g_aoBlurPs);
+                // Mode 1 is NVIDIA's own blur, offered for comparison. It is a
+                // FIXED-RADIUS kernel by design (3 taps each side at one texel),
+                // so Passes and Spread do not apply to it - the only shared
+                // control is Sharp, rescaled in AoSetBlurConsts. Passes==0 still
+                // means "no blur" in both modes, which is the one thing that
+                // has to stay consistent or the slider lies.
+                LONG blurMode = (g_aoBlurModeE[est] == 1 && g_aoBlurNvPs) ? 1 : 0;
+                AoSetPs(dev, blurMode ? g_aoBlurNvPs : g_aoBlurPs);
                 AoBindTex(dev, 13, (IDirect3DBaseTexture9 *)g_aoDepthTex);
-                {
+                if (blurMode) {
+                    // One X then one Y, exactly as the original does it, and
+                    // always landing back in RT A so the combine below finds
+                    // the finished AO where it expects it.
+                    if (g_aoBlurPassesE[est] > 0) {
+                        if (!AoTarget(dev, surfB, rw, rh)) goto done;
+                        AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtA);
+                        AoBlendOpaque(dev, 0x0F);
+                        AoSetBlurConsts(dev, rw, rh, 1.0f, 0.0f, 1.0f, aoScale, est);
+                        AoDrawFsQuad(dev, rw, rh);
+                        if (!AoTarget(dev, surfA, rw, rh)) goto done;
+                        AoBindTex(dev, 12, (IDirect3DBaseTexture9 *)g_aoRtB);
+                        AoBlendOpaque(dev, 0x0F);
+                        AoSetBlurConsts(dev, rw, rh, 0.0f, 1.0f, 1.0f, aoScale, est);
+                        AoDrawFsQuad(dev, rw, rh);
+                    }
+                } else {
                     LONG passes = g_aoBlurPassesE[est];
                     // 0 is a real setting now, not a floor to be clamped away
                     // (user request 2026-08-16: HBAO+ wants LESS than one

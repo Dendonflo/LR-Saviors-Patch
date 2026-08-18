@@ -131,6 +131,10 @@ TABLE = [
         "Blur Spread", "Étalement du flou", "Unschärfe-Streuung",
         "Diffusione sfocatura", "Extensión del desenfoque",
         "ぼかしの広がり", "模糊範圍", "블러 범위"]),
+    ("S_BLUR_NV", [
+        "NVIDIA blur", "Flou NVIDIA", "NVIDIA-Weichzeichner",
+        "Sfocatura NVIDIA", "Desenfoque NVIDIA",
+        "NVIDIA ブラー", "NVIDIA 模糊", "NVIDIA 블러"]),
     ("S_SHOW_RAW", [
         "Show raw AO", "Afficher l'AO brute", "Rohes AO anzeigen",
         "Mostra AO grezza", "Mostrar AO en bruto",

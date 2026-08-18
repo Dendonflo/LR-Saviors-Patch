@@ -117,7 +117,9 @@ def main():
             ]
             ok &= compile_one(fxc, estimator, defs, "%s q%d" % (estname, q))
 
-    for name, label in (("g_aoBlurHlsl", "blur"), ("g_aoCombineHlsl", "combine")):
+    for name, label in (("g_aoBlurHlsl", "blur"),
+                        ("g_aoBlurNvHlsl", "blur-nvidia"),
+                        ("g_aoCombineHlsl", "combine")):
         ok &= compile_one(fxc, extract(csrc, name), [], label)
 
     print("ALL SHADERS OK" if ok else "SHADER CHECK FAILED")
