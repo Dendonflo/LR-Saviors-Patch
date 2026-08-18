@@ -782,6 +782,19 @@ static int AoResIndexOf(LONG div)
     return 0;
 }
 
+// Is `a` above `b` in the top-level Z-order? Walks DOWN from `a`: if `b` is
+// reached, `a` was higher. Used to ask whether the panel has actually been
+// covered by the game before doing anything about it - an unconditional
+// re-assert is what set two topmost windows fighting each other.
+static int WndIsAbove(HWND a, HWND b)
+{
+    HWND w;
+    if (!a || !b) return 0;
+    for (w = GetWindow(a, GW_HWNDNEXT); w; w = GetWindow(w, GW_HWNDNEXT))
+        if (w == b) return 1;
+    return 0;
+}
+
 static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
@@ -952,12 +965,20 @@ static void EnsureAoTweakWindow(void)
     // window that has a menu bar.
     {
         HWND owner = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
+        char l[192];
         g_hAoTweak = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName,
             AoTweakTitle(),
             WS_POPUP | WS_CAPTION | WS_SYSMENU,
             120, 120, r.right - r.left, r.bottom - r.top,
             owner, NULL, wc.hInstance, NULL);
+        // Stated outright, because the whole fullscreen behaviour rests on it
+        // and a NULL owner is silent: the window still appears, still says
+        // topmost, and simply loses every Z-order argument it should win.
+        sprintf(l, "[menu] AO panel created hwnd=%p owner=%p (gameHwnd=%p)%s",
+                (void *)g_hAoTweak, (void *)owner, (void *)g_gameHwnd,
+                owner ? "" : "  *** NO OWNER - will not stay above the game ***");
+        LogLine(l);
     }
     if (!g_hAoTweak) return;
     for (size_t i = 0; i < AO_ROWS; i++) {
@@ -1173,19 +1194,26 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 SetWindowPos(g_hAoTweak, HWND_TOPMOST, 0, 0, 0, 0,
                              SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
-            // NO per-tick re-assert here, deliberately, and it must not be
-            // added back. A version of this file did exactly that and made the
-            // frametime overlay blink: SetWindowPos(HWND_TOPMOST) does not
-            // mean "be topmost", it means "go to the TOP of the topmost band",
-            // so two windows both re-asserting every tick swap places twice a
-            // second and each swap repaints them. One assertion per window is
-            // fine; two competing ones is a loop.
+            // CONDITIONAL re-assert, and the condition is the entire point.
             //
-            // Nothing is lost by dropping it: this window is OWNED by the game
-            // window, and the window manager keeps an owned window above its
-            // owner permanently, through device resets and alt-tabs alike.
-            // That was the actual fix - the re-assert was belt-and-braces on
-            // top of a guarantee that already held.
+            // An UNCONDITIONAL one was tried and made the frametime overlay
+            // blink: SetWindowPos(HWND_TOPMOST) does not mean "be topmost", it
+            // means "go to the TOP of the topmost band", so two windows both
+            // asserting every tick swap places twice a second and each swap
+            // repaints them. Removing it entirely was then tried too, on the
+            // theory that ownership alone guarantees this window sits above
+            // the game - which is true only when the owner was actually
+            // resolved, and it is NULL whenever the lookup misses.
+            //
+            // Asking first settles both: the overlay raising ITSELF never puts
+            // the GAME above this window, so the test stays false and no fight
+            // starts; a game that really has covered us is corrected once.
+            else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
+                HWND gw = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
+                if (gw && !WndIsAbove(g_hAoTweak, gw))
+                    SetWindowPos(g_hAoTweak, HWND_TOPMOST, 0, 0, 0, 0,
+                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
             // POLL the checkbox rather than trusting WM_COMMAND to arrive.
             // BS_AUTOCHECKBOX flips its own visual state natively, so its
             // state is authoritative whether or not the notification reaches
