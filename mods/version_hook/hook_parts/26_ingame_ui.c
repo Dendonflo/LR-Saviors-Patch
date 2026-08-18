@@ -254,6 +254,24 @@ static void IgPaint(int mx, int my)
 }
 
 // ---- input ------------------------------------------------------------------
+// The game window, cached. GameMenuFindWindow ENUMERATES every top-level
+// window in the system; calling it per EndScene (with g_gameHwnd null, which
+// it permanently is in this game) was a measurable slice of the 20fps report.
+// Revalidated cheaply with IsWindow and re-resolved once a second at most.
+static HWND IgGameWindow(void)
+{
+    static HWND cached = NULL;
+    static DWORD lastLookup = 0;
+    DWORD now;
+    if (g_gameHwnd) return g_gameHwnd;
+    if (cached && IsWindow(cached)) return cached;
+    now = GetTickCount();
+    if (now - lastLookup < 1000) return cached;
+    lastLookup = now;
+    cached = GameMenuFindWindow();
+    return cached;
+}
+
 // Backbuffer-space cursor. Client coords scale by backbuffer/client because
 // borderless keeps the backbuffer at desktop size while the client can be
 // anything; at 1:1 the scale is identity and this is a no-op.
@@ -261,7 +279,7 @@ static int IgCursor(LONG *ox, LONG *oy)
 {
     POINT p;
     RECT rc;
-    HWND w = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
+    HWND w = IgGameWindow();
     if (!w || !GetCursorPos(&p) || !ScreenToClient(w, &p)) return 0;
     if (!GetClientRect(w, &rc) || rc.right <= 0 || rc.bottom <= 0) return 0;
     if (g_backbufW > 1 && g_backbufH > 1) {
@@ -423,13 +441,39 @@ static void IgQuad(IDirect3DDevice9 *dev, float x, float y, float w, float h,
     IDirect3DDevice9_DrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, v, sizeof(IgVtx));
 }
 
-// Called from both Present hooks in 13, before the engine's frame goes out.
+// Called from HookedEndScene (13) - and nominally from the Present hooks,
+// which have never fired in this game but might under another wrapper stack.
+//
+// SPLIT into prep and draw (2026-08-18, the ~20fps report): EndScene can run
+// MANY times per frame if the engine brackets per pass, and the first version
+// did EVERYTHING per call - GDI repaint, full texture upload, input polling,
+// and (worst) the EnumWindows walk hiding in the window lookup. The
+// per-frame work now latches on g_msFrameSeq and runs once; each EndScene
+// pays only the draw itself (a handful of state sets and three quads), which
+// is what makes "last bracket wins" affordable. The one-shot rate line below
+// reports calls-per-frame so the cost model is measured, not assumed.
+static volatile LONG g_igEsCalls = 0, g_igEsRateLogged = 0;
+
 static void IgPresent(IDirect3DDevice9 *dev)
 {
+    static LONG lastPrepFrame = -1;
+    static LONG haveMouseS = 0, mxS = 0, myS = 0;
     LONG mx = 0, my = 0;
     int haveMouse;
 
     if (!g_aoTweakOpen || !g_aoPanelInGame || !dev) return;
+    // EndScene rate, measured once: past ~600 frames, report how many times
+    // this ran per frame. >1 means per-pass brackets and the draw runs that
+    // many times; the prep never does.
+    {
+        LONG c = InterlockedIncrement(&g_igEsCalls);
+        if (g_msFrameSeq > 600 && InterlockedCompareExchange(&g_igEsRateLogged, 1, 0) == 0) {
+            char l[128];
+            sprintf(l, "[menu] AO panel: EndScene calls=%ld over %ld frames (~%ld per frame)",
+                    c, g_msFrameSeq, g_msFrameSeq ? (c + g_msFrameSeq / 2) / g_msFrameSeq : 0);
+            LogLine(l);
+        }
+    }
     // The open request is logged BEFORE the two ensures, and each ensure
     // failure logs itself. The first flight had the only log line AFTER both,
     // so whichever failed did so in silence - the same
@@ -455,19 +499,26 @@ static void IgPresent(IDirect3DDevice9 *dev)
         return;
     }
 
-    haveMouse = IgCursor(&mx, &my);
-    if (haveMouse) IgInput(mx, my);
-    // Input may have closed the panel this very tick.
-    if (!g_aoTweakOpen) return;
+    // ---- prep: once per engine frame, however many EndScenes it has -------
+    if (g_msFrameSeq != lastPrepFrame) {
+        lastPrepFrame = g_msFrameSeq;
 
-    // Keep the panel reachable after a resolution change shrinks the screen.
-    if (g_backbufW > IG_W && g_igX > (LONG)g_backbufW - 40) g_igX = (LONG)g_backbufW - IG_W;
-    if (g_backbufH > IG_H && g_igY > (LONG)g_backbufH - 40) g_igY = (LONG)g_backbufH - IG_H;
-    if (g_igX < 0) g_igX = 0;
-    if (g_igY < 0) g_igY = 0;
+        haveMouseS = IgCursor(&mxS, &myS);
+        if (haveMouseS) IgInput(mxS, myS);
+        // Input may have closed the panel this very tick.
+        if (!g_aoTweakOpen) return;
 
-    IgPaint(haveMouse ? mx - g_igX : -100, haveMouse ? my - g_igY : -100);
-    if (!IgUpload()) { IgReleaseGpu(); return; }
+        // Keep the panel reachable after a resolution change shrinks the screen.
+        if (g_backbufW > IG_W && g_igX > (LONG)g_backbufW - 40) g_igX = (LONG)g_backbufW - IG_W;
+        if (g_backbufH > IG_H && g_igY > (LONG)g_backbufH - 40) g_igY = (LONG)g_backbufH - IG_H;
+        if (g_igX < 0) g_igX = 0;
+        if (g_igY < 0) g_igY = 0;
+
+        IgPaint(haveMouseS ? mxS - g_igX : -100, haveMouseS ? myS - g_igY : -100);
+        if (!IgUpload()) { IgReleaseGpu(); return; }
+    }
+    haveMouse = (int)haveMouseS;
+    mx = mxS; my = myS;
 
     // ---- draw, with explicit save/restore ----------------------------------
     // Restore comes from the engine-state shadows (15) exactly like the AO
