@@ -1,4 +1,4 @@
-﻿// ---- Control panel (separate Win32 window, not a D3D9 overlay) ------------
+// ---- Control panel (separate Win32 window, not a D3D9 overlay) ------------
 // A D3D9-rendered overlay (ImGui or similar, drawn via the already-hooked
 // Present) was considered and rejected for this: it would need its own
 // input capture wired through the game's own message loop, a font/vertex
@@ -392,7 +392,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      262           // 12 rows + header
+#define STAT_H      296           // 14 rows + header
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -508,6 +508,17 @@ static void DrawStatusPanel(HDC dc)
         sprintf(app, "%ld subs", g_msSubstitutions);
         StatRow(dc, &y, "MSAA", set, app, m > 0 && g_msSubstitutions == 0);
     }
+    if (g_msaaSamples > 0) {
+        // The open question the grab fix left behind: substitution is stood
+        // down for a frame whenever the engine writes into the scene surface
+        // itself, and if that happens EVERY frame then MSAA is quietly doing
+        // nothing. suppressed approaching subs is the tell, and it belongs on
+        // screen rather than in a log line nobody reads mid-test.
+        LONG sub = g_msSubstitutions, sup = g_msSuppressedSubs;
+        sprintf(set, "%ld sync / %ld write", g_msSyncResolves, g_msForeignWrites);
+        sprintf(app, "%ld suppressed", sup);
+        StatRow(dc, &y, "MSAA scene grabs", set, app, sub > 0 && sup * 2 > sub);
+    }
     {
         // The engine's built-in FXAA. g_fxaaOff=1 swaps the pass for a
         // passthrough shader, so "removed" is only true once that shader has
@@ -561,6 +572,19 @@ static void DrawStatusPanel(HDC dc)
         if (c > 0) sprintf(set, "%.2f fps", c / 100.0); else sprintf(set, "unlocked");
         sprintf(app, "p50 %.1f ms", g_liveP50 / 1000.0);
         StatRow(dc, &y, "Frame cap", set, app, 0);
+    }
+    {
+        // The ENGINE's own framerate mode, queried live from its handler
+        // rather than remembered - which is the point, because a launcher
+        // (Nova) can and does put it back to Fixed after boot, and Fixed
+        // halves the mod's target. This row is how that becomes visible
+        // without reading a log.
+        GameMenuHandler stab = (GameMenuHandler)(g_mainModBase + MENU_RVA_FRATE_STAB);
+        int fixedNow = (g_mainModBase && stab(0)) ? 1 : 0;
+        sprintf(set, "%s", g_forceDynamicFps ? "force Dynamic" : "leave alone");
+        sprintf(app, "%s%s", fixedNow ? "Fixed (halves cap)" : "Dynamic",
+                (!fixedNow && g_fdfForces > 0) ? " (corrected)" : "");
+        StatRow(dc, &y, "Engine framerate", set, app, fixedNow);
     }
     {
         LONG t = g_stutterThresholdUsec;
@@ -1073,6 +1097,14 @@ static DWORD WINAPI OverlayThread(LPVOID param)
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
+        // With InGameUi on, the frametime graph and the status panel are drawn
+        // inside the frame by 26_ingame_ui.c using these same paint functions.
+        // This thread must not ALSO put up Win32 windows for them - two copies
+        // of each, one of which loses to fullscreen, was the whole problem.
+        if (g_inGameUi) {
+            if (g_hOverlay && IsWindowVisible(g_hOverlay)) ShowWindow(g_hOverlay, SW_HIDE);
+            if (g_hStatus && IsWindowVisible(g_hStatus)) ShowWindow(g_hStatus, SW_HIDE);
+        } else
         if (g_overlayEnabled) {
             EnsureOverlayWindow();
             if (g_hOverlay) {
@@ -1167,7 +1199,7 @@ static DWORD WINAPI OverlayThread(LPVOID param)
         // fight, and the window is the thing that mode exists to escape. The
         // hide below covers flipping the ini mid-session with the old window
         // still up.
-        if (g_aoPanelInGame) {
+        if (g_inGameUi) {
             if (g_hAoTweak && IsWindowVisible(g_hAoTweak))
                 ShowWindow(g_hAoTweak, SW_HIDE);
         } else
@@ -1291,7 +1323,9 @@ static DWORD WINAPI OverlayThread(LPVOID param)
             ShowWindow(g_hAoTweak, SW_HIDE);
         }
 #endif
-        if (g_statusEnabled) {
+        if (g_inGameUi) {
+            /* drawn in-frame; the hide is handled with the overlay's above */
+        } else if (g_statusEnabled) {
             EnsureStatusWindow();
             if (g_hStatus) {
                 if (!IsWindowVisible(g_hStatus)) ShowWindow(g_hStatus, SW_SHOWNOACTIVATE);

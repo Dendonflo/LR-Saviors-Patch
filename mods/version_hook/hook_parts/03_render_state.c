@@ -627,6 +627,11 @@ static volatile LONG g_fxaaSubs;
 // whether MSAA actually latched onto the scene target, so it has to be
 // visible this early - same pattern as g_mainModBase below.
 static volatile LONG g_msSubstitutions;
+// Same reason, same pattern: the status panel reports the grab-intervention
+// rates (15_msaa.c owns them) and compiles well before that file.
+static volatile LONG g_msSyncResolves;
+static volatile LONG g_msForeignWrites;
+static volatile LONG g_msSuppressedSubs;
 
 static volatile LONG g_cutsceneActive;      // 1 while a cutscene is detected
 static volatile LONG g_cutsceneEdges;       // transition count, for the log

@@ -251,9 +251,8 @@ static volatile LONG g_msReported = 0;
 // before a mid-episode read (hole A), foreign writes into the latched scene
 // surface (hole C), and substitutions suppressed while a foreign write's
 // frame plays out.
-static volatile LONG g_msSyncResolves = 0;
-static volatile LONG g_msForeignWrites = 0;
-static volatile LONG g_msSuppressedSubs = 0;
+// (tentative defs in 03_render_state.c - the status panel prints these and
+// compiles earlier; assigning here would make two definitions.)
 // ---- v3 diagnostics: what is ONLY true of a multisampled target? ----------
 // The Discard theory died on evidence: Discard=FALSE was accepted (its refusal
 // line never printed), subs/resolves ran 1:1, resolveFail=0, failedMS=0 - and

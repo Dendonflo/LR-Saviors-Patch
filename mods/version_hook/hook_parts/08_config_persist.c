@@ -1,4 +1,4 @@
-﻿// ---- Config file persistence ----------------------------------------------
+// ---- Config file persistence ----------------------------------------------
 // Plain "Key=Value" text file next to the exe - no library needed, trivial
 // to hand-edit if something ever needs fixing outside the game. Loaded once
 // at startup (before hooks are installed, so the very first frame already
@@ -278,7 +278,7 @@ static NumericSetting g_numerics[] = {
     { &g_aoBlur,        "AoBlur",        0, 1 },
     // 1 = panel rendered inside the frame at Present; 0 = the old Win32
     // window. See g_aoPanelInGame.
-    { &g_aoPanelInGame, "AoPanelInGame", 0, 1 },
+    { &g_inGameUi,      "InGameUi",      0, 1 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
 #if ENABLE_NV_BLUR

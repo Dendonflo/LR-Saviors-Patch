@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Lightning Returns: Final Fantasy XIII - asset streaming & stutter mod
  * Copyright (C) 2026  Dendonflo
  *
@@ -317,11 +317,16 @@ static volatile LONG g_aoProj100E[2] = { 130, 130 };  // ini AoProj100 / AoHbaoP
 // unrelated geometry, huge variance, banding. 10 = 10% of screen width.
 static volatile LONG g_aoRadiusMaxPctE[2] = { 10, 8 };
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
-// ini AoPanelInGame: 1 = the tuning panel renders INSIDE the frame at Present
-// (26_ingame_ui.c) - no Win32 window, so fullscreen cannot cover it, focus
-// cannot be stolen, and window switches cost nothing. 0 = the old Win32
-// window, kept as the fallback until the in-game one has earned trust.
-static volatile LONG g_aoPanelInGame = 1;
+// ini InGameUi: 1 = ALL THREE mod surfaces (AO tuning panel, frametime graph,
+// status panel) render INSIDE the frame at EndScene (26_ingame_ui.c) - no
+// Win32 windows, so fullscreen cannot cover them, focus cannot be stolen, and
+// window switches cost nothing. 0 = the old Win32 windows, kept as the
+// fallback until the in-game path has earned trust.
+//
+// Renamed from AoPanelInGame once it stopped being AO-specific. That key
+// existed for one afternoon of beta testing; an ini still carrying it is
+// ignored and the default applies, which is the intended outcome.
+static volatile LONG g_inGameUi = 1;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

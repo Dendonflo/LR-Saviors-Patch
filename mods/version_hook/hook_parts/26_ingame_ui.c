@@ -65,7 +65,7 @@
 #define IG_WHITE_X  (IG_W - 8)
 #define IG_WHITE_Y  (IG_H - 8)
 
-// (g_aoPanelInGame is declared in 01_config_gates.c - the config table in 08
+// (g_inGameUi is declared in 01_config_gates.c - the config table in 08
 // and the Win32 gate in 10 both sit earlier in the TU and need it.)
 
 // Panel position in backbuffer pixels. Session-only on purpose for now: the
@@ -76,7 +76,10 @@ static LONG g_igX = 80, g_igY = 80;
 
 // Interaction state, render thread only (IgPresent is the sole writer).
 static int  g_igPrevDown = 0;
-static int  g_igDrag = 0;          // 0 none, 1 = title bar, 2+i = slider row i
+// 0 none, 1 = AO title bar, 2+i = AO slider row i, and the two displays.
+#define IG_DRAG_OVL  90
+#define IG_DRAG_STAT 91
+static int  g_igDrag = 0;
 static LONG g_igDragOffX = 0, g_igDragOffY = 0;
 static DWORD g_igResetArm = 0;     // tick count of first reset click, 0 = disarmed
 static LONG g_igOpenLogged = 0;
@@ -365,6 +368,18 @@ static void IgInput(LONG mx, LONG my)
         g_igPrevDown = down;
         return;
     }
+    // The two display surfaces drag from anywhere on them, exactly as their
+    // Win32 versions did (both answered WM_NCHITTEST with HTCAPTION). Position
+    // is saved on release, into the same ini keys as before.
+    if (g_igDrag == IG_DRAG_OVL || g_igDrag == IG_DRAG_STAT) {
+        LONG *px = (g_igDrag == IG_DRAG_OVL) ? &g_overlayX : &g_statusX;
+        LONG *py = (g_igDrag == IG_DRAG_OVL) ? &g_overlayY : &g_statusY;
+        InterlockedExchange(px, mx - g_igDragOffX);
+        InterlockedExchange(py, my - g_igDragOffY);
+        if (!down) { g_igDrag = 0; SaveConfig(); }
+        g_igPrevDown = down;
+        return;
+    }
     if (g_igDrag >= 2) {                             // slider being dragged
         size_t i = (size_t)(g_igDrag - 2);
         RECT t;
@@ -454,6 +469,24 @@ static void IgInput(LONG mx, LONG my)
                 g_igResetArm = now;
             }
         }
+        g_igPrevDown = down;
+        return;                                      // click consumed by the panel
+    }
+
+    // Outside the AO panel: the display surfaces, in the same order they are
+    // drawn (topmost first) so an overlap resolves the way it looks.
+    if (click) {
+        if (g_statusEnabled &&
+            mx >= g_statusX && mx < g_statusX + STAT_W &&
+            my >= g_statusY && my < g_statusY + STAT_H) {
+            g_igDrag = IG_DRAG_STAT;
+            g_igDragOffX = mx - g_statusX; g_igDragOffY = my - g_statusY;
+        } else if (g_overlayEnabled &&
+                   mx >= g_overlayX && mx < g_overlayX + OVL_W &&
+                   my >= g_overlayY && my < g_overlayY + OVL_H) {
+            g_igDrag = IG_DRAG_OVL;
+            g_igDragOffX = mx - g_overlayX; g_igDragOffY = my - g_overlayY;
+        }
     }
     // The reset arm deliberately survives mouse-up - the 3s timeout is what
     // ends it, so the second click can be a normal separate click.
@@ -510,6 +543,98 @@ static int IgUpload(void)
     return 1;
 }
 
+// ---- generic in-frame surfaces: the frametime graph and the status panel ---
+// Both already draw themselves into an HDC (DrawOverlayGraph, DrawStatusPanel
+// in 10_overlay.c), which is the whole reason porting them is cheap: point
+// those same functions at a DIB instead of a window's DC and the pixels are
+// identical. Nothing about their content or layout changes.
+//
+// They are DISPLAY surfaces - no widgets, no hit-testing - so they need none
+// of the AO panel's interaction machinery, only position and (for the graph)
+// the translucency its layered window used to provide.
+typedef struct {
+    int w, h;
+    HDC dc;
+    HBITMAP bmp;
+    void *bits;
+    IDirect3DTexture9 *tex;
+} IgSurf;
+
+static IgSurf g_igOvlSurf, g_igStatSurf;
+
+static int IgSurfEnsure(IDirect3DDevice9 *dev, IgSurf *s, int w, int h)
+{
+    if (!s->dc) {
+        BITMAPINFO bi;
+        HDC screen = GetDC(NULL);
+        if (!screen) return 0;
+        memset(&bi, 0, sizeof(bi));
+        bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;          // top-down, matching the lock copy
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        s->dc = CreateCompatibleDC(screen);
+        s->bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &s->bits, NULL, 0);
+        ReleaseDC(NULL, screen);
+        if (!s->dc || !s->bmp || !s->bits) return 0;
+        SelectObject(s->dc, s->bmp);
+        s->w = w; s->h = h;
+    }
+    if (!s->tex) {
+        // Same pool reasoning as the AO panel's texture: MANAGED survives
+        // Reset on the shipping non-Ex device, DEFAULT+DYNAMIC survives
+        // ResetEx on an Ex one, so neither needs release-before-Reset
+        // plumbing.
+        if (FAILED(IDirect3DDevice9_CreateTexture(dev, w, h, 1, 0, D3DFMT_A8R8G8B8,
+                                                  D3DPOOL_MANAGED, &s->tex, NULL)) &&
+            FAILED(IDirect3DDevice9_CreateTexture(dev, w, h, 1, D3DUSAGE_DYNAMIC,
+                                                  D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                                  &s->tex, NULL))) {
+            s->tex = NULL;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// alpha is the CONSTANT opacity for the whole surface - the graph's layered
+// window used SetLayeredWindowAttributes(205) and this is how that look is
+// reproduced now that there is no window to be layered.
+static int IgSurfUpload(IgSurf *s, unsigned int alpha)
+{
+    D3DLOCKED_RECT lr;
+    unsigned int a = (alpha & 0xFFu) << 24;
+    if (FAILED(IDirect3DTexture9_LockRect(s->tex, 0, &lr, NULL, D3DLOCK_DISCARD)) &&
+        FAILED(IDirect3DTexture9_LockRect(s->tex, 0, &lr, NULL, 0)))
+        return 0;
+    for (int y = 0; y < s->h; y++) {
+        const unsigned int *src = (const unsigned int *)s->bits + (size_t)y * s->w;
+        unsigned int *dst = (unsigned int *)((char *)lr.pBits + (size_t)y * lr.Pitch);
+        for (int x = 0; x < s->w; x++) dst[x] = (src[x] & 0x00FFFFFFu) | a;
+    }
+    IDirect3DTexture9_UnlockRect(s->tex, 0);
+    return 1;
+}
+
+// Auto-placement when no position has been chosen (-1), matching where the
+// Win32 windows used to put themselves: graph bottom-left, status top-right,
+// so the two never land on each other before either is moved.
+static void IgAutoPos(LONG *px, LONG *py, int w, int h, int topRight)
+{
+    const int m = 20;
+    LONG bw = (LONG)g_backbufW, bh = (LONG)g_backbufH;
+    if (bw < w + 2 * m) bw = w + 2 * m;
+    if (bh < h + 2 * m) bh = h + 2 * m;
+    if (*px < 0) *px = topRight ? bw - w - m : m;
+    if (*py < 0) *py = topRight ? m : bh - h - m;
+    if (*px > bw - 40) *px = bw - w - m;
+    if (*py > bh - 40) *py = bh - h - m;
+    if (*px < 0) *px = 0;
+    if (*py < 0) *py = 0;
+}
+
 static void IgQuad(IDirect3DDevice9 *dev, float x, float y, float w, float h,
                    float u0, float v0, float u1, float v1)
 {
@@ -544,7 +669,13 @@ static void IgPresent(IDirect3DDevice9 *dev)
     LONG mx = 0, my = 0;
     int haveMouse;
 
-    if (!g_aoTweakOpen || !g_aoPanelInGame || !dev) return;
+    int wantAo, wantOvl, wantStat;
+
+    if (!dev || !g_inGameUi) return;
+    wantAo   = (g_aoTweakOpen != 0);
+    wantOvl  = (g_overlayEnabled != 0);
+    wantStat = (g_statusEnabled != 0);
+    if (!wantAo && !wantOvl && !wantStat) return;
     // EndScene rate, measured once: past ~600 frames, report how many times
     // this ran per frame. >1 means per-pass brackets and the draw runs that
     // many times; the prep never does.
@@ -552,7 +683,7 @@ static void IgPresent(IDirect3DDevice9 *dev)
         LONG c = InterlockedIncrement(&g_igEsCalls);
         if (g_msFrameSeq > 600 && InterlockedCompareExchange(&g_igEsRateLogged, 1, 0) == 0) {
             char l[128];
-            sprintf(l, "[menu] AO panel: EndScene calls=%ld over %ld frames (~%ld per frame)",
+            sprintf(l, "[menu] in-game UI: EndScene calls=%ld over %ld frames (~%ld per frame)",
                     c, g_msFrameSeq, g_msFrameSeq ? (c + g_msFrameSeq / 2) / g_msFrameSeq : 0);
             LogLine(l);
         }
@@ -563,24 +694,31 @@ static void IgPresent(IDirect3DDevice9 *dev)
     // absence-of-evidence trap as the language probe, fallen into the same
     // day. Every early return between "user asked" and "pixels drawn" now
     // leaves a trace.
-    if (InterlockedCompareExchange(&g_igOpenLogged, 1, 0) == 0)
-        LogLine("[menu] AO panel: open request reached the Present hook");
-    if (!IgEnsureGdi()) {
-        static volatile LONG f = 0;
-        if (InterlockedCompareExchange(&f, 1, 0) == 0)
-            LogLine("[menu] AO panel: GDI setup FAILED (DIB or DC creation)");
-        return;
-    }
-    if (!IgEnsureGpu(dev)) {
-        static volatile LONG f = 0;
-        if (InterlockedCompareExchange(&f, 1, 0) == 0) {
-            char l[128];
-            sprintf(l, "[menu] AO panel: GPU setup FAILED (psState=%ld tex=%p)",
-                    g_igPsState, (void *)g_igTex);
-            LogLine(l);
+    if (wantAo) {
+        if (InterlockedCompareExchange(&g_igOpenLogged, 1, 0) == 0)
+            LogLine("[menu] AO panel: open request reached the render hook");
+        if (!IgEnsureGdi()) {
+            static volatile LONG f = 0;
+            if (InterlockedCompareExchange(&f, 1, 0) == 0)
+                LogLine("[menu] AO panel: GDI setup FAILED (DIB or DC creation)");
+            wantAo = 0;
+        } else if (!IgEnsureGpu(dev)) {
+            static volatile LONG f = 0;
+            if (InterlockedCompareExchange(&f, 1, 0) == 0) {
+                char l[128];
+                sprintf(l, "[menu] AO panel: GPU setup FAILED (psState=%ld tex=%p)",
+                        g_igPsState, (void *)g_igTex);
+                LogLine(l);
+            }
+            wantAo = 0;
         }
-        return;
     }
+    // The blit shader is shared by all three surfaces; without the AO panel
+    // open nothing else has created it yet.
+    if ((wantOvl || wantStat) && !IgEnsureGpu(dev)) { wantOvl = wantStat = 0; }
+    if (wantOvl && !IgSurfEnsure(dev, &g_igOvlSurf, OVL_W, OVL_H)) wantOvl = 0;
+    if (wantStat && !IgSurfEnsure(dev, &g_igStatSurf, STAT_W, STAT_H)) wantStat = 0;
+    if (!wantAo && !wantOvl && !wantStat) return;
 
     // ---- prep: once per engine frame, however many EndScenes it has -------
     if (g_msFrameSeq != lastPrepFrame) {
@@ -588,18 +726,32 @@ static void IgPresent(IDirect3DDevice9 *dev)
 
         haveMouseS = IgCursor(&mxS, &myS);
         if (haveMouseS) IgInput(mxS, myS);
-        // Input may have closed the panel this very tick.
-        if (!g_aoTweakOpen) return;
 
-        // Keep the panel reachable after a resolution change shrinks the screen.
-        if (g_backbufW > IG_W && g_igX > (LONG)g_backbufW - 40) g_igX = (LONG)g_backbufW - IG_W;
-        if (g_backbufH > IG_H && g_igY > (LONG)g_backbufH - 40) g_igY = (LONG)g_backbufH - IG_H;
-        if (g_igX < 0) g_igX = 0;
-        if (g_igY < 0) g_igY = 0;
-
-        IgPaint(haveMouseS ? mxS - g_igX : -100, haveMouseS ? myS - g_igY : -100);
-        if (!IgUpload()) { IgReleaseGpu(); return; }
+        if (wantAo && g_aoTweakOpen) {
+            // Keep the panel reachable after a resolution change shrinks the screen.
+            if (g_backbufW > IG_W && g_igX > (LONG)g_backbufW - 40) g_igX = (LONG)g_backbufW - IG_W;
+            if (g_backbufH > IG_H && g_igY > (LONG)g_backbufH - 40) g_igY = (LONG)g_backbufH - IG_H;
+            if (g_igX < 0) g_igX = 0;
+            if (g_igY < 0) g_igY = 0;
+            IgPaint(haveMouseS ? mxS - g_igX : -100, haveMouseS ? myS - g_igY : -100);
+            if (!IgUpload()) { IgReleaseGpu(); wantAo = 0; }
+        }
+        // The two display surfaces: their own paint functions, unchanged,
+        // pointed at a DIB instead of a window DC. The graph carries the 205
+        // alpha its layered window used to apply.
+        if (wantOvl) {
+            IgAutoPos(&g_overlayX, &g_overlayY, OVL_W, OVL_H, 0);
+            DrawOverlayGraph(g_igOvlSurf.dc);
+            if (!IgSurfUpload(&g_igOvlSurf, 205)) wantOvl = 0;
+        }
+        if (wantStat) {
+            IgAutoPos(&g_statusX, &g_statusY, STAT_W, STAT_H, 1);
+            DrawStatusPanel(g_igStatSurf.dc);
+            if (!IgSurfUpload(&g_igStatSurf, 255)) wantStat = 0;
+        }
     }
+    // Input may have closed the AO panel this tick.
+    if (!g_aoTweakOpen) wantAo = 0;
     haveMouse = (int)haveMouseS;
     mx = mxS; my = myS;
 
@@ -624,7 +776,13 @@ static void IgPresent(IDirect3DDevice9 *dev)
 
             g_origSetRenderState(dev, D3DRS_ZENABLE, FALSE);
             g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);
-            g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE);
+            // Blending ON for the whole bracket: the frametime graph carries
+            // a constant 205 alpha, which is how its layered window's
+            // translucency is reproduced without a window. The opaque
+            // surfaces upload alpha 255 and are unaffected.
+            g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE);
+            g_origSetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            g_origSetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
             g_origSetRenderState(dev, D3DRS_ALPHATESTENABLE, FALSE);
             g_origSetRenderState(dev, D3DRS_STENCILENABLE, FALSE);
             g_origSetRenderState(dev, D3DRS_CULLMODE, D3DCULL_NONE);
@@ -635,25 +793,39 @@ static void IgPresent(IDirect3DDevice9 *dev)
             g_origSetVertexShader(dev, NULL);        // XYZRHW needs the FF path
             g_origSetPixelShader(dev, g_igPs);
             g_origSetFVF(dev, D3DFVF_XYZRHW | D3DFVF_TEX1);
-            g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igTex);
             IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_MINFILTER, D3DTEXF_POINT);
             IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
             IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
             IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 
-            // Only the LIVE height: the texture is always allocated tall
-            // enough for an open dropdown, but the quad shows just the part
-            // that is currently painted, so a closed panel has no dead strip
-            // hanging off its bottom.
-            {
+            // Painter's order = Z-order: displays first, the interactive panel
+            // over them, the cursor last so it is never occluded.
+            if (wantOvl) {
+                g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igOvlSurf.tex);
+                IgQuad(dev, (float)g_overlayX, (float)g_overlayY,
+                       (float)OVL_W, (float)OVL_H, 0.0f, 0.0f, 1.0f, 1.0f);
+            }
+            if (wantStat) {
+                g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igStatSurf.tex);
+                IgQuad(dev, (float)g_statusX, (float)g_statusY,
+                       (float)STAT_W, (float)STAT_H, 0.0f, 0.0f, 1.0f, 1.0f);
+            }
+            if (wantAo) {
+                // Only the LIVE height: the texture is always allocated tall
+                // enough for an open dropdown, but the quad shows just the part
+                // that is currently painted, so a closed panel has no dead strip
+                // hanging off its bottom.
                 float ph = (float)IgPanelH();
+                g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igTex);
                 IgQuad(dev, (float)g_igX, (float)g_igY, (float)IG_W, ph,
                        0.0f, 0.0f, 1.0f, ph / (float)IG_TEX_H);
             }
-            // Cursor: crosshair from the white patch. Drawn only when the
-            // mapping succeeded - a wrong cursor is worse than none.
-            if (haveMouse) {
-                float wu = (IG_WHITE_X + 4.0f) / IG_W, wv = (IG_WHITE_Y + 4.0f) / IG_H;
+            // Cursor: crosshair from the white patch. Only while the panel that
+            // owns that patch is up - and only when the mapping succeeded, since
+            // a wrong cursor is worse than none.
+            if (haveMouse && wantAo) {
+                float wu = (IG_WHITE_X + 4.0f) / IG_W, wv = (IG_WHITE_Y + 4.0f) / IG_TEX_H;
+                g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igTex);
                 IgQuad(dev, (float)mx - 7, (float)my - 1, 14, 2, wu, wv, wu, wv);
                 IgQuad(dev, (float)mx - 1, (float)my - 7, 2, 14, wu, wv, wu, wv);
             }
@@ -672,6 +844,11 @@ static void IgPresent(IDirect3DDevice9 *dev)
             g_origSetRenderState(dev, D3DRS_ZENABLE, EsRs(D3DRS_ZENABLE, TRUE));
             g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, EsRs(D3DRS_ZWRITEENABLE, TRUE));
             g_origSetRenderState(dev, D3DRS_ALPHABLENDENABLE, EsRs(D3DRS_ALPHABLENDENABLE, FALSE));
+            // The two factors are restored because the bracket now SETS them
+            // for the graph's translucency - restore only what you touched,
+            // but restore all of it.
+            g_origSetRenderState(dev, D3DRS_SRCBLEND, EsRs(D3DRS_SRCBLEND, D3DBLEND_ONE));
+            g_origSetRenderState(dev, D3DRS_DESTBLEND, EsRs(D3DRS_DESTBLEND, D3DBLEND_ZERO));
             g_origSetRenderState(dev, D3DRS_ALPHATESTENABLE, EsRs(D3DRS_ALPHATESTENABLE, FALSE));
             g_origSetRenderState(dev, D3DRS_STENCILENABLE, EsRs(D3DRS_STENCILENABLE, FALSE));
             g_origSetRenderState(dev, D3DRS_CULLMODE, EsRs(D3DRS_CULLMODE, D3DCULL_CCW));
