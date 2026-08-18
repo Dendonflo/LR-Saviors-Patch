@@ -1005,11 +1005,22 @@ static void GameMenuLangProbe(void)
     LONG n;
     void *mgr;
 
+    // Entry report BEFORE the gates. The probe has now produced nothing from
+    // two different clocks while every check said it should run, and the three
+    // conditions below are the only way out of this function that leaves no
+    // trace. Static reading cannot tell "not called" from "called and gated",
+    // so the function says so itself.
+    n = InterlockedIncrement(&attempts);
+    if (n <= 3) {
+        char g[192];
+        sprintf(g, "[i18n] probe entered #%ld: langCfg=%ld fromLabel=%ld base=%p",
+                n, g_langCfg, g_langFromLabel, (void *)base);
+        LogLine(g);
+    }
+
     if (g_langCfg > 0) return;              // forced by ini - nothing to detect
     if (g_langFromLabel) return;            // already resolved from a real label
     if (!base) return;
-
-    n = InterlockedIncrement(&attempts);
     mgr = *(void **)(base + MENU_RVA_MGR_PTR);
     if (mgr) mMgr = *(HMENU *)((char *)mgr + MENUMGR_ROOT_HMENU);
     wnd = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
