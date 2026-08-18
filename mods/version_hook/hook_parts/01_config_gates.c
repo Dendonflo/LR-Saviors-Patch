@@ -559,6 +559,20 @@ static volatile LONG g_stutterThresholdUsec = 1000000;
 // rate. 0 (fully unlocked) is available but pushes the sim delta far outside
 // anything the engine was tuned for.
 static volatile LONG g_targetFpsX100 = 6000;
+// ini ForceDynamicFramerate: put the ENGINE's own framerate mode back to
+// Dynamic ("Variable") once per session, if it is sitting on Fixed
+// ("Stability"). Fixed halves the mod limiter's effective target, and since
+// the mod replaces the vanilla FrameRate popup entirely there is no longer a
+// menu entry that could explain or undo it - the symptom reads as "the mod
+// stopped working". Users mostly land on Fixed via the game's own reset to
+// low settings after an unclean exit (Windows users get it rewritten by Nova
+// Launcher; Linux users do not, and are hit hardest).
+//
+// Default ON. Kept as a key rather than made unconditional because it is the
+// first thing the mod WRITES back into the engine's own settings at boot, so
+// there has to be a way to switch it off without a new build if it ever
+// misbehaves. See GameMenuForceDynamicFps in 09_game_menu.c.
+static volatile LONG g_forceDynamicFps = 1;
 // Fix for the "seesaw aftershock": after a stall, the limiter's accumulated
 // deadline (decompiled in FUN_00ac3040) computes max(one interval, actual
 // elapsed rounded to whole intervals) as the increment to the OLD deadline -

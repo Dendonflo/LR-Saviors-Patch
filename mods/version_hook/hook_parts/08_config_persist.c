@@ -158,6 +158,10 @@ static NumericSetting g_numerics[] = {
     // 0 = unlocked, otherwise fps*100 (6000 = 60.00fps). Only takes effect
     // while UnlockFramerate is also on - see ApplyFramerateUnlock.
     { &g_targetFpsX100, "TargetFpsX100", 0, 24000 },
+    // 1 = put the engine's own framerate mode back to Dynamic at boot when it
+    // is found on Fixed (which halves the mod's target). Ini-only, default on;
+    // see g_forceDynamicFps.
+    { &g_forceDynamicFps, "ForceDynamicFramerate", 0, 1 },
 #if ENABLE_DEFER_UPLOADS
     // NOTE: the GUI's defer edit box reaches this entry as g_numerics[2], so it
     // must stay third while it exists, and its handler is gated in step with it.

@@ -431,6 +431,44 @@ static char __cdecl MenuH_FrUnlimited(char apply)
     return (char)(g_unlockFramerateEnabled && g_targetFpsX100 == 0);
 }
 
+// ---- engine framerate mode: force Dynamic once per session -----------------
+// The vanilla FrameRate popup is replaced wholesale below, so "Variable" and
+// "Stability" are no longer clickable - but the ENGINE's own setting lives in
+// the game's own storage and survives that. Sitting on Stability halves the
+// mod limiter's effective target, and with no menu entry left to show or undo
+// it, the symptom reads as "the mod stopped working". The usual way in is the
+// game resetting its settings to low after an unclean exit.
+//
+// Same convention as every vanilla handler here: handler(0) queries, and
+// handler(1) applies AND persists through the game's own path - so this is the
+// engine changing its own setting, not us writing a field behind its back.
+//
+// Deliberately conditional and one-shot: a session already on Variable
+// performs no write at all, and the result is VERIFIED by re-querying rather
+// than assumed, because "we called the handler" and "the mode changed" are not
+// the same claim. Runs from GameMenuAppend, which is the proven context - the
+// manager exists, it is the main thread, and it is the same subsystem that
+// dispatches these handlers on a click.
+static void GameMenuForceDynamicFps(unsigned char *base)
+{
+    static volatile LONG done = 0;
+    GameMenuHandler var, stab;
+    if (!g_forceDynamicFps || !base) return;
+    if (InterlockedCompareExchange(&done, 1, 0) != 0) return;
+    var  = (GameMenuHandler)(base + MENU_RVA_FRATE_VAR);
+    stab = (GameMenuHandler)(base + MENU_RVA_FRATE_STAB);
+    if (!stab(0)) {
+        LogLine("[menu] engine framerate mode already Dynamic - not touched");
+        return;
+    }
+    var(1);
+    LogLine(stab(0)
+        ? "[menu] engine framerate mode was Fixed - force to Dynamic FAILED"
+          " (still reads Fixed; set ForceDynamicFramerate=0 if this repeats)"
+        : "[menu] engine framerate mode was Fixed - forced to Dynamic"
+          " (Fixed halves the mod's framerate target)");
+}
+
 // ---- tree construction helpers --------------------------------------------
 
 // Overwrite the label of the item the builder just inserted (it inserted the
@@ -809,6 +847,12 @@ static void GameMenuAppend(void)
             }
         }
     }
+
+    // Function level, not inside the anchor-surgery block above: the force is
+    // about the ENGINE's setting and must still happen on a build where the
+    // vanilla popups were not found (a stale RVA would skip the surgery but
+    // says nothing about the handlers themselves).
+    GameMenuForceDynamicFps(base);
 
     if (InterlockedIncrement(&g_menuBuilds) == 1) {
         char line[256];
