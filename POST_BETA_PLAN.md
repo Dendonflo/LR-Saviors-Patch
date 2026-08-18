@@ -118,7 +118,25 @@ version < current, apply migrations (v2: force AoRespectFloor=0), then
 stamp. Reusable machinery for every future default change. "Reset all
 settings" already restores the new default (snapshot is compile-time).
 
-### 1. Force the engine's framerate mode to Dynamic at boot
+### 1. Force the engine's framerate mode to Dynamic at boot — DONE (commit 60d79c9)
+
+**Shipped.** `GameMenuForceDynamicFps` in `09_game_menu.c`, called at function
+level from `GameMenuAppend` (outside the anchor-surgery block, so a stale popup
+RVA cannot skip it). Queries `MENU_RVA_FRATE_STAB` with `handler(0)`; if Fixed
+is active, calls `MENU_RVA_FRATE_VAR` with `handler(1)` (applies + persists
+through the game's own path), then RE-QUERIES to verify and logs the outcome.
+One-shot, conditional, `[menu]`-tagged so it appears in release logs.
+`ForceDynamicFramerate` ini key, default 1, ini-only.
+
+**Open:** whether `GameMenuAppend` runs at all in exclusive fullscreen (the
+menu bar is detached with `SetMenu(NULL)`, but the builder may still run). If a
+fullscreen log shows no `[menu] engine framerate mode ...` line, the fallback
+is a one-shot on the main-thread frame tick (`OnEnter_ac3040_C`, 07) — NOT the
+monitor thread.
+
+The original analysis follows.
+
+
 
 **Problem.** Vanilla "Fixed" (Stability) mode halves the mod's framerate
 target. Our menu replaced the vanilla FrameRate popup, but the vanilla
@@ -190,6 +208,44 @@ handler (`handler(0)`), persist the answers in OUR ini (survives crashes);
 on next boot re-apply (`handler(1)`) any that came back reset. Restores the
 user's actual choices — deliberately NOT a blanket "force Advanced" (that
 would override a deliberate Standard choice).
+
+**FOUND 2026-08-18 — the settings are a plain ini, and this changes the plan.**
+The engine's own graphics settings live in Steam userdata, NOT the registry
+and not the game folder:
+
+```
+<Steam>\userdata\<steamid3>\345350\remote\SquareEnix\
+    LightningReturnsFinalFantasyXIII\
+        Configuration.ini   <- the settings
+        Environment.ini     <- VoiceLanguage, DownloadContent
+        Validation.ini      <- a single token: "Validated"
+```
+
+`Configuration.ini` is `[Configuration]` with aligned `Key = Value` lines:
+`Graphics_Presentation` (FullScreen), `Graphics_Resolution` (3840x2160),
+`Graphics_Scaling`, `Graphics_ColorCorrection`, `Graphics_Glare`,
+`Graphics_DepthOfField`, `Graphics_Shadowing`, `Graphics_Lighting`,
+`Graphics_TextureFiltering` (all Advanced), `Graphics_FrameRate`
+(Variable/Stability), `Control_ConfirmButtonLayout`. The key names match the
+`Graphics_*` localisation keys the handler RVAs were found by, so the missing
+handlers (Lighting, DoF, Glare, ColorCorrection, TextureFiltering) can now be
+identified by NAME instead of hunted.
+
+**`Validation.ini` is the likely crash-reset mechanism** — a clean-exit marker
+the game re-runs its auto-detect after when it is missing or not "Validated".
+Worth confirming before designing anything: if so, item 4 may be less about
+snapshot/restore and more about the marker.
+
+**Two possible designs now.** (a) Read `Configuration.ini` ourselves at boot,
+compare against a snapshot in our own ini, and re-apply through the vanilla
+HANDLERS (still the safe path - the engine updates its own live state, not
+just the file). (b) Write the file directly - simpler, but behind the engine's
+back and possibly at odds with `Validation.ini` and Steam Cloud sync. (a) is
+strongly preferred; the file is then a source of truth for READING, and the
+handlers stay the only writers.
+
+**Note it is Steam Cloud synced**, so a conflict is possible if it is written
+while Steam is running.
 
 **Gap:** we hold RVAs for Shadowing (ADV 0x006CAC90 / STD 0x006CACC0),
 Scaling ADV 0x006CAEA0, Presentation FS 0x006CA830, and FrameRate (above).
