@@ -1156,16 +1156,19 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 SetWindowPos(g_hAoTweak, HWND_TOPMOST, 0, 0, 0, 0,
                              SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
-            // Re-assert while visible, at the overlay's own cadence and for
-            // the same reason it does: a device reset or an alt-tab puts the
-            // game back on top, and a control surface that silently slid
-            // behind the game is indistinguishable from one that failed to
-            // open. Cheap - one call per tick against an already-correct
-            // Z-order is a no-op inside the window manager.
-            else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
-                SetWindowPos(g_hAoTweak, HWND_TOPMOST, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
+            // NO per-tick re-assert here, deliberately, and it must not be
+            // added back. A version of this file did exactly that and made the
+            // frametime overlay blink: SetWindowPos(HWND_TOPMOST) does not
+            // mean "be topmost", it means "go to the TOP of the topmost band",
+            // so two windows both re-asserting every tick swap places twice a
+            // second and each swap repaints them. One assertion per window is
+            // fine; two competing ones is a loop.
+            //
+            // Nothing is lost by dropping it: this window is OWNED by the game
+            // window, and the window manager keeps an owned window above its
+            // owner permanently, through device resets and alt-tabs alike.
+            // That was the actual fix - the re-assert was belt-and-braces on
+            // top of a guarantee that already held.
             // POLL the checkbox rather than trusting WM_COMMAND to arrive.
             // BS_AUTOCHECKBOX flips its own visual state natively, so its
             // state is authoritative whether or not the notification reaches
