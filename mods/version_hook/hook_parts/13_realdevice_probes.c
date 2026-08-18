@@ -452,6 +452,22 @@ static HRESULT STDMETHODCALLTYPE HookedCreateTexture(
                 (int)Format, (int)origPool, (unsigned long)hr);
         LogLine(l);
     }
+    // A failed creation was previously SILENT unless it hit a special path.
+    // The MSAA grab-effect hunt needs this visible: if an effect module
+    // allocates its buffers on demand and the allocation fails under the MS
+    // pair's memory pressure, the engine skips the effect gracefully and no
+    // other counter moves. FAILED keeps it past the release log filter.
+    if (FAILED(hr)) {
+        static volatile LONG texFailLogged = 0;
+        if (InterlockedIncrement(&texFailLogged) <= 12) {
+            char l[224];
+            sprintf(l, "[d3d9] CreateTexture FAILED hr=0x%08lX %ux%u levels=%u"
+                       " usage=0x%lX fmt=%d pool=%d",
+                    (unsigned long)hr, Width, Height, Levels,
+                    (unsigned long)origUsage, (int)Format, (int)origPool);
+            LogLine(l);
+        }
+    }
     if (g_cyclesPerUsec > 0.0) {
         LONG us = (LONG)((double)(__rdtsc() - t0) / g_cyclesPerUsec);
         InterlockedIncrement(&g_createTexCount);

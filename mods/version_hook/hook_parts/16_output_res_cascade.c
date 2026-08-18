@@ -137,7 +137,7 @@ void __cdecl SsaaInPlaceResolve_C(void)
 // supersampling is happening - the exact failure seen in the first test.
 static volatile LONG g_ssaaPins = 0;
 
-static HRESULT STDMETHODCALLTYPE HookedStretchRect(
+static HRESULT STDMETHODCALLTYPE StretchRectEngine(
     IDirect3DDevice9 *This, IDirect3DSurface9 *pSrc, const RECT *pSrcRect,
     IDirect3DSurface9 *pDst, const RECT *pDstRect, D3DTEXTUREFILTERTYPE Filter)
 {
@@ -431,6 +431,119 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
         }
     }
     return g_origStretchRect(This, pSrc, pSrcRect, pDst, pDstRect, Filter);
+}
+
+// ---- MSAA screen-grab diagnostic (2026-08-18) -----------------------------
+// Beta reports: with MSAA on, fullscreen "grab" effects vanish - the white
+// flash layers on spells, and the battle-transition freeze-frame (the scene
+// captured into a low-res buffer, FX animated over it, crossfade into the
+// arena). Both are exactly the residual risk recorded when the substitution
+// was designed: the engine touching the scene surface through paths that are
+// NOT SetRenderTarget, which the identity redirect cannot see. Three candidate
+// holes, none observed yet - this wrapper exists to catch one in the act:
+//
+//   A. StretchRect FROM the scene surface mid-episode (g_msActive): the real
+//      surface is missing every draw since the last resolve, so the engine
+//      captures a stale frame.
+//   B. The scene TEXTURE sampled mid-episode - detector lives in
+//      HookedSetTexture (24), same [grab] tag.
+//   C. StretchRect INTO the scene surface: the write lands on the real
+//      surface, our MS surface never receives it (non-MS -> MS StretchRect is
+//      illegal, so it CANNOT), and the next resolve overwrites it with the MS
+//      accumulation - the engine's copy is silently clobbered.
+//
+// OBSERVE ONLY, deliberately: two confirmed-diagnostic lessons say no fix
+// before a log shows which hole actually fires. Classifies both surfaces
+// against the tracked scene/depth sets and our MS pair; anything interesting
+// logs once per distinct shape WITH the HRESULT and the MS state. Runs with
+// MSAA off too - that run is the baseline naming the vanilla transition path.
+// [grab] is on the release-filter keep list: a handful of deduped lines per
+// session buys every beta log being actionable for this hunt.
+#define SRX_SEEN_MAX 96
+static unsigned int g_srxSeen[SRX_SEEN_MAX];
+static volatile LONG g_srxSeenCount = 0;
+
+// Role of a surface in the substitution scheme: 0 = uninvolved, otherwise a
+// small id that also feeds the dedupe signature. The tag names it for the log.
+static int SrxRole(IDirect3DSurface9 *s, char *tag)
+{
+    tag[0] = 0;
+    if (!s) return 0;
+    if (s == g_msColour) { strcpy(tag, "|OUR-MS-COLOUR"); return 1; }
+    if (s == g_msR32f)   { strcpy(tag, "|OUR-MS-R32F");   return 2; }
+    LONG n = g_sceneRtCount, i;
+    if (n > SCENE_RT_MAX) n = SCENE_RT_MAX;
+    for (i = 0; i < n; i++)
+        if (g_sceneRts[i] == (void *)s) {
+            sprintf(tag, ((void *)s == g_sceneRtMain) ? "|SCENE#%ld-LATCHED"
+                                                      : "|SCENE#%ld", i + 1);
+            return 8 + (int)i;
+        }
+    n = g_depthRtCount;
+    if (n > SCENE_RT_MAX) n = SCENE_RT_MAX;
+    for (i = 0; i < n; i++)
+        if (g_depthRts[i] == (void *)s) {
+            sprintf(tag, ((void *)s == g_depthRtMain) ? "|R32F#%ld-LATCHED"
+                                                      : "|R32F#%ld", i + 1);
+            return 16 + (int)i;
+        }
+    return 0;
+}
+
+static HRESULT STDMETHODCALLTYPE HookedStretchRect(
+    IDirect3DDevice9 *This, IDirect3DSurface9 *pSrc, const RECT *pSrcRect,
+    IDirect3DSurface9 *pDst, const RECT *pDstRect, D3DTEXTUREFILTERTYPE Filter)
+{
+    char st[32], dt[32];
+    int rs = SrxRole(pSrc, st), rd = SrxRole(pDst, dt);
+    if (!rs && !rd)
+        return StretchRectEngine(This, pSrc, pSrcRect, pDst, pDstRect, Filter);
+
+    // MS state BEFORE the call - the inner path can legitimately change it.
+    LONG act = g_msActive, has = g_msHasContent, ract = g_msR32fActive;
+    HRESULT hr = StretchRectEngine(This, pSrc, pSrcRect, pDst, pDstRect, Filter);
+
+    D3DSURFACE_DESC s, d;
+    LONG sw = 0, sh = 0, dw = 0, dh = 0;
+    int sf = 0, df = 0;
+    if (pSrc && SUCCEEDED(IDirect3DSurface9_GetDesc(pSrc, &s))) {
+        sw = pSrcRect ? (pSrcRect->right - pSrcRect->left) : (LONG)s.Width;
+        sh = pSrcRect ? (pSrcRect->bottom - pSrcRect->top) : (LONG)s.Height;
+        sf = (int)s.Format;
+    }
+    if (pDst && SUCCEEDED(IDirect3DSurface9_GetDesc(pDst, &d))) {
+        dw = pDstRect ? (pDstRect->right - pDstRect->left) : (LONG)d.Width;
+        dh = pDstRect ? (pDstRect->bottom - pDstRect->top) : (LONG)d.Height;
+        df = (int)d.Format;
+    }
+    unsigned int sig = ((unsigned int)rs << 5) ^ (unsigned int)rd
+                     ^ ((unsigned int)sw << 1) ^ ((unsigned int)sh << 3)
+                     ^ ((unsigned int)dw << 5) ^ ((unsigned int)dh << 7)
+                     ^ ((unsigned int)sf << 11) ^ ((unsigned int)df << 13)
+                     ^ ((unsigned int)Filter << 17)
+                     ^ (FAILED(hr) ? 1u << 20 : 0)
+                     ^ ((unsigned int)(act != 0) << 21)
+                     ^ ((unsigned int)(has != 0) << 22);
+    LONG n = g_srxSeenCount, i, found = 0;
+    if (n > SRX_SEEN_MAX) n = SRX_SEEN_MAX;
+    for (i = 0; i < n; i++) if (g_srxSeen[i] == sig) { found = 1; break; }
+    if (!found && n < SRX_SEEN_MAX) {
+        g_srxSeen[n] = sig;
+        g_srxSeenCount = n + 1;
+        LONG p = g_curPass;
+        if (p < 0 || p >= PASS_COUNT) p = PASS_NONE;
+        char l[352];
+        sprintf(l, "[grab] blit %-14s src%s %ldx%ld fmt=%d -> dst%s %ldx%ld fmt=%d"
+                   " filter=%d msActive=%ld hasContent=%ld r32fActive=%ld%s%s",
+                g_passNames[p], st, sw, sh, sf, dt, dw, dh, df, (int)Filter,
+                act, has, ract,
+                (rd >= 8 && rd < 16) ? "  *** WRITE INTO SCENE TARGET ***" : "",
+                FAILED(hr) ? "  FAILED" : "");
+        if (FAILED(hr))
+            sprintf(l + strlen(l), " hr=0x%08lX", (unsigned long)hr);
+        LogLine(l);
+    }
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE HookedCreateRenderTarget(

@@ -1297,6 +1297,8 @@ static const char *const g_logKeepTags[] = {
     "[crash]",
     "[stutter]", // the watchdog is a user-facing feature, not a diagnostic
     "[log]",     // the size-cap notice must never filter itself out
+    "[grab]",    // MSAA grab-effect hunt: deduped, a handful of lines per
+                 // session, and every beta log becomes actionable for it
 };
 
 static int LogLineWanted(const char *msg)

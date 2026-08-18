@@ -153,6 +153,13 @@ static void *AoResolveContainer(void *surf)
     return tex;
 }
 
+// MSAA grab-effect detector state (hole B - see the block in HookedSetTexture
+// and the [grab] StretchRect wrapper in 16). Written on the render thread only.
+static void *g_msSceneTexSurf = NULL;    // latch identity the cache was built for
+static void *g_msSceneTexCache = NULL;   // container texture of the latched scene RT
+static volatile LONG g_msMidSamples = 0, g_msMidSampleLogged = 0;
+static volatile LONG g_msMidSamplesR32f = 0, g_msMidSampleR32fLogged = 0;
+
 static void AoReconReport(const char *how)
 {
     char l[224];
@@ -633,6 +640,46 @@ static HRESULT STDMETHODCALLTYPE HookedSetTexture(
     // texture stages from this. Engine traffic only - injected code binds
     // through g_origSetTexture, which bypasses this hook.
     if (stage < 16) g_esTex[stage] = (void *)tex;
+
+    // ---- MSAA grab-effect detector, hole B (see the [grab] wrapper in 16) --
+    // The engine sampling the scene TEXTURE while our MS episode is still
+    // accumulating reads content from before the last resolve - the one
+    // residual risk the substitution design recorded. Suspected mechanism of
+    // the vanishing spell-flash layers and battle-transition freeze-frame.
+    // Cost on the hot path: one volatile load (g_msActive is 0 unless MSAA is
+    // on). Container resolution re-runs only when the latch identity changes.
+    if (g_msActive && tex) {
+        void *lsurf = g_sceneRtMain;
+        if (lsurf != g_msSceneTexSurf) {
+            g_msSceneTexSurf = lsurf;
+            g_msSceneTexCache = lsurf ? AoResolveContainer(lsurf) : NULL;
+        }
+        if (g_msSceneTexCache && (void *)tex == g_msSceneTexCache &&
+            g_msHasContent) {
+            InterlockedIncrement(&g_msMidSamples);
+            if (InterlockedIncrement(&g_msMidSampleLogged) <= 10) {
+                LONG p = pass;
+                if (p < 0 || p >= PASS_COUNT) p = PASS_NONE;
+                char gl[160];
+                sprintf(gl, "[grab] scene texture SAMPLED mid-episode:"
+                            " stage=%lu pass=%s (stale until next resolve)",
+                        (unsigned long)stage, g_passNames[p]);
+                LogLine(gl);
+            }
+        }
+    }
+    // Same detector for the linear-depth texture during the prepass window -
+    // soft particles and fog sample it, and mid-prepass it is equally stale.
+    if (g_msR32fActive && g_msR32fHasContent && tex &&
+        g_aoDepthTex && (void *)tex == g_aoDepthTex) {
+        InterlockedIncrement(&g_msMidSamplesR32f);
+        if (InterlockedIncrement(&g_msMidSampleR32fLogged) <= 6) {
+            char gl[128];
+            sprintf(gl, "[grab] R32F depth texture SAMPLED mid-prepass: stage=%lu",
+                    (unsigned long)stage);
+            LogLine(gl);
+        }
+    }
 
     // Track every pass that binds the shadow container, not just MULTI_SAMPLE.
     if (tex && AoIsShadowTex((void *)tex)) {
