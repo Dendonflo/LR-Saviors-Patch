@@ -507,9 +507,17 @@ static void IgReleaseGpu(void)
 static int IgEnsureGpu(IDirect3DDevice9 *dev)
 {
     if (g_igPsState == 0) {
+        // Opacity from a constant rather than the texture's alpha byte: GDI
+        // writes 0 there, and fixing it up per pixel cost a 320,000-iteration
+        // loop per upload for the graph alone. c223 deliberately - high enough
+        // to be clear of the engine's own registers and of the AO passes'
+        // c220/c221, and we do not restore pixel-shader constants.
         g_igPs = AoCompilePs(dev,
             "sampler2D t : register(s12);\n"
-            "float4 main(float2 uv : TEXCOORD0) : COLOR { return tex2D(t, uv); }\n",
+            "float4 cA : register(c223);\n"
+            "float4 main(float2 uv : TEXCOORD0) : COLOR {\n"
+            "    return float4(tex2D(t, uv).rgb, cA.a);\n"
+            "}\n",
             NULL, "in-game panel blit");
         g_igPsState = g_igPs ? 1 : -1;
     }
@@ -538,12 +546,11 @@ static int IgUpload(void)
     if (FAILED(IDirect3DTexture9_LockRect(g_igTex, 0, &lr, NULL, D3DLOCK_DISCARD)))
         if (FAILED(IDirect3DTexture9_LockRect(g_igTex, 0, &lr, NULL, 0)))
             return 0;
-    for (int y = 0; y < IG_TEX_H; y++) {
-        const unsigned int *src = (const unsigned int *)g_igBits + (size_t)y * IG_W;
-        unsigned int *dst = (unsigned int *)((char *)lr.pBits + (size_t)y * lr.Pitch);
-        // GDI leaves the alpha byte 0; the panel is opaque, so force it.
-        for (int x = 0; x < IG_W; x++) dst[x] = src[x] | 0xFF000000u;
-    }
+    // Row memcpy; opacity comes from the shader constant, not the alpha byte.
+    for (int y = 0; y < IG_TEX_H; y++)
+        memcpy((char *)lr.pBits + (size_t)y * lr.Pitch,
+               (const unsigned int *)g_igBits + (size_t)y * IG_W,
+               (size_t)IG_W * 4);
     IDirect3DTexture9_UnlockRect(g_igTex, 0);
     return 1;
 }
@@ -563,7 +570,22 @@ typedef struct {
     HBITMAP bmp;
     void *bits;
     IDirect3DTexture9 *tex;
+    DWORD lastPaint;               // tick of the last repaint+upload
 } IgSurf;
+
+// Repaint cadence for the display surfaces, in ms.
+//
+// These are NOT drawn at frame rate, and that is the whole point. Their Win32
+// versions were repainted by the overlay thread at 4Hz (its Sleep(250)); the
+// first in-frame version repainted them once per ENGINE FRAME instead, which
+// at 140fps is 35x the GDI work and 35x the texture upload for content that
+// changes four times a second. Measured cost of that mistake: the frametime
+// graph (1000x320) took 140fps down to 105, the status panel to 135.
+//
+// The QUAD is still drawn every frame - that is a few state sets and four
+// vertices. Only the expensive half is rate-limited, which restores the old
+// cost while keeping the in-frame rendering.
+#define IG_DISPLAY_PERIOD_MS 250
 
 static IgSurf g_igOvlSurf, g_igStatSurf;
 
@@ -604,22 +626,22 @@ static int IgSurfEnsure(IDirect3DDevice9 *dev, IgSurf *s, int w, int h)
     return 1;
 }
 
-// alpha is the CONSTANT opacity for the whole surface - the graph's layered
-// window used SetLayeredWindowAttributes(205) and this is how that look is
-// reproduced now that there is no window to be layered.
-static int IgSurfUpload(IgSurf *s, unsigned int alpha)
+// Straight row memcpy. The alpha byte GDI leaves at 0 is no longer fixed up
+// per pixel here - the blit shader supplies opacity from a constant instead,
+// which turns a 320,000-iteration scalar loop into 320 memcpys and lets one
+// texture serve any opacity.
+static int IgSurfUpload(IgSurf *s)
 {
     D3DLOCKED_RECT lr;
-    unsigned int a = (alpha & 0xFFu) << 24;
     if (FAILED(IDirect3DTexture9_LockRect(s->tex, 0, &lr, NULL, D3DLOCK_DISCARD)) &&
         FAILED(IDirect3DTexture9_LockRect(s->tex, 0, &lr, NULL, 0)))
         return 0;
-    for (int y = 0; y < s->h; y++) {
-        const unsigned int *src = (const unsigned int *)s->bits + (size_t)y * s->w;
-        unsigned int *dst = (unsigned int *)((char *)lr.pBits + (size_t)y * lr.Pitch);
-        for (int x = 0; x < s->w; x++) dst[x] = (src[x] & 0x00FFFFFFu) | a;
-    }
+    for (int y = 0; y < s->h; y++)
+        memcpy((char *)lr.pBits + (size_t)y * lr.Pitch,
+               (const unsigned int *)s->bits + (size_t)y * s->w,
+               (size_t)s->w * 4);
     IDirect3DTexture9_UnlockRect(s->tex, 0);
+    s->lastPaint = GetTickCount();
     return 1;
 }
 
@@ -747,6 +769,9 @@ static void IgPresent(IDirect3DDevice9 *dev)
         lastPrepFrame = g_msFrameSeq;
 
         if (wantAo && g_aoTweakOpen) {
+            // The interactive surface DOES repaint every frame - it has to
+            // track a dragged thumb and a hover highlight, and at 428x390 it
+            // is a third of the graph's pixels and only up while tuning.
             // Keep the panel reachable after a resolution change shrinks the screen.
             if (g_backbufW > IG_W && g_igX > (LONG)g_backbufW - 40) g_igX = (LONG)g_backbufW - IG_W;
             if (g_backbufH > IG_H && g_igY > (LONG)g_backbufH - 40) g_igY = (LONG)g_backbufH - IG_H;
@@ -756,15 +781,19 @@ static void IgPresent(IDirect3DDevice9 *dev)
             if (!IgUpload()) { IgReleaseGpu(); wantAo = 0; }
         }
         // The two display surfaces: their own paint functions, unchanged,
-        // pointed at a DIB instead of a window DC. The graph carries the 205
-        // alpha its layered window used to apply.
-        if (wantOvl) {
-            DrawOverlayGraph(g_igOvlSurf.dc);
-            if (!IgSurfUpload(&g_igOvlSurf, 205)) wantOvl = 0;
-        }
-        if (wantStat) {
-            DrawStatusPanel(g_igStatSurf.dc);
-            if (!IgSurfUpload(&g_igStatSurf, 255)) wantStat = 0;
+        // pointed at a DIB instead of a window DC - but only every
+        // IG_DISPLAY_PERIOD_MS, which is the cadence their Win32 versions
+        // always had. Both show values that move at human speed.
+        {
+            DWORD now = GetTickCount();
+            if (wantOvl && now - g_igOvlSurf.lastPaint >= IG_DISPLAY_PERIOD_MS) {
+                DrawOverlayGraph(g_igOvlSurf.dc);
+                if (!IgSurfUpload(&g_igOvlSurf)) wantOvl = 0;
+            }
+            if (wantStat && now - g_igStatSurf.lastPaint >= IG_DISPLAY_PERIOD_MS) {
+                DrawStatusPanel(g_igStatSurf.dc);
+                if (!IgSurfUpload(&g_igStatSurf)) wantStat = 0;
+            }
         }
     }
     haveMouse = (int)haveMouseS;
@@ -816,9 +845,16 @@ static void IgPresent(IDirect3DDevice9 *dev)
             // Painter's order = Z-order: displays first, the interactive panel
             // over them, the cursor last so it is never occluded.
             if (wantOvl) {
+                // 205/255, the exact opacity the graph's layered window used.
+                float a[4] = { 0.0f, 0.0f, 0.0f, 205.0f / 255.0f };
+                IDirect3DDevice9_SetPixelShaderConstantF(dev, 223, a, 1);
                 g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igOvlSurf.tex);
                 IgQuad(dev, (float)g_overlayX, (float)g_overlayY,
                        (float)OVL_W, (float)OVL_H, 0.0f, 0.0f, 1.0f, 1.0f);
+            }
+            if (wantStat || wantAo) {
+                float a[4] = { 0.0f, 0.0f, 0.0f, 1.0f };   // opaque
+                IDirect3DDevice9_SetPixelShaderConstantF(dev, 223, a, 1);
             }
             if (wantStat) {
                 g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igStatSurf.tex);
