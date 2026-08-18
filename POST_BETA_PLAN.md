@@ -11,9 +11,31 @@ details unknown yet). See the MSAA section at the bottom for orientation.**
 
 ## Release state (facts, verified)
 
-- `MOD_VERSION "1.0"` in `hook.h` — bump per release. Boot banner is the
-  first log line: `[boot] Savior's Patch 1.0 (Performance & graphics) -
-  built <date> <time>`.
+- `MOD_VERSION "1.1 BETA"` in `hook.h` — bump per release. Boot banner is the
+  first log line: `[boot] Savior's Patch 1.1 BETA (Performance & graphics) -
+  built <date> <time>`. The public release name is carried in the version
+  string itself so a reporter's log names the exact build.
+- **1.1 BETA contents:** the MSAA grab-effect fix (below) and queue item 0
+  (AoRespectFloor + the ConfigVersion migration machinery).
+- **MSAA screen-grab fix** (commits 0bf9834 diag, 7131e3d fix). Symptoms:
+  with MSAA on, fullscreen "grab" effects vanished — the white flash layers
+  on spells, and the battle-transition freeze-frame (so the transition cut
+  straight to the still-loading arena). Root cause: the substitution only
+  intercepted `SetRenderTarget`, and the engine also reads the scene surface
+  mid-episode (stale grab) and WRITES into it by StretchRect (our resolve
+  then overwrote the engine's paste). Both are handled in the `[grab]`
+  wrapper around `HookedStretchRect` (16): a sync-resolve before a foreign
+  read, and for a foreign write an episode handback plus `g_msSuppressFrame`
+  (cleared where `g_msNeedDepthClear` is armed, 07). Hole B — mid-episode
+  SAMPLING of the scene texture — was instrumented in 24 and never fired;
+  the detectors stay. `[grab]` is on the release-filter keep list, so beta
+  logs carry this for free. Rates are in the `[msaa]` report as
+  `grab sync= foreignW= suppressed=`.
+- **Open question on that fix:** the handback may fire every frame (the
+  engine's scene→SCENE#3→scene post ping-pong looks per-frame), which is
+  harmless only because it lands after the world pass. If `suppressed` ever
+  approaches `subs` in the `[msaa]` line, MSAA is being defeated — that line
+  is NOT on the keep list, so it needs a `LogVerbose=1` run to read.
 - **Release log filter** is live: `LogLineWanted()` at
   `hook_parts/06_io_alloc.c:1302`, called from `LogLine` at :1346. Keeps
   `[boot] [config] [menu] [i18n] [fov] [swap] [crash] [stutter] [log]` plus
@@ -45,7 +67,25 @@ details unknown yet). See the MSAA section at the bottom for orientation.**
 
 ## Queue
 
-### 0. AoRespectFloor should ship as 0 — needs a ConfigVersion migration
+### 0. AoRespectFloor should ship as 0 — DONE in 1.1 BETA
+
+**Shipped.** Code default is now 0 (`01_config_gates.c`), and the
+ConfigVersion migration machinery exists: `CONFIG_VERSION` + `g_configVersion`
+declared above the numerics table in `08_config_persist.c`, `CfgMigrate(from)`
+just above `LoadConfig`, called after parsing and before the `[config] loaded`
+line. An ini with no `ConfigVersion` key parses as 0 (a 1.0 BETA file); steps
+run in order, then the file is stamped and rewritten immediately so a step
+runs exactly once — a re-running step would keep overwriting a value the user
+had since set on purpose. Fresh installs stamp current in the no-file branch;
+`CfgResetDefaults` re-stamps too (its snapshot predates the ini read, so it
+would otherwise restore 0 and re-migrate forever).
+
+**Adding a future migration:** bump `CONFIG_VERSION`, add an `if (from < N)`
+block to `CfgMigrate`. That is the whole procedure.
+
+The original analysis follows, since it is the reasoning behind the default.
+
+
 
 **Problem.** Beta users report AO "can't be made strong enough". Root cause:
 the shipped default `AoRespectFloor=1` clamps the composite at the engine's

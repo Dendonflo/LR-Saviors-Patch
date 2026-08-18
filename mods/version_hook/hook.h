@@ -30,7 +30,7 @@
 #define MOD_TAGLINE     "Performance & graphics"
 // Bump for each release. Logged in the boot banner, which is the first line of
 // every log and the one that makes a user's bug report actionable.
-#define MOD_VERSION     "1.0"
+#define MOD_VERSION     "1.1 BETA"
 // Wide form of MOD_NAME for MessageBoxW captions, without restating the name.
 #define MOD_WIDEN2(x)   L##x
 #define MOD_WIDEN(x)    MOD_WIDEN2(x)

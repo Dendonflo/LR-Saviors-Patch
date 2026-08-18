@@ -144,6 +144,12 @@ typedef struct {
 // order: 1 en  2 fr  3 de  4 it  5 es  6 ja  7 zh-Hans  8 zh-Hant  9 ko.
 static volatile LONG g_langCfg = 0;
 static volatile LONG g_advancedMenu = 0;
+// Config schema version of the FILE on disk. Compile-time 0 deliberately: an
+// ini written before this key existed (1.0 BETA) has no line to parse, so it
+// keeps this 0 and is recognised as needing migration. See CfgMigrate, which
+// is where the version's meaning and every step live.
+#define CONFIG_VERSION 2
+static volatile LONG g_configVersion = 0;
 
 static NumericSetting g_numerics[] = {
     // Upper bound raised to 1,000,000 so the default (1s = watchdog off in
@@ -414,6 +420,11 @@ static NumericSetting g_numerics[] = {
     { &g_logVerbose, "LogVerbose", 0, 1 },
     { &g_langCfg, "Language", 0, 8 },
     { &g_advancedMenu, "AdvancedMenu", 0, 1 },
+    // Written by the mod, not a setting. Drives the one-time migrations in
+    // CfgMigrate; appended at the END of the table on purpose, so adding it
+    // shifts no existing index (the GUI reaches a couple of entries by
+    // position).
+    { &g_configVersion, "ConfigVersion", 0, 1000 },
 };
 #define NUM_NUMERICS (sizeof(g_numerics) / sizeof(g_numerics[0]))
 
@@ -485,6 +496,11 @@ static void CfgResetDefaults(int aoOnly)
         if (aoOnly && !CfgIsAoTweakKey(g_numerics[i].key)) continue;
         InterlockedExchange(g_numerics[i].val, g_defNum[i]);
     }
+    // A reset produces a CURRENT config by definition - it just wrote today's
+    // compile-time defaults. Without this the snapshot's 0 would be restored
+    // (the snapshot is taken before the ini is read, when the version is still
+    // "unknown") and every migration would run again on the next launch.
+    InterlockedExchange(&g_configVersion, CONFIG_VERSION);
     SaveConfig();
     {
         char l[96];
@@ -493,13 +509,54 @@ static void CfgResetDefaults(int aoOnly)
     }
 }
 
+// ---- Config version migrations --------------------------------------------
+// SaveConfig writes EVERY key, so every existing ini has every value pinned to
+// whatever the defaults were when it was written: changing a compile-time
+// default reaches FRESH INSTALLS ONLY. This is the machinery for moving an
+// existing config forward - bump CONFIG_VERSION, add a step, and files written
+// by older builds are corrected once, at the next load.
+//
+// An ini with no ConfigVersion line is a 1.0 BETA file and parses as 0. The
+// file is stamped and rewritten immediately after migrating, so a step runs
+// exactly once: a step that re-ran every launch would keep overwriting a value
+// the user had since set deliberately, which is worse than never migrating.
+// (CONFIG_VERSION itself is defined with g_configVersion, above the table -
+// CfgResetDefaults needs it and sits earlier in the file.)
+static void CfgMigrate(LONG from)
+{
+    char l[192];
+#if ENABLE_AO_SSAO
+    // v2 (1.1): AoRespectFloor now ships as 0 - see its declaration in
+    // 01_config_gates.c for why 1 caps the sliders and cancels AO in shade.
+    // Conditional so the line only appears when something actually changed.
+    if (from < 2 && g_aoRespectFloor != 0) {
+        g_aoRespectFloor = 0;
+        LogLine("[config] migration v2: AoRespectFloor 1 -> 0"
+                " (at 1 the engine's 0.5 shadow floor clamps AO;"
+                " the shipped AO defaults were tuned at 0)");
+    }
+#endif
+    sprintf(l, "[config] config file version %ld -> %d", from, CONFIG_VERSION);
+    LogLine(l);
+    g_configVersion = CONFIG_VERSION;
+    SaveConfig();                        // stamp now - migrations run once
+}
+
 static void LoadConfig(void)
 {
     char path[MAX_PATH];
     CfgCaptureDefaults();                // must precede the early return below
     GetConfigPath(path, sizeof(path));
     FILE *f = fopen(path, "r");
-    if (!f) return;
+    if (!f) {
+        // No ini at all: a fresh install already HAS the current defaults, so
+        // it is current by definition. Stamping here rather than leaving the
+        // compile-time 0 stops the first SaveConfig from writing a file that
+        // claims to predate its own defaults - which would re-run every
+        // migration on the next launch, forever.
+        g_configVersion = CONFIG_VERSION;
+        return;
+    }
     char line[128];
     while (fgets(line, sizeof(line), f)) {
         int matched = 0;
@@ -527,6 +584,10 @@ static void LoadConfig(void)
         // reviving a confirmed-crashing toggle.
     }
     fclose(f);
+    // Before the [config] loaded line below, so the log shows POST-migration
+    // values - the alternative reports numbers that were already stale by the
+    // time they were printed.
+    if (g_configVersion < CONFIG_VERSION) CfgMigrate(g_configVersion);
     // LogFrameTimes is a momentary "capture from here" button, not a setting,
     // but it rides the same table as the real toggles so it was being saved
     // and restored like one. Restored as 1, the monitor thread saw a rising

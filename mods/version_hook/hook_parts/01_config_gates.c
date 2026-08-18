@@ -361,8 +361,20 @@ static volatile LONG g_aoBisect = 0;
 static volatile LONG g_aoFlatTest = 0;
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
 static volatile LONG g_aoBlurSharpE[2] = { 681, 915 };  // ini AoBlurSharp / AoHbaoBlurSharp
-static volatile LONG g_aoRespectFloor = 1;    // ini AoRespectFloor: stay inside the
-                                              //   engine's [0.5..1] shadow envelope
+// ini AoRespectFloor: stay inside the engine's [0.5..1] shadow envelope.
+// Ships as 0 since 1.1. At 1 the composite is clamped at the engine's own 0.5
+// floor, which caps AO at half strength in lit areas and cancels it almost
+// entirely in engine-shadowed ones (eng ~ 0.5, so any AO lands below the floor
+// and is clamped straight back) - the "cannot make it strong enough" reports.
+// The tuned defaults 1.0 shipped were calibrated with this at 0, so a 1.0
+// install could not reproduce the look those numbers describe. Existing inis
+// are moved by the v2 migration in 08_config_persist.c.
+//
+// The residual risk it guards against is a material that decodes the [0.5..1]
+// envelope rendering sub-floor pixels hard black. That was the 2026-08-16 menu
+// shield, which was later root-caused to the state block instead - weeks of
+// play at 0 since, with no material artifact. Kept as the escape hatch.
+static volatile LONG g_aoRespectFloor = 0;
 // AO buffer resolution. The DIVISOR is applied to the DISPLAY resolution,
 // not to the engine's internal one: at 4K with SSAA x2 the composite is 8K,
 // and AO at 8K is pure waste (the effect is low-frequency and gets blurred
