@@ -920,12 +920,28 @@ static void EnsureAoTweakWindow(void)
     int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + AOTW_NVBLUR_H + 28 + 30 + 28;
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
-    g_hAoTweak = CreateWindowExW(
-        WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName,
-        AoTweakTitle(),
-        WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        120, 120, r.right - r.left, r.bottom - r.top,
-        NULL, NULL, wc.hInstance, NULL);
+    // OWNED by the game window, which is the fix for "opens behind the game in
+    // fullscreen". WS_EX_TOPMOST alone is not enough: the game's own window is
+    // topmost too in fullscreen, and among topmost windows the Z-order is
+    // decided by who asserted it last - so a window created once at startup
+    // loses to a game that re-asserts on every device reset and focus change.
+    // An OWNED window is guaranteed to sit above its owner regardless, which
+    // is a structural guarantee rather than a race.
+    //
+    // The owner is resolved here rather than at startup because g_gameHwnd is
+    // only set from presentation parameters that carry an hDeviceWindow, and
+    // this game passes none (measured: it stayed NULL for a whole session) -
+    // hence the enumeration fallback, which finds the process's own visible
+    // window that has a menu bar.
+    {
+        HWND owner = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
+        g_hAoTweak = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST, wc.lpszClassName,
+            AoTweakTitle(),
+            WS_POPUP | WS_CAPTION | WS_SYSMENU,
+            120, 120, r.right - r.left, r.bottom - r.top,
+            owner, NULL, wc.hInstance, NULL);
+    }
     if (!g_hAoTweak) return;
     for (size_t i = 0; i < AO_ROWS; i++) {
         int y = 10 + (int)i * AOTW_ROW_H;
@@ -1130,6 +1146,25 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                     SendMessageA(g_hAoResCombo, CB_SETCURSEL,
                                  (WPARAM)AoResIndexOf(g_aoResDiv), 0);
                 ShowWindow(g_hAoTweak, SW_SHOW);
+                // Assert the top of the topmost band on the way up. Ownership
+                // handles the game, this handles everything else that is also
+                // topmost (an overlay, a launcher) and happens to have claimed
+                // it more recently. NOACTIVATE deliberately: stealing the
+                // foreground from a fullscreen D3D9 device is how you get the
+                // game minimised, and a click on the window activates it
+                // anyway when the user actually wants to use it.
+                SetWindowPos(g_hAoTweak, HWND_TOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            // Re-assert while visible, at the overlay's own cadence and for
+            // the same reason it does: a device reset or an alt-tab puts the
+            // game back on top, and a control surface that silently slid
+            // behind the game is indistinguishable from one that failed to
+            // open. Cheap - one call per tick against an already-correct
+            // Z-order is a no-op inside the window manager.
+            else if (g_hAoTweak && IsWindowVisible(g_hAoTweak)) {
+                SetWindowPos(g_hAoTweak, HWND_TOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
             // POLL the checkbox rather than trusting WM_COMMAND to arrive.
             // BS_AUTOCHECKBOX flips its own visual state natively, so its

@@ -960,8 +960,19 @@ static BOOL CALLBACK GameMenuEnumWndProc(HWND h, LPARAM lp)
 {
     GameMenuWndSearch *s = (GameMenuWndSearch *)lp;
     DWORD pid = 0;
+    char cls[64];
     GetWindowThreadProcessId(h, &pid);
     if (pid != s->pid || !IsWindowVisible(h)) return TRUE;
+    // Skip the mod's OWN windows. They live in this process and are visible,
+    // so without this the "first visible window" fallback can return the
+    // frametime overlay or the tuning panel itself - and that fallback is
+    // exactly what runs in fullscreen, where the game's menu bar is detached
+    // with SetMenu(NULL) and the preferred has-a-menu test cannot match.
+    // Making a window its own owner, or the owner of its own owner, is not a
+    // mistake the window manager forgives.
+    if (GetClassNameA(h, cls, sizeof(cls)) > 0 &&
+        (strncmp(cls, "LRSavior", 8) == 0 || strncmp(cls, "LRStutter", 9) == 0))
+        return TRUE;
     if (GetMenu(h)) { s->withMenu = h; return FALSE; }
     if (!s->anyVisible) s->anyVisible = h;
     return TRUE;
@@ -1093,5 +1104,6 @@ static void GameMenuDeferredPoll(LONG frame)
 #else
 static void GameMenuDeferredPoll(LONG frame) { (void)frame; }
 static void GameMenuLangProbe(void) { }
+static HWND GameMenuFindWindow(void) { return NULL; }
 #endif // ENABLE_GAME_MENU
 
