@@ -276,6 +276,9 @@ static NumericSetting g_numerics[] = {
     // Medium tables stay in 25_ssao.c in case a performance tier is ever
     // wanted again. Old inis carrying AoQuality are ignored, as intended.
     { &g_aoBlur,        "AoBlur",        0, 1 },
+    // 1 = panel rendered inside the frame at Present; 0 = the old Win32
+    // window. See g_aoPanelInGame.
+    { &g_aoPanelInGame, "AoPanelInGame", 0, 1 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
 #if ENABLE_NV_BLUR

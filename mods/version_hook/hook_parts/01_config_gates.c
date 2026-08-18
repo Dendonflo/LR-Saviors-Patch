@@ -317,6 +317,11 @@ static volatile LONG g_aoProj100E[2] = { 130, 130 };  // ini AoProj100 / AoHbaoP
 // unrelated geometry, huge variance, banding. 10 = 10% of screen width.
 static volatile LONG g_aoRadiusMaxPctE[2] = { 10, 8 };
 static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persisted)
+// ini AoPanelInGame: 1 = the tuning panel renders INSIDE the frame at Present
+// (26_ingame_ui.c) - no Win32 window, so fullscreen cannot cover it, focus
+// cannot be stolen, and window switches cost nothing. 0 = the old Win32
+// window, kept as the fallback until the in-game one has earned trust.
+static volatile LONG g_aoPanelInGame = 1;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

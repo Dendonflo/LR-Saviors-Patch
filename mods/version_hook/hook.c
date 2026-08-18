@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Lightning Returns: Final Fantasy XIII - asset streaming & stutter mod
  * Copyright (C) 2026  Dendonflo
  *
@@ -62,3 +62,4 @@
 #include "hook_parts/23_upload_gate.c"
 #include "hook_parts/24_ao_recon.c"
 #include "hook_parts/25_ssao.c"
+#include "hook_parts/26_ingame_ui.c"

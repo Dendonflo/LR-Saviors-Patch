@@ -1161,6 +1161,16 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 }
             }
         }
+        // In-game panel mode (26_ingame_ui.c): the Present hook renders the
+        // panel inside the frame and this thread must NOT create the Win32
+        // window at all - two control surfaces editing the same values is a
+        // fight, and the window is the thing that mode exists to escape. The
+        // hide below covers flipping the ini mid-session with the old window
+        // still up.
+        if (g_aoPanelInGame) {
+            if (g_hAoTweak && IsWindowVisible(g_hAoTweak))
+                ShowWindow(g_hAoTweak, SW_HIDE);
+        } else
         if (g_aoTweakOpen) {
             EnsureAoTweakWindow();
             if (g_hAoTweak && !IsWindowVisible(g_hAoTweak)) {

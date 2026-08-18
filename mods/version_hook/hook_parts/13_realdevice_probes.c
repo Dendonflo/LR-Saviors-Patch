@@ -27,6 +27,11 @@ static volatile LONG g_devicePresentHooked = 0;
 static void MsaaResolve(IDirect3DDevice9 *dev);
 static void MsaaResolveR32f(IDirect3DDevice9 *dev);
 static void MsaaRestoreDepth(IDirect3DDevice9 *dev);
+// In-game tuning panel (26_ingame_ui.c, later in the TU). Runs at Present so
+// the panel is part of the frame - the whole point of its existence is that
+// no Win32 window is involved. AFTER the MSAA backstop, so it draws onto the
+// resolved image.
+static void IgPresent(IDirect3DDevice9 *dev);
 // One-shot pipeline splitter for the 4K black screen (defined with the MSAA
 // block): MsaaResolve arms state 2 after dumping the resolved scene texture;
 // the next Present dumps the backbuffer, i.e. what the user actually sees.
@@ -49,6 +54,7 @@ static HRESULT STDMETHODCALLTYPE HookedDevicePresent(
             IDirect3DSurface9_Release(bb);
         }
     }
+    IgPresent(This);
     unsigned __int64 t0 = __rdtsc();
     HRESULT hr = g_origDevicePresent(This, pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
     if (g_cyclesPerUsec > 0.0) {
@@ -508,6 +514,7 @@ static HRESULT STDMETHODCALLTYPE HookedDevicePresentEx(
             IDirect3DSurface9_Release(bb);
         }
     }
+    IgPresent((IDirect3DDevice9 *)This);
     unsigned __int64 t0 = __rdtsc();
     HRESULT hr = g_origDevicePresentEx(This, pSourceRect, pDestRect, hDestWindowOverride,
                                        pDirtyRegion, dwFlags);
