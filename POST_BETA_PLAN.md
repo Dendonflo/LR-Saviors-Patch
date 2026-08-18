@@ -11,12 +11,38 @@ details unknown yet). See the MSAA section at the bottom for orientation.**
 
 ## Release state (facts, verified)
 
-- `MOD_VERSION "1.1 BETA"` in `hook.h` — bump per release. Boot banner is the
-  first log line: `[boot] Savior's Patch 1.1 BETA (Performance & graphics) -
+- `MOD_VERSION "1.2"` in `hook.h` — bump per release. Boot banner is the
+  first log line: `[boot] Savior's Patch 1.2 (Performance & graphics) -
   built <date> <time>`. The public release name is carried in the version
   string itself so a reporter's log names the exact build.
-- **1.1 BETA contents:** the MSAA grab-effect fix (below) and queue item 0
-  (AoRespectFloor + the ConfigVersion migration machinery).
+- **1.2 contents** (1.1 BETA was an internal build; its contents ship here):
+  - queue item 0 — `AoRespectFloor` now defaults to 0, plus the
+    `ConfigVersion` migration machinery that carries existing inis forward.
+  - queue item 1 — the engine's own framerate mode is forced back to Dynamic
+    (Fixed halves the mod's target). Re-checked once a second for the first
+    minute, because a launcher can revert it after boot.
+  - the MSAA screen-grab fix (below).
+  - queue item 2 — NVIDIA's HBAO+ blur was built, tested and RETIRED; ours
+    wins. Gated at `ENABLE_NV_BLUR`.
+  - **the in-game UI** (`26_ingame_ui.c`): all three mod surfaces — AO tuning
+    panel, frametime graph, status panel — render inside the frame at
+    EndScene instead of as Win32 windows. `InGameUi=1`.
+  - i18n: the language "failure" was a missing success line; detection always
+    worked. Both sides are logged now.
+- **The in-game UI, and why it exists.** The Win32 tuning window lost to
+  fullscreen three fixes running: topmost is a band not a guarantee;
+  ownership pins Z-order but couples fates (Windows hides owned windows when
+  the owner minimises, and a fullscreen device minimises on any focus loss);
+  and every activation near the game window costs it a focus round-trip the
+  user reads as a stutter. Rendering inside the frame removes all three as
+  categories. Hard-won details worth keeping: **neither device-level Present
+  hook has ever fired in this game** (the swap-chain one is a confirmed
+  first-frame crash, retired) so `EndScene` is the injection point — which
+  also means the MSAA resolve backstop, which lived in Present, had never
+  run either and now does; EndScene fires **~4x per frame** here, so
+  per-frame work must latch on `g_msFrameSeq`; and the display surfaces
+  repaint on a 250ms timer, which is the cadence their Win32 versions always
+  had — repainting them per frame cost 140fps → 105.
 - **MSAA screen-grab fix** (commits 0bf9834 diag, 7131e3d fix). Symptoms:
   with MSAA on, fullscreen "grab" effects vanished — the white flash layers
   on spells, and the battle-transition freeze-frame (so the transition cut
