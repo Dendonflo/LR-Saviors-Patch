@@ -501,6 +501,60 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
 
     // MS state BEFORE the call - the inner path can legitimately change it.
     LONG act = g_msActive, has = g_msHasContent, ract = g_msR32fActive;
+
+    // ---- Interventions (2026-08-18, from the first [grab] flight) ---------
+    // The MSAA-ON log confirmed holes A and C in the act; B never fired (the
+    // engine grabs by blit, never by mid-episode sampling):
+    //   A: DRAW_FILTER/UI blits read the scene surface while the episode was
+    //      open (msActive=1 hasContent=1) - the grab feeding fullscreen
+    //      effects (the spell flash layers) missed every draw since the last
+    //      resolve.
+    //   C: a 1280x720 -> scene LINEAR upscale (the battle-transition
+    //      freeze-frame display) landed on the REAL surface, which the next
+    //      resolve then overwrote with the MS accumulation.
+    //
+    // A: sync-resolve the accumulation into the engine's surface and keep the
+    //    episode open - the MS surface accumulates the total, so the later
+    //    end-of-episode resolve of the same content is idempotent. Resolving
+    //    while the MS colour is still the bound RT is the production-proven
+    //    pattern (HookedSetRenderTarget resolves before g_origSetRT too).
+    //    Through g_orig* directly - self-interference rule.
+    // C: finish the episode (resolve preserves the sub-rect case), hand the
+    //    real surface back, and suppress substitution until the frame
+    //    boundary: the engine's write makes the MS accumulation stale, and
+    //    non-MS -> MS StretchRect being illegal means it cannot be refreshed.
+    //    The rest of that frame (the transition FX drawn over the freeze
+    //    frame) renders vanilla - unaliased for one frame, inside a
+    //    crossfade. Full per-pixel overdraw re-founds the MS content on the
+    //    next frame. (No write into the latched R32F has ever been observed,
+    //    so only the colour surface gets the handback treatment.)
+    int ours = (rs == 1 || rs == 2);   // our own resolve passing through here
+    int synced = 0, handback = 0;
+    if (!ours && g_msColour && pDst && (void *)pDst == g_sceneRtMain) {
+        if (act) {
+            if (has) MsaaResolve(This);
+            g_origSetRT(This, 0, pDst);
+            MsaaRestoreDepth(This);
+            g_msActive = 0;
+        }
+        g_msSuppressFrame = 1;
+        handback = 1;
+        InterlockedIncrement(&g_msForeignWrites);
+    } else if (!ours) {
+        if (act && has && pSrc && pSrc == g_msResolveTo) {
+            g_origStretchRect(This, g_msColour, NULL, g_msResolveTo, NULL,
+                              D3DTEXF_NONE);
+            synced = 1;
+            InterlockedIncrement(&g_msSyncResolves);
+        }
+        if (ract && g_msR32fHasContent && pSrc && pSrc == g_msR32fResolveTo) {
+            g_origStretchRect(This, g_msR32f, NULL, g_msR32fResolveTo, NULL,
+                              D3DTEXF_NONE);
+            synced = 1;
+            InterlockedIncrement(&g_msSyncResolves);
+        }
+    }
+
     HRESULT hr = StretchRectEngine(This, pSrc, pSrcRect, pDst, pDstRect, Filter);
 
     D3DSURFACE_DESC s, d;
@@ -523,7 +577,9 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
                      ^ ((unsigned int)Filter << 17)
                      ^ (FAILED(hr) ? 1u << 20 : 0)
                      ^ ((unsigned int)(act != 0) << 21)
-                     ^ ((unsigned int)(has != 0) << 22);
+                     ^ ((unsigned int)(has != 0) << 22)
+                     ^ ((unsigned int)synced << 23)
+                     ^ ((unsigned int)handback << 24);
     LONG n = g_srxSeenCount, i, found = 0;
     if (n > SRX_SEEN_MAX) n = SRX_SEEN_MAX;
     for (i = 0; i < n; i++) if (g_srxSeen[i] == sig) { found = 1; break; }
@@ -537,7 +593,9 @@ static HRESULT STDMETHODCALLTYPE HookedStretchRect(
                    " filter=%d msActive=%ld hasContent=%ld r32fActive=%ld%s%s",
                 g_passNames[p], st, sw, sh, sf, dt, dw, dh, df, (int)Filter,
                 act, has, ract,
-                (rd >= 8 && rd < 16) ? "  *** WRITE INTO SCENE TARGET ***" : "",
+                synced ? "  [sync-resolved]"
+                       : handback ? "  [episode handed back]"
+                       : (rd >= 8 && rd < 16) ? "  *** WRITE INTO SCENE TARGET ***" : "",
                 FAILED(hr) ? "  FAILED" : "");
         if (FAILED(hr))
             sprintf(l + strlen(l), " hr=0x%08lX", (unsigned long)hr);
@@ -801,6 +859,14 @@ static HRESULT STDMETHODCALLTYPE HookedSetRenderTarget(
         // stops substitution) restores it - so substitution is certainly the
         // cause; this says which half.
         LONG samples = g_msaaSamples;
+        // Foreign-write suppression (see the handback intervention in
+        // HookedStretchRect): after the engine writes into the real scene
+        // surface, the MS accumulation is stale and cannot be refreshed, so
+        // substitution stands down until the frame boundary re-founds it.
+        if (g_msSuppressFrame && samples >= 1 && pRT && g_sceneRtMain &&
+            (void *)pRT == g_sceneRtMain) {
+            InterlockedIncrement(&g_msSuppressedSubs);
+        } else
         if (samples >= 1 && pRT && g_sceneRtMain && (void *)pRT == g_sceneRtMain) {
             D3DSURFACE_DESC sd;
             if (SUCCEEDED(IDirect3DSurface9_GetDesc(pRT, &sd)) &&

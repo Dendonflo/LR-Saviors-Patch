@@ -449,6 +449,9 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     // ...and arm the MSAA depth clear, so it happens exactly once per frame
     // regardless of how many times the scene target is bound.
     g_msNeedDepthClear = 1;
+    // Foreign-write suppression ends with the frame that was written into;
+    // the new frame's full overdraw re-founds the MS accumulation.
+    g_msSuppressFrame = 0;
     g_msFrameSeq++;
     unsigned __int64 now = __rdtsc();
     if (g_lastFrameTsc != 0 && g_cyclesPerUsec > 0.0) {

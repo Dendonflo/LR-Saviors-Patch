@@ -323,14 +323,16 @@ static void LogD3DWindow(void)
                             "draws total=%ld whileMS=%ld failedMS=%ld failedALL=%ld | "
                             "getLies rt=%ld ds=%ld dsOutside=%ld | rsWrites=%ld forced=%ld | "
                             "clearZ=%.3f | texMemFreeMB=%ld | zfuncSeen=0x%lX zfuncForced=%ld stencilNE=%ld | "
-                            "r32f subs=%ld resolves=%ld fails=%ld | a2c=%ld",
+                            "r32f subs=%ld resolves=%ld fails=%ld | a2c=%ld | "
+                            "grab sync=%ld foreignW=%ld suppressed=%ld",
                         g_msaaSamples, g_msSubstitutions, g_msResolves, g_msFailures,
                         g_msW, g_msH, g_drawsTotal, g_drawsWhileMs, g_drawsFailedMs,
                         g_drawsFailedAll, g_msGetRtLies, g_msGetDsLies,
                         g_msDsOutsideRebind, g_rsMsWrites, g_rsMsForced, g_lastClearZ,
                         g_availTexMemMB, (unsigned long)g_zfuncSeenMask, g_zfuncForced,
                         g_stencilNonAlways, g_msR32fSubs, g_msR32fResolves, g_msR32fFails,
-                        g_a2cMirrored);
+                        g_a2cMirrored, g_msSyncResolves, g_msForeignWrites,
+                        g_msSuppressedSubs);
                 LogLine(ml);
             }
             // SSAA status, on its OWN condition - reported whenever a scale is

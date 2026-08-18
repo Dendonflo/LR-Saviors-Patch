@@ -247,6 +247,13 @@ static volatile LONG g_msDepthBound = 0;   // MS depth is current; must be undon
 // (g_msHasContent is a tentative def near the top - the Present hooks need it.)
 static volatile LONG g_msSubstitutions = 0, g_msResolves = 0, g_msFailures = 0;
 static volatile LONG g_msReported = 0;
+// Grab-effect intervention counters (the [grab] wrapper in 16): sync-resolves
+// before a mid-episode read (hole A), foreign writes into the latched scene
+// surface (hole C), and substitutions suppressed while a foreign write's
+// frame plays out.
+static volatile LONG g_msSyncResolves = 0;
+static volatile LONG g_msForeignWrites = 0;
+static volatile LONG g_msSuppressedSubs = 0;
 // ---- v3 diagnostics: what is ONLY true of a multisampled target? ----------
 // The Discard theory died on evidence: Discard=FALSE was accepted (its refusal
 // line never printed), subs/resolves ran 1:1, resolveFail=0, failedMS=0 - and

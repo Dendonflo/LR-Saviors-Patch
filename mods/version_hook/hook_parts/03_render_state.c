@@ -115,6 +115,10 @@ static volatile LONG g_fxaaPick;    // 0 = off, 1..N = kill candidate N (see g_p
 static volatile LONG g_msaaDebugClear;
 static volatile LONG g_msNeedDepthClear;   // set at each frame boundary
 static volatile LONG g_msFrameSeq;         // increments at each frame boundary (episode dump)
+static volatile LONG g_msSuppressFrame;    // foreign write into the scene surface:
+                                           // no substitution until next frame
+                                           // (set in 16's [grab] wrapper,
+                                           // cleared at the frame boundary)
 // ---- Scene render-target tracking ----------------------------------------
 // Three distinct full-screen A8R8G8B8 surfaces exist, so matching on
 // format+size cannot pick the one carrying the scene. Per-surface draw counts
