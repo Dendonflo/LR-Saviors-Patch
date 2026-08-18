@@ -47,6 +47,41 @@ static volatile LONG g_presentAliveLogged = 0;
     do { if (InterlockedCompareExchange(&g_presentAliveLogged, 1, 0) == 0) \
         LogLine("[boot] present hook alive (" which ")"); } while (0)
 
+// ---- EndScene: the injection point that actually fires ---------------------
+// The chain trace for the in-game panel proved what the retirement note in 16
+// had already recorded: NEITHER device-level Present has ever fired in this
+// game (the "present hook alive" one-shot stayed silent from frame 1), and
+// the swap-chain Present hook is a confirmed first-frame crash, retired
+// undiagnosed. So anything that must run once per frame inside the frame -
+// the panel, and the MSAA resolve backstop that silently never ran either -
+// hooks EndScene instead: the canonical D3D9 overlay point (the Steam
+// overlay's own choice), guaranteed inside a Begin/EndScene bracket, on the
+// same vtable where our other slot patches are proven safe by precedent.
+//
+// Drawn at EVERY EndScene deliberately: if the engine brackets the frame
+// once (the common case) this is exactly "after all drawing, before
+// present"; if it brackets per-pass, the last bracket's draw is the one
+// that survives, and the earlier ones cost a quad each. Measure before
+// optimising - the alive line says which world we are in.
+typedef HRESULT (STDMETHODCALLTYPE *PFN_EndScene)(IDirect3DDevice9 *);
+static PFN_EndScene g_origEndScene = NULL;
+
+static HRESULT STDMETHODCALLTYPE HookedEndScene(IDirect3DDevice9 *This)
+{
+    static volatile LONG esAlive = 0;
+    if (InterlockedCompareExchange(&esAlive, 1, 0) == 0)
+        LogLine("[boot] EndScene hook alive (panel + MSAA backstop moved here)");
+    // The MSAA backstop, relocated from the Present hooks where it never ran.
+    // Resolving here is legal and idempotent: hasContent set means the scene
+    // episode is still open, the resolve syncs the engine's texture, and the
+    // next bind of the scene target re-substitutes exactly as after any
+    // resolve.
+    if (g_msHasContent) { MsaaResolve(This); MsaaRestoreDepth(This); }
+    if (g_msR32fHasContent) MsaaResolveR32f(This);
+    IgPresent(This);
+    return g_origEndScene(This);
+}
+
 static HRESULT STDMETHODCALLTYPE HookedDevicePresent(
     IDirect3DDevice9 *This, const RECT *pSourceRect, const RECT *pDestRect,
     HWND hDestWindowOverride, const RGNDATA *pDirtyRegion)

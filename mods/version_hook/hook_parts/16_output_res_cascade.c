@@ -2030,7 +2030,20 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
     // only an exploratory question. Where presentation happens is a
     // side-question anyway; the Sleep probe below is what actually
     // investigates the 60fps cap.
-    sprintf(line, "[d3d9] present hooks installed: Present slot=%d PresentEx=%s", slot,
+    // EndScene - the per-frame in-frame callsite that actually fires in this
+    // game (see HookedEndScene in 13 for the evidence trail; the Present
+    // hooks above have never fired here and stay only because they cost
+    // nothing and might fire under another wrapper stack).
+    {
+        int slotES = offsetof(IDirect3DDevice9Vtbl, EndScene) / sizeof(void *);
+        g_origEndScene = (PFN_EndScene)ResolveOrigSlot(vtbl[slotES]);
+        if (VirtualProtect(&vtbl[slotES], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+            vtbl[slotES] = (void *)HookedEndScene;
+            VirtualProtect(&vtbl[slotES], sizeof(void *), oldProtect, &oldProtect);
+        }
+    }
+
+    sprintf(line, "[d3d9] present hooks installed: Present slot=%d PresentEx=%s EndScene=hooked", slot,
             g_origDevicePresentEx ? "hooked" : "skipped (device is not Ex)");
     LogLine(line);
 }
