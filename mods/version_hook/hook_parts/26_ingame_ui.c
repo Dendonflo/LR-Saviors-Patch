@@ -421,7 +421,12 @@ static void IgInput(LONG mx, LONG my)
         return;
     }
 
-    if (click && lx >= 0 && lx < IG_W && ly >= 0 && ly < IgPanelH()) {
+    // g_aoTweakOpen is part of the test, not assumed: g_igX/g_igY keep the
+    // CLOSED panel's last position, so without it a 428x390 patch of screen
+    // where the panel used to be silently swallowed every click - an invisible
+    // dead zone over anything drawn underneath.
+    if (click && g_aoTweakOpen &&
+        lx >= 0 && lx < IG_W && ly >= 0 && ly < IgPanelH()) {
         IgCloseRect(&r);
         if (lx >= r.left && ly < r.bottom) {
             // Same contract as the Win32 WM_CLOSE: the raw view must never
@@ -720,12 +725,26 @@ static void IgPresent(IDirect3DDevice9 *dev)
     if (wantStat && !IgSurfEnsure(dev, &g_igStatSurf, STAT_W, STAT_H)) wantStat = 0;
     if (!wantAo && !wantOvl && !wantStat) return;
 
+    // ---- input: EVERY call, not once per frame -----------------------------
+    // Deliberately outside the prep block below. EndScene runs ~4x per frame
+    // here, and sampling the button only at frame rate meant a press shorter
+    // than a frame vanished entirely, and a drag only started if the RISING
+    // EDGE happened to be sampled while the cursor was still over the target -
+    // which is what "the zone I have to click is very precise" actually was.
+    // It is not a hit-test problem; the rects are the full surfaces. Polling
+    // here costs a cached GetCursorPos and a GetAsyncKeyState, and it is only
+    // the PAINT that is expensive enough to want frame-rate limiting.
+    haveMouseS = IgCursor(&mxS, &myS);
+    // Positions before the hit test, so the first sample after a resolution
+    // change tests against where the surfaces are actually drawn.
+    if (wantOvl) IgAutoPos(&g_overlayX, &g_overlayY, OVL_W, OVL_H, 0);
+    if (wantStat) IgAutoPos(&g_statusX, &g_statusY, STAT_W, STAT_H, 1);
+    if (haveMouseS) IgInput(mxS, myS);
+    if (!g_aoTweakOpen) wantAo = 0;
+
     // ---- prep: once per engine frame, however many EndScenes it has -------
     if (g_msFrameSeq != lastPrepFrame) {
         lastPrepFrame = g_msFrameSeq;
-
-        haveMouseS = IgCursor(&mxS, &myS);
-        if (haveMouseS) IgInput(mxS, myS);
 
         if (wantAo && g_aoTweakOpen) {
             // Keep the panel reachable after a resolution change shrinks the screen.
@@ -740,18 +759,14 @@ static void IgPresent(IDirect3DDevice9 *dev)
         // pointed at a DIB instead of a window DC. The graph carries the 205
         // alpha its layered window used to apply.
         if (wantOvl) {
-            IgAutoPos(&g_overlayX, &g_overlayY, OVL_W, OVL_H, 0);
             DrawOverlayGraph(g_igOvlSurf.dc);
             if (!IgSurfUpload(&g_igOvlSurf, 205)) wantOvl = 0;
         }
         if (wantStat) {
-            IgAutoPos(&g_statusX, &g_statusY, STAT_W, STAT_H, 1);
             DrawStatusPanel(g_igStatSurf.dc);
             if (!IgSurfUpload(&g_igStatSurf, 255)) wantStat = 0;
         }
     }
-    // Input may have closed the AO panel this tick.
-    if (!g_aoTweakOpen) wantAo = 0;
     haveMouse = (int)haveMouseS;
     mx = mxS; my = myS;
 
