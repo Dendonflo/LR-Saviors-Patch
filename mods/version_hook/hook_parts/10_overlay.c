@@ -785,6 +785,23 @@ static int AoResIndexOf(LONG div)
 static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
+    // NEVER take the foreground from the game. Clicking or dragging this
+    // window used to activate it, which deactivates the game - and a D3D9
+    // device in fullscreen responds to losing focus by minimising, which
+    // takes this window down with it because Windows hides owned windows
+    // when their owner is minimised. That is the "drag it without focus and
+    // it disappears" report: the panel was not closing, its owner was going
+    // away underneath it.
+    //
+    // MA_NOACTIVATE also removes the focus change on the way in, which is the
+    // part of the window-switch stall this mod was actually responsible for.
+    //
+    // The controls do not need activation: scrollbars, checkboxes and buttons
+    // all work from mouse input alone, and this window has no keyboard input
+    // to receive. The modal move loop DefWindowProc runs for a caption drag
+    // does not need it either.
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
     case WM_HSCROLL: {
         HWND bar = (HWND)lp;
         for (size_t i = 0; i < AO_ROWS; i++) {
