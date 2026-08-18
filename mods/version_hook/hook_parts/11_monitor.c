@@ -98,6 +98,28 @@ static DWORD WINAPI MonitorThread(LPVOID param)
     (void)param;
     for (;;) {
         Sleep(500);
+        // Heartbeat. Every log across four sessions of very different lengths
+        // ends at roughly the same size, and the i18n probe added to this loop
+        // produced nothing at all - which has two possible causes that no
+        // amount of reading can separate: this thread stops running, or the
+        // log stops being written. This says which. It also reports the engine
+        // frame counter, which is the other open measurement (the frame tick
+        // fired once and never appeared again).
+        //
+        // Note the coupling that makes the pair diagnostic: g_bootFlush is
+        // cleared from THIS thread's report, so if the thread dies early every
+        // later line stays in the stdio buffer and the log ends mid-session -
+        // exactly what the truncation looks like.
+        {
+            static volatile LONG mtTicks = 0;
+            LONG t = InterlockedIncrement(&mtTicks);
+            if (t <= 8 || (t % 20) == 0) {
+                char hb[160];
+                sprintf(hb, "[boot] monitor tick #%ld (engine frames=%ld, bootFlush=%ld)",
+                        t, g_msFrameSeq, g_bootFlush);
+                LogLine(hb);
+            }
+        }
 #if ENABLE_SURFACE_DIAG
         // F9 capture poll lives here as well as in the panel's timer: the
         // panel's timer only runs while that window is OPEN, and the first
