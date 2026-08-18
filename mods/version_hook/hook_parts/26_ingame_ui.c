@@ -100,11 +100,26 @@ static void IgCheckRect(RECT *r)
     r->left = IG_PAD; r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 2;
     r->right = IG_W - IG_PAD; r->bottom = r->top + 20;
 }
-static void IgResRect(RECT *r)
+// AO resolution as a SEGMENTED control: three buttons, the active one lit.
+// The cycle button it replaces made the current value readable but the
+// alternatives invisible, and reaching Quarter from Native meant two clicks
+// through a state you did not want. Three segments show the whole choice and
+// cost one click to any of it.
+//
+// Labels are ratio glyphs (1:1, 1/2, 1/4) rather than TR(S_RES_*): they are
+// language-independent, and S_RES_NATIVE is "Native (expensive at high res)",
+// which no 93px segment will ever hold. The translated name lives in the
+// label column at the left, where every other row's name is.
+#define IG_RES_SEGS 3
+static void IgResSegRect(int i, RECT *r)
 {
-    r->left = IG_PAD + IG_LABEL_W;
+    const int total = IG_TRACK_W + 8 + IG_VAL_W;
+    const int gap = 4;
+    const int w = (total - gap * (IG_RES_SEGS - 1)) / IG_RES_SEGS;
+    r->left = IG_PAD + IG_LABEL_W + i * (w + gap);
+    r->right = r->left + w;
     r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 24;
-    r->right = r->left + IG_TRACK_W + 8 + IG_VAL_W; r->bottom = r->top + 22;
+    r->bottom = r->top + 22;
 }
 static void IgResetRect(RECT *r)
 {
@@ -218,17 +233,23 @@ static void IgPaint(int mx, int my)
                RGB(210, 210, 210), g_igFont, DT_LEFT);
     }
 
-    // Resolution: one button cycling Native/Half/Quarter. A dropdown needs a
-    // popup and a popup is a WINDOW - the entire species this panel exists to
-    // escape. Cycling through three values costs at most two clicks.
-    IgResRect(&r);
-    IgFill(&r, (mx >= r.left && mx < r.right && my >= r.top && my < r.bottom)
-                   ? RGB(66, 72, 84) : RGB(52, 56, 64));
+    // Resolution: three segments, active one lit. A real dropdown needs a
+    // popup and a popup is a WINDOW - the species this panel exists to escape.
     {
-        int idx = AoResIndexOf(g_aoResDiv);
-        IgText(r.left, r.top + 1, r.right - r.left,
-               TR(idx == 0 ? S_RES_NATIVE : idx == 1 ? S_RES_HALF : S_RES_QUARTER),
-               RGB(225, 225, 225), g_igFont, DT_CENTER);
+        static const wchar_t *const seg[IG_RES_SEGS] = { L"1:1", L"1/2", L"1/4" };
+        int active = AoResIndexOf(g_aoResDiv);
+        IgText(IG_PAD, IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 25,
+               IG_LABEL_W - 4, TR(S_AO_RES), RGB(210, 210, 210), g_igFont, DT_LEFT);
+        for (int i = 0; i < IG_RES_SEGS; i++) {
+            int hot;
+            IgResSegRect(i, &r);
+            hot = (mx >= r.left && mx < r.right && my >= r.top && my < r.bottom);
+            IgFill(&r, (i == active) ? RGB(58, 108, 178)
+                                     : hot ? RGB(66, 72, 84) : RGB(46, 50, 58));
+            IgText(r.left, r.top + 1, r.right - r.left, seg[i],
+                   (i == active) ? RGB(255, 255, 255) : RGB(150, 154, 162),
+                   (i == active) ? g_igFontBold : g_igFont, DT_CENTER);
+        }
     }
 
     // Reset, double-click armed: a MessageBox is a window AND a modal loop on
@@ -353,13 +374,19 @@ static void IgInput(LONG mx, LONG my)
             g_igPrevDown = down;
             return;
         }
-        IgResRect(&r);
-        if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {
-            int idx = (AoResIndexOf(g_aoResDiv) + 1) % 3;
-            InterlockedExchange(&g_aoResDiv, g_aoResDivs[idx]);
-            SaveConfig();
-            g_igPrevDown = down;
-            return;
+        for (int i = 0; i < IG_RES_SEGS; i++) {
+            IgResSegRect(i, &r);
+            if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {
+                if (g_aoResDivs[i] != g_aoResDiv) {
+                    char l[64];
+                    InterlockedExchange(&g_aoResDiv, g_aoResDivs[i]);
+                    sprintf(l, "[ssao] AO resolution: 1/%ld (panel)", g_aoResDiv);
+                    LogLine(l);
+                    SaveConfig();
+                }
+                g_igPrevDown = down;
+                return;
+            }
         }
         IgResetRect(&r);
         if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {

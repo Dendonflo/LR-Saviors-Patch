@@ -77,6 +77,10 @@ typedef char (__cdecl *GameMenuHandler)(char apply);
 static volatile LONG g_menuBuilds = 0;      // rebuild counter (log first only)
 static int g_menuHookInstalled = 0;
 
+// Defined below with the deferred poll; declared here because MenuH_ResetAll
+// needs the game window to own its confirmation dialog and sits earlier.
+static HWND GameMenuFindWindow(void);
+
 // ---- handlers -------------------------------------------------------------
 // One tiny function per item because the game's dispatch carries no context:
 // the function POINTER (dwItemData) is the identity.
@@ -223,8 +227,16 @@ static volatile LONG g_markCount = 0;
 static char __cdecl MenuH_ResetAll(char apply)
 {
     if (apply) {
-        if (MessageBoxW(NULL, TR(S_RESET_ASK_ALL), MOD_NAME_W,
-                        MB_YESNO | MB_ICONWARNING | MB_TASKMODAL) == IDYES)
+        // OWNED by the game window, and topmost. With a NULL owner (and
+        // MB_TASKMODAL, which owns nothing by definition) this dialog opened
+        // BEHIND the game in fullscreen - the same Z-order lesson the tuning
+        // panel taught: the game's window is topmost, and an unowned window
+        // has no claim above it. An owned dialog sits above its owner by
+        // construction. MB_SETFOREGROUND makes sure it is also the thing
+        // receiving the keystroke that answers it.
+        HWND owner = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
+        if (MessageBoxW(owner, TR(S_RESET_ASK_ALL), MOD_NAME_W,
+                        MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND) == IDYES)
             CfgResetDefaults(0);
     }
     return 0;
