@@ -192,6 +192,12 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         }
 #endif  // ENABLE_SHADER_DIAG
         ReportAndClampSleepGranularity();
+        // Menu-label language probe. Here rather than on the engine frame tick
+        // because this thread provably runs on a fixed 500ms cadence, and
+        // reading menu labels is pure Win32 - safe off the main thread, unlike
+        // the setting handlers, which stay on it. Self-limiting: it stops for
+        // good once a real localised label matches.
+        GameMenuLangProbe();
         FlushLog();   // see LogLine: buffered writes, flushed here instead
 #if ENABLE_FRAMETIME_DUMP
         // Frametime burst: arm on the rising edge, dump once full.

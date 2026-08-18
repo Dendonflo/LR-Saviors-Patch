@@ -949,50 +949,100 @@ static void InstallGameMenuHook(void)
 #define GAMEMENU_POLL_FRAMES 3600
 #define GAMEMENU_POLL_EVERY  60
 
-static void GameMenuLangProbe(LONG frame)
+// g_gameHwnd came back NULL in the probe's first flight - the game passes no
+// hDeviceWindow in its presentation parameters, so D3D uses the focus window
+// and our only recorded handle is never set. Find the real one instead: the
+// process's own visible top-level window, preferring one that HAS a menu bar,
+// which is exactly the window this probe is about.
+typedef struct { DWORD pid; HWND withMenu; HWND anyVisible; } GameMenuWndSearch;
+
+static BOOL CALLBACK GameMenuEnumWndProc(HWND h, LPARAM lp)
 {
+    GameMenuWndSearch *s = (GameMenuWndSearch *)lp;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (pid != s->pid || !IsWindowVisible(h)) return TRUE;
+    if (GetMenu(h)) { s->withMenu = h; return FALSE; }
+    if (!s->anyVisible) s->anyVisible = h;
+    return TRUE;
+}
+
+static HWND GameMenuFindWindow(void)
+{
+    GameMenuWndSearch s;
+    s.pid = GetCurrentProcessId();
+    s.withMenu = NULL;
+    s.anyVisible = NULL;
+    EnumWindows(GameMenuEnumWndProc, (LPARAM)&s);
+    return s.withMenu ? s.withMenu : s.anyVisible;
+}
+
+// Runs from the MONITOR thread (11_monitor.c), twice a second.
+//
+// It used to ride the engine frame tick, and that flight returned exactly one
+// sample: frame=1 and nothing at 30, 60 or 120. Truncation was ruled out (the
+// logs end at unaligned sizes, and the log is flushed per line until the first
+// monitor window and every 500ms after), so the tick itself is not the
+// reliable per-frame clock it was assumed to be. That is worth knowing on its
+// own - g_msFrameSeq is reported below so the next run measures it - but the
+// probe does not need to depend on it: reading menu labels is pure Win32 and
+// is safe from any thread, unlike the framerate handlers, which stay on the
+// main thread.
+//
+// What the one sample DID establish: at frame 1 the manager's menu reads
+// "* | * | * | Autre" - our own inserted label is correct while all three
+// vanilla ones are still the builder's "*" fallback. So either they are
+// filled in later, or that HMENU is not the one on screen. Both menus are read
+// here, every attempt, until one of them yields a real label.
+static void GameMenuLangProbe(void)
+{
+    static volatile LONG attempts = 0;
     unsigned char *base = (unsigned char *)g_mainModBase;
     char fromMgr[192], fromWnd[192];
     HMENU mMgr = NULL, mWnd = NULL;
+    HWND wnd;
     int lMgr, lWnd, lang;
+    LONG n;
     void *mgr;
 
     if (g_langCfg > 0) return;              // forced by ini - nothing to detect
     if (g_langFromLabel) return;            // already resolved from a real label
     if (!base) return;
 
+    n = InterlockedIncrement(&attempts);
     mgr = *(void **)(base + MENU_RVA_MGR_PTR);
     if (mgr) mMgr = *(HMENU *)((char *)mgr + MENUMGR_ROOT_HMENU);
-    if (g_gameHwnd) mWnd = GetMenu(g_gameHwnd);
+    wnd = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
+    if (wnd) mWnd = GetMenu(wnd);
 
     lMgr = LangProbeMenuBar(mMgr, fromMgr, sizeof(fromMgr));
     lWnd = LangProbeMenuBar(mWnd, fromWnd, sizeof(fromWnd));
     lang = (lMgr >= 0) ? lMgr : lWnd;
 
-    // Report the first few attempts whatever they say (that is the evidence),
-    // and always report the attempt that finally resolves it.
-    if (frame <= 120 || lang >= 0) {
-        char l[512];
-        sprintf(l, "[i18n] probe frame=%ld  mgr[%p]: %s  |  window[%p]: %s",
-                frame, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
-                (void *)mWnd, fromWnd[0] ? fromWnd : "(empty)");
+    // First few attempts whatever they say (that is the evidence), plus the
+    // one that resolves it. g_msFrameSeq rides along to settle the tick
+    // question without a separate instrument.
+    if (n <= 6 || lang >= 0) {
+        char l[576];
+        sprintf(l, "[i18n] probe #%ld (tick=%ld)  mgr[%p]: %s  |  hwnd %p menu[%p]: %s",
+                n, g_msFrameSeq, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
+                (void *)wnd, (void *)mWnd, fromWnd[0] ? fromWnd : "(empty)");
         LogLine(l);
     }
     if (lang < 0) return;
 
     InterlockedExchange(&g_langFromLabel, 1);
     if (lang != g_langIdx) {
-        char l[224];
+        char l[256];
         InterlockedExchange(&g_langIdx, lang);
-        sprintf(l, "[i18n] language corrected to index %d from the %s menu at frame %ld"
+        sprintf(l, "[i18n] language corrected to index %d from the %s menu on probe #%ld"
                    " - labels already inserted keep the old language until the"
-                   " next menu rebuild", lang,
-                (lMgr >= 0) ? "manager" : "window", frame);
+                   " next menu rebuild", lang, (lMgr >= 0) ? "manager" : "window", n);
         LogLine(l);
     } else {
-        char l[160];
-        sprintf(l, "[i18n] label match at frame %ld confirms the current language"
-                   " (the OS fallback had guessed right)", frame);
+        char l[192];
+        sprintf(l, "[i18n] label match on probe #%ld confirms the current language"
+                   " (the OS fallback had guessed right)", n);
         LogLine(l);
     }
 }
@@ -1006,10 +1056,14 @@ static void GameMenuDeferredPoll(LONG frame)
     // The first sample now lands while boot-flushing is still on, so it
     // reaches disk even if the session ends badly.
     if (!(frame == 1 || frame == 30 || (frame % GAMEMENU_POLL_EVERY) == 0)) return;
+    // Framerate only. The language probe moved to the monitor thread - see
+    // GameMenuLangProbe for why this clock turned out not to be dependable.
+    // The force stays here (and on the menu build) because it calls the game's
+    // own handlers and must not leave the main thread.
     GameMenuForceDynamicNow("runtime poll");
-    GameMenuLangProbe(frame);
 }
 #else
 static void GameMenuDeferredPoll(LONG frame) { (void)frame; }
+static void GameMenuLangProbe(void) { }
 #endif // ENABLE_GAME_MENU
 
