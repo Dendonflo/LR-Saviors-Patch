@@ -101,6 +101,26 @@
 //
 // ENABLE_TIMER_RES      - force 1ms timer resolution. Dead before it was ever
 //   tested: the probe showed the system already at 1.0000ms.
+//
+// ENABLE_NV_BLUR        - NVIDIA's own HBAO+ blur, offered as a per-estimator
+//   toggle so it could be judged against our a-trous one. Built faithfully
+//   (radius 3, one texel spacing, their gaussian weight) and tested on both
+//   estimators; user's verdict 2026-08-18, and it holds up on the mechanism:
+//
+//     SSAO  - clearly WORSE. SAO's noise is white grain over the whole tap
+//             disk, and a fixed 3-tap radius at one texel cannot cover it.
+//             Ours reaches 9/17/33/65px through a-trous levels, which is
+//             what makes that grain resolve at all.
+//     HBAO+ - no visible difference. Its noise is a structured 4x4 tile
+//             rather than grain, so it is already resolved by the single
+//             narrow pass (spread 5) our blur runs for it - the two kernels
+//             are doing the same small job.
+//
+//   So it is worse where the blur matters and equivalent where it does not,
+//   which leaves nothing for it to win. The transcription and the
+//   absolute-vs-relative depth finding are the parts worth keeping - see
+//   g_aoBlurNvHlsl in 25_ssao.c.
+#define ENABLE_NV_BLUR        0
 #define ENABLE_GYSAHL_DIAG    0
 #define ENABLE_CASCADE_HUNT   0
 #define ENABLE_SHADOW_SCALE   0
@@ -361,13 +381,13 @@ static volatile LONG g_aoBisect = 0;
 static volatile LONG g_aoFlatTest = 0;
 static volatile LONG g_aoBlur = 1;            // ini AoBlur: bilateral blur (the noise cure)
 static volatile LONG g_aoBlurSharpE[2] = { 681, 915 };  // ini AoBlurSharp / AoHbaoBlurSharp
+#if ENABLE_NV_BLUR
 // ini AoBlurMode / AoHbaoBlurMode: 0 = our a-trous bilateral, 1 = NVIDIA's own
 // HBAO+ blur (fixed 3-tap radius, one texel spacing, separable X then Y).
-// Both default to 0 so nothing changes for an existing install until the
-// toggle is used - this ships to be COMPARED, not to replace anything yet.
-// Passes and Spread do not apply to mode 1; Sharp does, rescaled (see
-// AoSetBlurConsts in 25_ssao.c).
+// RETIRED - see ENABLE_NV_BLUR for the comparison that ended it. Old inis
+// carrying either key are ignored, which is the intended outcome.
 static volatile LONG g_aoBlurModeE[2] = { 0, 0 };
+#endif
 // ini AoRespectFloor: stay inside the engine's [0.5..1] shadow envelope.
 // Ships as 0 since 1.1. At 1 the composite is clamped at the engine's own 0.5
 // floor, which caps AO at half strength in lit areas and cancels it almost

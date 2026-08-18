@@ -94,6 +94,22 @@ def compile_one(fxc, hlsl, defines, label):
     return ok
 
 
+def nv_blur_enabled():
+    """Read the ENABLE_NV_BLUR gate out of 01_config_gates.c.
+
+    Parsed rather than hardcoded so flipping the gate back on cannot leave the
+    checker silently skipping a shader that is once again being compiled at
+    runtime - which is the exact failure this whole tool exists to catch.
+    """
+    gates = os.path.join(os.path.dirname(SRC), "01_config_gates.c")
+    try:
+        with open(gates, encoding="utf-8", errors="replace") as fh:
+            m = re.search(r"^#define\s+ENABLE_NV_BLUR\s+(\d+)", fh.read(), re.M)
+    except OSError:
+        return False
+    return bool(m and int(m.group(1)))
+
+
 def main():
     fxc = find_fxc()
     if not fxc:
@@ -117,9 +133,14 @@ def main():
             ]
             ok &= compile_one(fxc, estimator, defs, "%s q%d" % (estname, q))
 
-    for name, label in (("g_aoBlurHlsl", "blur"),
-                        ("g_aoBlurNvHlsl", "blur-nvidia"),
-                        ("g_aoCombineHlsl", "combine")):
+    # g_aoBlurNvHlsl is checked only while ENABLE_NV_BLUR is on. It is retired
+    # (worse than ours on SSAO, indistinguishable on HBAO+) but still compiled
+    # here when the gate is flipped back, so reviving it cannot ship broken.
+    blurs = [("g_aoBlurHlsl", "blur")]
+    if nv_blur_enabled():
+        blurs.append(("g_aoBlurNvHlsl", "blur-nvidia"))
+    blurs.append(("g_aoCombineHlsl", "combine"))
+    for name, label in blurs:
         ok &= compile_one(fxc, extract(csrc, name), [], label)
 
     print("ALL SHADERS OK" if ok else "SHADER CHECK FAILED")

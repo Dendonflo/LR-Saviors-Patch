@@ -763,12 +763,17 @@ static HWND g_hAoRawCheck = NULL;
 // better than a radio group buried a menu level away.
 #define AOTW_COMBO_ID 4002
 #define AOTW_RESET_ID 4003
-// NVIDIA's HBAO+ blur instead of our a-trous one. Per-estimator like the
-// sliders, so it is re-seeded whenever the live estimator changes. A checkbox
-// rather than a row because it selects a KERNEL, not a magnitude - and while
-// it is on, two of the rows above it (Passes, Spread) do not apply.
+// NVIDIA's HBAO+ blur instead of our a-trous one. RETIRED (ENABLE_NV_BLUR):
+// worse than ours on SSAO, indistinguishable on HBAO+. The row height it
+// occupied is a named constant so the layout below collapses cleanly rather
+// than leaving a gap when the gate is off.
 #define AOTW_NVBLUR_ID 4004
+#if ENABLE_NV_BLUR
+#define AOTW_NVBLUR_H 22
 static HWND g_hAoNvBlurCheck = NULL;
+#else
+#define AOTW_NVBLUR_H 0
+#endif
 static HWND g_hAoResCombo = NULL;
 static const LONG g_aoResDivs[3] = { 1, 2, 4 };
 static int AoResIndexOf(LONG div)
@@ -834,9 +839,8 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InterlockedExchange(&g_aoRawView, on);
             return 0;   // not persisted, so nothing to save
         }
-        // Writes the LIVE estimator's slot, matching the sliders - the two
-        // estimators want different blurs, which is the whole reason this is
-        // per-estimator rather than global.
+#if ENABLE_NV_BLUR
+        // Writes the LIVE estimator's slot, matching the sliders.
         if (LOWORD(wp) == AOTW_NVBLUR_ID && HIWORD(wp) == BN_CLICKED) {
             LONG est = (g_aoEnable == 2) ? 1 : 0;
             LONG on = (SendMessageA(g_hAoNvBlurCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -844,6 +848,7 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             SaveConfig();
             return 0;
         }
+#endif
         // Restores only what this window shows - the eight sliders for BOTH
         // estimators plus the resolution - never AoEnable, so the effect does
         // not switch itself off under the button that was pressed. Confirmed:
@@ -862,11 +867,13 @@ static LRESULT CALLBACK AoTweakProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 if (g_hAoResCombo)
                     SendMessageW(g_hAoResCombo, CB_SETCURSEL,
                                  (WPARAM)AoResIndexOf(g_aoResDiv), 0);
+#if ENABLE_NV_BLUR
                 if (g_hAoNvBlurCheck) {
                     LONG e = (g_aoEnable == 2) ? 1 : 0;
                     SendMessageA(g_hAoNvBlurCheck, BM_SETCHECK,
                                  g_aoBlurModeE[e] ? BST_CHECKED : BST_UNCHECKED, 0);
                 }
+#endif
                 InvalidateRect(h, NULL, TRUE);
             }
             return 0;
@@ -908,9 +915,9 @@ static void EnsureAoTweakWindow(void)
     wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
     RegisterClassW(&wc);
     int cw = 10 + AOTW_LABEL_W + AOTW_BAR_W + 8 + AOTW_VAL_W + 10;
-    // rows + the NVIDIA-blur checkbox + the raw-view checkbox + the resolution
-    // dropdown + the reset button
-    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + 22 + 28 + 30 + 28;
+    // rows + the raw-view checkbox + the resolution dropdown + the reset
+    // button (+ the retired NVIDIA-blur checkbox, 0 while gated off)
+    int ch = 20 + (int)AO_ROWS * AOTW_ROW_H + AOTW_NVBLUR_H + 28 + 30 + 28;
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_TOOLWINDOW);
     g_hAoTweak = CreateWindowExW(
@@ -942,6 +949,7 @@ static void EnsureAoTweakWindow(void)
         si.nPage = 1;
         SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
     }
+#if ENABLE_NV_BLUR
     {
         LONG est0 = (g_aoEnable == 2) ? 1 : 0;
         g_hAoNvBlurCheck = CreateWindowExW(
@@ -957,10 +965,11 @@ static void EnsureAoTweakWindow(void)
                          g_aoBlurModeE[est0] ? BST_CHECKED : BST_UNCHECKED, 0);
         }
     }
+#endif
     g_hAoRawCheck = CreateWindowExW(
         0, L"BUTTON", TR(S_SHOW_RAW),
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        10, 10 + (int)AO_ROWS * AOTW_ROW_H + 24, cw - 20, 20,
+        10, 10 + (int)AO_ROWS * AOTW_ROW_H + AOTW_NVBLUR_H + 2, cw - 20, 20,
         g_hAoTweak, (HMENU)(UINT_PTR)AOTW_CHECK_ID, wc.hInstance, NULL);
     if (g_hAoRawCheck) {
         // The child controls default to the ugly system font; the rest of
@@ -975,7 +984,7 @@ static void EnsureAoTweakWindow(void)
     g_hAoResCombo = CreateWindowExW(
         0, L"COMBOBOX", NULL,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
-        10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + 50,
+        10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + AOTW_NVBLUR_H + 28,
         AOTW_BAR_W + 8 + AOTW_VAL_W, 120,
         g_hAoTweak, (HMENU)(UINT_PTR)AOTW_COMBO_ID, wc.hInstance, NULL);
     if (g_hAoResCombo) {
@@ -992,7 +1001,7 @@ static void EnsureAoTweakWindow(void)
         // column so it reads as the last row of the list.
         HWND b = CreateWindowExW(
             0, L"BUTTON", TR(S_RESET_AO), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + 78,
+            10 + AOTW_LABEL_W, 10 + (int)AO_ROWS * AOTW_ROW_H + AOTW_NVBLUR_H + 56,
             AOTW_BAR_W + 8 + AOTW_VAL_W, 24,
             g_hAoTweak, (HMENU)(UINT_PTR)AOTW_RESET_ID, wc.hInstance, NULL);
         if (b) SendMessageW(b, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
@@ -1086,10 +1095,12 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                         SetScrollInfo(g_aoRows[i].bar, SB_CTL, &si, TRUE);
                     }
                 }
+#if ENABLE_NV_BLUR
                 // Per-estimator like the rows above, so it follows the switch.
                 if (g_hAoNvBlurCheck)
                     SendMessageA(g_hAoNvBlurCheck, BM_SETCHECK,
                                  g_aoBlurModeE[est] ? BST_CHECKED : BST_UNCHECKED, 0);
+#endif
                 if (g_hAoTweak) {
                     SetWindowTextW(g_hAoTweak, AoTweakTitle());
                     InvalidateRect(g_hAoTweak, NULL, TRUE);
@@ -1108,11 +1119,13 @@ static DWORD WINAPI OverlayThread(LPVOID param)
                 if (g_hAoRawCheck)
                     SendMessageA(g_hAoRawCheck, BM_SETCHECK,
                                  g_aoRawView ? BST_CHECKED : BST_UNCHECKED, 0);
+#if ENABLE_NV_BLUR
                 if (g_hAoNvBlurCheck) {
                     LONG e = (g_aoEnable == 2) ? 1 : 0;
                     SendMessageA(g_hAoNvBlurCheck, BM_SETCHECK,
                                  g_aoBlurModeE[e] ? BST_CHECKED : BST_UNCHECKED, 0);
                 }
+#endif
                 if (g_hAoResCombo)
                     SendMessageA(g_hAoResCombo, CB_SETCURSEL,
                                  (WPARAM)AoResIndexOf(g_aoResDiv), 0);

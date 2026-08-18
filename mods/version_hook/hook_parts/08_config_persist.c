@@ -278,10 +278,12 @@ static NumericSetting g_numerics[] = {
     { &g_aoBlur,        "AoBlur",        0, 1 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
-    // 0 = our a-trous bilateral, 1 = NVIDIA's HBAO+ blur. Per-estimator like
-    // every other AO row; Passes/Spread are ignored in mode 1.
+#if ENABLE_NV_BLUR
+    // 0 = our a-trous bilateral, 1 = NVIDIA's HBAO+ blur. RETIRED - an ini
+    // still carrying either key is ignored, as intended.
     { &g_aoBlurModeE[0], "AoBlurMode",     0, 1 },
     { &g_aoBlurModeE[1], "AoHbaoBlurMode", 0, 1 },
+#endif
     // A-trous: each extra pass reuses the same 9-tap kernel with DOUBLED
     // spacing, so reach grows 9/17/33/65px for a linear cost. Spread scales
     // the base spacing (100 = 1px between taps).
@@ -479,7 +481,9 @@ static const char *const g_aoTweakKeys[] = {
     "AoBlurSharp",    "AoHbaoBlurSharp",
     "AoBlurPasses",   "AoHbaoBlurPasses",
     "AoBlurStep100",  "AoHbaoBlurStep100",
+#if ENABLE_NV_BLUR
     "AoBlurMode",     "AoHbaoBlurMode",
+#endif
     "AoResDiv",
 };
 

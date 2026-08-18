@@ -156,7 +156,37 @@ to Dynamic`. Idempotent. **Open question:** does the build hook fire early
 enough in fullscreen (menu bar detached via SetMenu(NULL), but the builder
 may still run)? If not, fall back to a one-shot check on the monitor thread.
 
-### 2. NVIDIA's HBAO+ blur as a toggle in the tuning panel
+### 2. NVIDIA's HBAO+ blur — BUILT, TESTED, RETIRED (commits 1053248, then gated)
+
+**Answered.** Built faithfully (radius 3, one texel spacing, their gaussian
+weight, separable X then Y), shipped as a per-estimator panel toggle, tested on
+both estimators. User's verdict 2026-08-18: **keep ours.**
+
+- **SSAO — clearly worse.** SAO's noise is white grain spread over the whole
+  tap disk, and a fixed 3-tap radius at one texel cannot cover it. Ours reaches
+  9/17/33/65px through a-trous levels, which is what makes that grain resolve.
+- **HBAO+ — no visible difference.** Its noise is a structured 4x4 interleaved
+  tile rather than grain, so it is already resolved by the single narrow pass
+  (spread 5) ours runs there. Both kernels are doing the same small job.
+
+Worse where the blur matters, equivalent where it does not — nothing left for
+it to win. Gated behind `ENABLE_NV_BLUR 0` (01_config_gates.c) rather than
+deleted, with the full reasoning at the gate.
+
+**The reusable finding, and the reason the code is kept:** NVIDIA's blur
+weights the ABSOLUTE depth difference, tuned for a depth range their default
+sharpness of 40 was chosen against. This game's depth spans ~4..2000 world
+units, so an absolute threshold that stops edges at arm's length ignores them
+across a courtyard. Any future port of a depth-aware filter into this engine
+has to normalise by centre depth first — ours already does.
+
+`tools/check_shaders.py` PARSES the gate rather than hardcoding it, so flipping
+`ENABLE_NV_BLUR` back on cannot leave the checker silently skipping a shader
+that is again being compiled at runtime.
+
+The original plan follows.
+
+
 
 User wants it as a temporary toggle until they decide which blur ships.
 
