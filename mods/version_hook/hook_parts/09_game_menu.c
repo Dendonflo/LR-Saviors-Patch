@@ -178,7 +178,13 @@ GAMEMENU_VALUE(MenuH_AoFlat60,  g_aoFlatTest, 60)
 // the window's own close box, which writes the flag back.
 static char __cdecl MenuH_AoPanel(char apply)
 {
-    if (apply) InterlockedExchange(&g_aoTweakOpen, 1);
+    if (apply) {
+        InterlockedExchange(&g_aoTweakOpen, 1);
+        // The click is the first link in the chain the in-game panel hangs
+        // off; logging it separates "handler never fired" from every failure
+        // further along (the trap the panel's first flight fell into).
+        LogLine("[menu] AO tuning panel: open clicked");
+    }
     return 0;
 }
 // The raw-AO view moved INTO that window as a checkbox (see AOTW_CHECK_ID

@@ -38,10 +38,20 @@ static void IgPresent(IDirect3DDevice9 *dev);
 static void DumpSurfaceToBmp(IDirect3DDevice9 *dev, IDirect3DSurface9 *surf, const char *name);
 static volatile LONG g_msDumpState;   // 0 idle, 2 backbuffer pending, 3 done
 
+// One-shot proof that presents actually route through these hooks - the
+// in-game panel renders here, so "panel never appears" with no other line is
+// indistinguishable from "Present never hooked" without it. Shared by both
+// Present and PresentEx, and [boot]-tagged to survive the release filter.
+static volatile LONG g_presentAliveLogged = 0;
+#define PRESENT_ALIVE_ONCE(which) \
+    do { if (InterlockedCompareExchange(&g_presentAliveLogged, 1, 0) == 0) \
+        LogLine("[boot] present hook alive (" which ")"); } while (0)
+
 static HRESULT STDMETHODCALLTYPE HookedDevicePresent(
     IDirect3DDevice9 *This, const RECT *pSourceRect, const RECT *pDestRect,
     HWND hDestWindowOverride, const RGNDATA *pDirtyRegion)
 {
+    PRESENT_ALIVE_ONCE("Present");
     // Backstop: if the pass ended without any later SetRenderTarget, the
     // accumulated MS scene would never reach the engine's texture. Resolving
     // here is late but cannot be missed.
@@ -504,6 +514,7 @@ static HRESULT STDMETHODCALLTYPE HookedDevicePresentEx(
     IDirect3DDevice9Ex *This, const RECT *pSourceRect, const RECT *pDestRect,
     HWND hDestWindowOverride, const RGNDATA *pDirtyRegion, DWORD dwFlags)
 {
+    PRESENT_ALIVE_ONCE("PresentEx");
     if (g_msHasContent) { MsaaResolve((IDirect3DDevice9 *)This); MsaaRestoreDepth((IDirect3DDevice9 *)This); }
     if (g_msR32fHasContent) MsaaResolveR32f((IDirect3DDevice9 *)This);
     if (g_msDumpState == 2 && InterlockedCompareExchange(&g_msDumpState, 3, 2) == 2) {

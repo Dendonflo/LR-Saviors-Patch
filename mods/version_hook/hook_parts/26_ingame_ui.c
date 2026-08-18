@@ -430,10 +430,30 @@ static void IgPresent(IDirect3DDevice9 *dev)
     int haveMouse;
 
     if (!g_aoTweakOpen || !g_aoPanelInGame || !dev) return;
-    if (!IgEnsureGdi() || !IgEnsureGpu(dev)) return;
-
+    // The open request is logged BEFORE the two ensures, and each ensure
+    // failure logs itself. The first flight had the only log line AFTER both,
+    // so whichever failed did so in silence - the same
+    // absence-of-evidence trap as the language probe, fallen into the same
+    // day. Every early return between "user asked" and "pixels drawn" now
+    // leaves a trace.
     if (InterlockedCompareExchange(&g_igOpenLogged, 1, 0) == 0)
-        LogLine("[menu] AO panel: in-game renderer active (AoPanelInGame=1)");
+        LogLine("[menu] AO panel: open request reached the Present hook");
+    if (!IgEnsureGdi()) {
+        static volatile LONG f = 0;
+        if (InterlockedCompareExchange(&f, 1, 0) == 0)
+            LogLine("[menu] AO panel: GDI setup FAILED (DIB or DC creation)");
+        return;
+    }
+    if (!IgEnsureGpu(dev)) {
+        static volatile LONG f = 0;
+        if (InterlockedCompareExchange(&f, 1, 0) == 0) {
+            char l[128];
+            sprintf(l, "[menu] AO panel: GPU setup FAILED (psState=%ld tex=%p)",
+                    g_igPsState, (void *)g_igTex);
+            LogLine(l);
+        }
+        return;
+    }
 
     haveMouse = IgCursor(&mx, &my);
     if (haveMouse) IgInput(mx, my);
