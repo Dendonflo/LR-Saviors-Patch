@@ -457,6 +457,17 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     // the new frame's full overdraw re-founds the MS accumulation.
     g_msSuppressFrame = 0;
     g_msFrameSeq++;
+    // One-shot proof of life. The deferred poll below produced NOTHING in its
+    // first flight - no probe lines, no runtime-poll forces - and every
+    // explanation for that reduces to one question: does this function run at
+    // all? Reasoning could not settle it (the hook is installed
+    // unconditionally, but its result was logged on an untagged line the
+    // release filter dropped), so it is now stated outright, once, in the log.
+    {
+        static volatile LONG tickAnnounced = 0;
+        if (InterlockedCompareExchange(&tickAnnounced, 1, 0) == 0)
+            LogLine("[boot] frame tick alive (engine pacer hook is running)");
+    }
     // Deferred menu/settings poll (defined in 09_game_menu.c, which is later in
     // the TU). THIS is the main thread by definition - g_mainThreadId is
     // established right above - which is why the poll lives here and not on the

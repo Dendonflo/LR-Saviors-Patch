@@ -949,7 +949,7 @@ static void InstallGameMenuHook(void)
 #define GAMEMENU_POLL_FRAMES 3600
 #define GAMEMENU_POLL_EVERY  60
 
-static void GameMenuLangProbe(LONG sec)
+static void GameMenuLangProbe(LONG frame)
 {
     unsigned char *base = (unsigned char *)g_mainModBase;
     char fromMgr[192], fromWnd[192];
@@ -971,10 +971,10 @@ static void GameMenuLangProbe(LONG sec)
 
     // Report the first few attempts whatever they say (that is the evidence),
     // and always report the attempt that finally resolves it.
-    if (sec <= 3 || lang >= 0) {
+    if (frame <= 120 || lang >= 0) {
         char l[512];
-        sprintf(l, "[i18n] probe t=%lds  mgr[%p]: %s  |  window[%p]: %s",
-                sec, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
+        sprintf(l, "[i18n] probe frame=%ld  mgr[%p]: %s  |  window[%p]: %s",
+                frame, (void *)mMgr, fromMgr[0] ? fromMgr : "(empty)",
                 (void *)mWnd, fromWnd[0] ? fromWnd : "(empty)");
         LogLine(l);
     }
@@ -984,15 +984,15 @@ static void GameMenuLangProbe(LONG sec)
     if (lang != g_langIdx) {
         char l[224];
         InterlockedExchange(&g_langIdx, lang);
-        sprintf(l, "[i18n] language corrected to index %d from the %s menu at t=%lds"
+        sprintf(l, "[i18n] language corrected to index %d from the %s menu at frame %ld"
                    " - labels already inserted keep the old language until the"
                    " next menu rebuild", lang,
-                (lMgr >= 0) ? "manager" : "window", sec);
+                (lMgr >= 0) ? "manager" : "window", frame);
         LogLine(l);
     } else {
         char l[160];
-        sprintf(l, "[i18n] label match at t=%lds confirms the current language"
-                   " (the OS fallback had guessed right)", sec);
+        sprintf(l, "[i18n] label match at frame %ld confirms the current language"
+                   " (the OS fallback had guessed right)", frame);
         LogLine(l);
     }
 }
@@ -1000,9 +1000,14 @@ static void GameMenuLangProbe(LONG sec)
 static void GameMenuDeferredPoll(LONG frame)
 {
     if (frame <= 0 || frame > GAMEMENU_POLL_FRAMES) return;
-    if ((frame % GAMEMENU_POLL_EVERY) != 0) return;
+    // Frame 1 and 30 before the once-a-second cadence: the first flight logged
+    // nothing at all, and a probe whose earliest possible evidence is a whole
+    // second in cannot distinguish "never ran" from "ran and found nothing".
+    // The first sample now lands while boot-flushing is still on, so it
+    // reaches disk even if the session ends badly.
+    if (!(frame == 1 || frame == 30 || (frame % GAMEMENU_POLL_EVERY) == 0)) return;
     GameMenuForceDynamicNow("runtime poll");
-    GameMenuLangProbe(frame / GAMEMENU_POLL_EVERY);
+    GameMenuLangProbe(frame);
 }
 #else
 static void GameMenuDeferredPoll(LONG frame) { (void)frame; }

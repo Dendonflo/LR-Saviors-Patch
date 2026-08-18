@@ -909,7 +909,12 @@ void InstallPrefetchHook(void)
     // FN_AA3250 is installed separately by InstallUploadGateHook (below), so
     // it reports its own line rather than joining this one.
     ok[FN_AA3250] = 0;
-    sprintf(line, "Hooks installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d b46c20=%d",
+    // [boot]-tagged so it survives the release log filter. Whether the engine
+    // hooks attached is the first thing worth knowing about any report, and
+    // ac3040 in particular is the frame tick that the per-frame work rides on
+    // - an untagged line meant a silent install failure was invisible in every
+    // shipped log.
+    sprintf(line, "[boot] hooks installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d b46c20=%d",
             ok[0], ok[1], ok[2], ok[3], ok[4], ok[5], ok[6], ok[7], ok[8]);
     LogLine(line);
 
