@@ -373,9 +373,18 @@ static volatile LONG g_forceTrilinear = 0;
 // reaching +5.0) and nothing writes +5.0 by accident - overriding those to 0
 // would sharpen something the artist meant to be soft.
 //
-// Ships OFF. It is an A/B instrument first: real-time from the menu, and the
-// hypothesis is the user's to confirm by eye before it becomes a default.
-static volatile LONG g_mipBiasMode = 0;
+// SHIPS ON at floor 0.0 (2026-08-19). It went out as an A/B instrument with
+// four positions and the user confirmed by eye that clamping fixes the
+// Wildlands crawl, so the menu is now the two positions that matter - Off
+// (the engine's bias) and On (neutral 0.0) - and On is the default.
+//
+// Modes 2 and 3 (floors -0.5 and -1.0) stay REACHABLE FROM THE INI. They are
+// not dead: a mild negative bias is legitimate practice once anisotropic
+// filtering is paying for the extra samples, which it now is at 16x, so they
+// are the natural knob for anyone who finds neutral a touch soft. Same
+// treatment as ForceTrilinear and ScreenShadowResPct - out of the menu,
+// still in the file.
+static volatile LONG g_mipBiasMode = 1;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

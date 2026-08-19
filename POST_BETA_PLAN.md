@@ -485,12 +485,53 @@ with no framerate cost reported. **Done for 1.0.**
 
 `ForceTrilinear` resolved to NO — see section B.
 
-### B. Mipmapping — MEASURED, NO FIX WARRANTED (2026-08-19)
+### B. Mipmapping — ONE REAL FAULT FOUND AND FIXED (2026-08-19)
 
-**Closed.** Three census runs; every mechanism that can produce a mipmapping
-fault was measured against real gameplay, and none of them is broken. What
-follows is the evidence, because the negative result is the valuable part —
-it is what stops this being re-opened on the next vague report.
+**The fault is the engine's negative mip LOD bias, and `MipBiasMode=1` ships
+as the fix.** Four census runs. Of the four mechanisms that can produce a
+mipmapping fault, three are healthy and one was not — and the one that was
+not is the one this document, an hour earlier, recorded as "not a defect,
+leave it alone". That reversal is the most useful thing on this page, so the
+reasoning for it is preserved below rather than edited away.
+
+**What the wrong call was, and why it was wrong.** The measurement said 97.8%
+of LOD bias writes are negative, spanning −5.00 to +5.00, and I concluded
+*per-material art direction, not a fault* — because no engine writes ±5.0 by
+accident. That inference was sound and the conclusion still did not follow.
+Deliberate does not mean harmless: the bias was authored against a 720p
+console target, and it is resolution-independent, so it survives unchanged
+into a 1440p/4K PC render where the pixel footprint is already far smaller.
+Intent and correctness are separate questions, and I answered the first one
+while believing I had answered the second.
+
+**What actually settled it was the user's own eye, not the log**: distant
+terrain in the Wildlands crawling like "a texture too detailed for the
+current res", improving with both anisotropy and SSAA, explicitly NOT
+sparkle. Pattern crawl that responds to sample count is undersampling, and
+a negative bias is undersampling by construction — distance-weighted,
+because near the camera the selection is already at level 0 and the bias
+clamps out, while far away it sits mid-chain and applies in full. "Fine
+nearby, shimmery in the distance" is the shape that produces.
+
+**The general lesson, which is worth more than the fix:** a census can only
+tell you what the engine DOES, never whether what it does looks wrong on
+someone's monitor. Closing an investigation on "no confirmed symptom" was
+correct process, but the correct next step was to ask what the symptom would
+look like, not to file the question as settled. Related: the loading-screen
+trap below, which is the same failure of window selection one level down.
+
+**The fix**: a FLOOR on the negative side only, at `SetSamplerState`.
+Positive biases pass through untouched — those really are deliberate blur
+effects (30,036 of them, stages 0 and 1 only, reaching +5.0). Menu is
+Graphics → Mip LOD Bias → Off / On, real-time in both directions because the
+engine rewrites this state over a million times a session. Floors of −0.5 and
+−1.0 remain reachable as `MipBiasMode=2`/`3` in the ini: a mild negative bias
+is legitimate practice once anisotropy is paying for the extra samples, which
+at 16x it now is.
+
+The other three mechanisms were and remain healthy — evidence below, because
+a negative result is what stops each being re-opened on the next vague
+report.
 
 **Read the loading-screen trap first.** The first census build only ever
 captured its first 13 seconds, and two conclusions drawn from that window
@@ -511,13 +552,10 @@ census reading must come from a window where `stages used=0xFFFF` and
   — 5.4%, in a game that is otherwise trilinear throughout. Not a defect;
   those are specific samplers choosing point deliberately. `ForceTrilinear`
   stays built, gated off, ini-only. **Not a 1.0 feature.**
-- **`MIPMAPLODBIAS`.** Written 1,349,109 times, range −5.00 to +5.00, but
-  **97.8% negative** (1,319,073 sharpening vs 30,036 blurring), and the
-  positive ones land on `blurStages=0x0003` — stages 0 and 1 only. No engine
-  writes +5.0 by accident; this is per-material art direction, not a fault.
-  Leave it alone: a global bias knob would fight the engine's own per-sampler
-  decisions. Note the useful side effect — the engine's heavy NEGATIVE bias
-  sharpens and buys aliasing, which is exactly what our 16x counteracts.
+- **`MIPMAPLODBIAS`. THE FAULT — see the section header.** Written 1,349,109
+  times, range −5.00 to +5.00, **97.8% negative** (1,319,073 sharpening vs
+  30,036 blurring), positives confined to `blurStages=0x0003`. Fixed by a
+  negative-side floor, `MipBiasMode` shipping at 1.
 - **`MAXMIPLEVEL`.** `nz=0` in every window. Clean.
 - **Textures with no mip chain.** 302 of 1242 (24%), 260 compressed, 141 at
   1024+, and creator attribution kills the HD-GUI-mod hypothesis outright:
@@ -527,7 +565,7 @@ census reading must come from a window where `stages used=0xFFFF` and
   world; the sampler now skips the first 300 creations so a future log
   answers this without a special run.
 
-**Why no fix even so.** Generating the missing chains means asking
+**Why no fix for the missing chains even so.** Generating them means asking
 `CreateTexture` for more levels than the game wants, detecting when its own
 level-0 upload has finished, and filtering the rest — against a game whose
 code assumes one level and whose upload path already goes through the

@@ -453,8 +453,14 @@ static void GameMenuSetMipBias(LONG mode)
 }
 static char __cdecl MenuH_Bias0(char apply)
 { if (apply) GameMenuSetMipBias(0); return (char)(g_mipBiasMode == 0); }
+// "On" is mode 1, the neutral floor. It reports checked for ANY clamping
+// mode, so an ini-only 2 or 3 shows as on rather than as nothing selected -
+// a menu where no entry is checked reads as broken.
 static char __cdecl MenuH_BiasNeutral(char apply)
-{ if (apply) GameMenuSetMipBias(1); return (char)(g_mipBiasMode == 1); }
+{ if (apply) GameMenuSetMipBias(1); return (char)(g_mipBiasMode > 0); }
+// RETIRED from the menu 2026-08-19 with the drop to Off/On. Kept compiled:
+// MipBiasMode 2 and 3 still work from the ini, and these are the only code
+// that names them.
 static char __cdecl MenuH_BiasHalf(char apply)
 { if (apply) GameMenuSetMipBias(2); return (char)(g_mipBiasMode == 2); }
 static char __cdecl MenuH_BiasOne(char apply)
@@ -915,13 +921,15 @@ static void GameMenuAppend(void)
                 at = (texPos >= 0) ? texPos + 1 : endPos;
                 sub = GameMenuInsertGroup(gfx, at, L"Mip LOD Bias");
                 if (sub) {
-                    // NOT localised yet, deliberately - this ships as an A/B
-                    // instrument and may not survive testing. If it becomes a
-                    // default, these four need entries in gen_i18n.py first.
-                    GameMenuInsertLeaf(sub, 0, id++, L"Engine (vanilla)",  MenuH_Bias0);
-                    GameMenuInsertLeaf(sub, 1, id++, L"Neutral (0.0)",     MenuH_BiasNeutral);
-                    GameMenuInsertLeaf(sub, 2, id++, L"Allow -0.5",        MenuH_BiasHalf);
-                    GameMenuInsertLeaf(sub, 3, id++, L"Allow -1.0",        MenuH_BiasOne);
+                    // Off/On after testing confirmed the neutral floor is the
+                    // answer - the four-position version was the A/B rig, and
+                    // shipping the rig would have been offering the player a
+                    // measurement to take. S_OFF and S_ON were already in the
+                    // string table, so this needed no gen_i18n.py run; the
+                    // GROUP name is still English, being a term of art that
+                    // reads the same in every language the mod supports.
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_OFF), MenuH_Bias0);
+                    GameMenuInsertLeaf(sub, 1, id++, TR(S_ON),  MenuH_BiasNeutral);
                     groups++;
                 }
 

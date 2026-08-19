@@ -541,8 +541,8 @@ static void DrawStatusPanel(HDC dc)
         // not biasing on anything currently on screen, which is the reading
         // that stops an A/B test from being run against nothing.
         LONG m = g_mipBiasMode;
-        sprintf(set, "%s", m == 0 ? "engine" : (m == 1 ? "neutral 0.0" :
-                (m == 2 ? "floor -0.5" : "floor -1.0")));
+        sprintf(set, "%s", m == 0 ? "off (engine)" : (m == 1 ? "on (0.0)" :
+                (m == 2 ? "on (-0.5)" : "on (-1.0)")));
         if (!m) sprintf(app, "%ld neg seen", g_tfBiasNeg);
         else    sprintf(app, "%ld clamped", g_tfBiasClamped);
         StatRow(dc, &y, "Mip LOD bias", set, app, m > 0 && g_tfBiasClamped == 0);

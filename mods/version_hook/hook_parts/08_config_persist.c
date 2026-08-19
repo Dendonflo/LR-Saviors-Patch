@@ -284,9 +284,16 @@ static NumericSetting g_numerics[] = {
     // the real clamp, per device, and logs what it found.
     { &g_anisoLevel,    "AnisoLevel",    0, 16 },
     { &g_forceTrilinear, "ForceTrilinear", 0, 1 },
-    // 0 = engine's own bias, 1 = floor 0.0, 2 = floor -0.5, 3 = floor -1.0.
-    // An enum rather than a signed value because the numerics table is
-    // unsigned, and because these are the four positions the menu offers.
+    // 0 = engine's own bias, 1 = floor 0.0 (default), 2 = floor -0.5,
+    // 3 = floor -1.0. An enum rather than a signed value because the numerics
+    // table is unsigned. The menu offers 0 and 1; 2 and 3 are ini-only.
+    //
+    // NO ConfigVersion MIGRATION, deliberately, and this is a checked fact
+    // rather than an assumption: the key never shipped in a public build, so
+    // every public ini parses it as absent and takes the new default. Exactly
+    // one ini in the world carries it - the test machine's - and it already
+    // reads MipBiasMode=1. A migration step is permanent code; there is
+    // nothing here for it to fix.
     { &g_mipBiasMode,   "MipBiasMode",   0, 3 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
