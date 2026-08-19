@@ -327,6 +327,24 @@ static volatile LONG g_aoTweakOpen = 0;       // SSAO tuning window (not persist
 // existed for one afternoon of beta testing; an ini still carrying it is
 // ignored and the default applies, which is the intended outcome.
 static volatile LONG g_inGameUi = 1;
+// ini AnisoLevel: anisotropic filtering the mod enforces at SetSamplerState,
+// replacing the vanilla Texture Filtering menu (whose entire range is 1x and
+// 8x - see the header block of 08d_texfilter.c for the disassembly). Values:
+// 0 = leave the engine alone, 1 = off (trilinear), 2/4/8/16 = that level,
+// clamped to D3DCAPS9.MaxAnisotropy.
+//
+// Ships as 0 for its first build ON PURPOSE. The census in 08d has to
+// observe the engine's own filtering to be worth anything, and it cannot do
+// that from a session where we have already overwritten it - so the default
+// run is the baseline, and the menu is how the same session produces the
+// comparison. Flip to 16 once that run confirms the rewrite lands.
+static volatile LONG g_anisoLevel = 0;
+// ini ForceTrilinear: rewrite MIPFILTER POINT -> LINEAR. Point mip filtering
+// is what produces a visible arc on the ground where one mip level ends and
+// the next begins, sliding with the camera. Ships OFF because whether this
+// engine ever asks for POINT is exactly what the census is measuring - a fix
+// aimed at a defect nobody has confirmed is how you ship a regression.
+static volatile LONG g_forceTrilinear = 0;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

@@ -1,4 +1,4 @@
-// ---- In-game AO tuning panel (2026-08-18) ----------------------------------
+﻿// ---- In-game AO tuning panel (2026-08-18) ----------------------------------
 //
 // WHY THIS EXISTS: the Win32 tuning window fought fullscreen and lost, three
 // fixes in a row. Each fix uncovered the next OS behaviour working against a
@@ -837,10 +837,10 @@ static void IgPresent(IDirect3DDevice9 *dev)
             g_origSetVertexShader(dev, NULL);        // XYZRHW needs the FF path
             g_origSetPixelShader(dev, g_igPs);
             g_origSetFVF(dev, D3DFVF_XYZRHW | D3DFVF_TEX1);
-            IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-            IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-            IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-            IDirect3DDevice9_SetSamplerState(dev, 12, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+            ModSetSamplerState(dev, 12, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            ModSetSamplerState(dev, 12, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+            ModSetSamplerState(dev, 12, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            ModSetSamplerState(dev, 12, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 
             // Painter's order = Z-order: displays first, the interactive panel
             // over them, the cursor last so it is never occluded.

@@ -279,6 +279,11 @@ static NumericSetting g_numerics[] = {
     // 1 = panel rendered inside the frame at Present; 0 = the old Win32
     // window. See g_aoPanelInGame.
     { &g_inGameUi,      "InGameUi",      0, 1 },
+    // Anisotropic filtering. The upper bound is 16 rather than the device cap
+    // because the cap is not known when the ini is parsed - TfClampLevel does
+    // the real clamp, per device, and logs what it found.
+    { &g_anisoLevel,    "AnisoLevel",    0, 16 },
+    { &g_forceTrilinear, "ForceTrilinear", 0, 1 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
 #if ENABLE_NV_BLUR

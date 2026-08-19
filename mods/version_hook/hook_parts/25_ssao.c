@@ -773,9 +773,16 @@ static LONG g_aoMrtLogged = 0;   // one-shot: are MRT slots 1-3 in use here?
 // internal RTs and runtime-compiled shaders must not pass through those
 // either; HookedStretchRect is the SSAA present-path probe. The calls this
 // file may still make through the macro form are exactly the UNHOOKED
-// slots: SetVertexShader, SetFVF, SetSamplerState, SetPixelShaderConstantF
-// (unhooked while ENABLE_CASCADE_HUNT=0 - revisit if that gate returns),
-// DrawPrimitiveUP, CreateStateBlock, GetSurfaceLevel, GetDesc.
+// slots: SetVertexShader, SetFVF, SetPixelShaderConstantF (unhooked while
+// ENABLE_CASCADE_HUNT=0 - revisit if that gate returns), DrawPrimitiveUP,
+// CreateStateBlock, GetSurfaceLevel, GetDesc.
+//
+// SetSamplerState LEFT that list on 2026-08-19: 08d_texfilter.c hooks it,
+// and that hook is a state machine over the engine's sampler state exactly
+// like the ones above. Our passes go through ModSetSamplerState now - if they
+// did not, the AO passes would teach the census filter values the engine
+// never asked for, and their POINT sampling could be "upgraded" to
+// anisotropic by the very feature they have nothing to do with.
 static void AoSetPs(IDirect3DDevice9 *dev, IDirect3DPixelShader9 *ps)
 {
     if (g_origSetPixelShader) g_origSetPixelShader(dev, ps);
@@ -934,21 +941,21 @@ static void AoBindTexF(IDirect3DDevice9 *dev, DWORD stage,
                        IDirect3DBaseTexture9 *t, DWORD filter)
 {
     g_origSetTexture(dev, stage, t);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MINFILTER, filter);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MAGFILTER, filter);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    ModSetSamplerState(dev, stage, D3DSAMP_MINFILTER, filter);
+    ModSetSamplerState(dev, stage, D3DSAMP_MAGFILTER, filter);
+    ModSetSamplerState(dev, stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    ModSetSamplerState(dev, stage, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    ModSetSamplerState(dev, stage, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 }
 
 static void AoBindTex(IDirect3DDevice9 *dev, DWORD stage, IDirect3DBaseTexture9 *t)
 {
     g_origSetTexture(dev, stage, t);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-    IDirect3DDevice9_SetSamplerState(dev, stage, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    ModSetSamplerState(dev, stage, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+    ModSetSamplerState(dev, stage, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    ModSetSamplerState(dev, stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    ModSetSamplerState(dev, stage, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    ModSetSamplerState(dev, stage, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 }
 
 static int AoTarget(IDirect3DDevice9 *dev, IDirect3DSurface9 *surf, UINT w, UINT h)

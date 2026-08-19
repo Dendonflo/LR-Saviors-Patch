@@ -1,4 +1,4 @@
-// ---- Honouring the chosen resolution in borderless fullscreen -------------
+﻿// ---- Honouring the chosen resolution in borderless fullscreen -------------
 // The game is ALWAYS borderless (every Reset logs windowed=1), so the
 // backbuffer is always the desktop size and a lower resolution setting is
 // rendered small and upscaled into it. With SSAA that produces a surprise: at
@@ -1614,6 +1614,7 @@ static HRESULT STDMETHODCALLTYPE HookedDeviceReset(
         LogLine(l);
     }
     ClearShadowSurfaces();   // recorded addresses are meaningless across a Reset
+    TexFilterDeviceReset();  // sampler state returns to API defaults across a Reset
 #if ENABLE_AO_RECON
     // Same rule for the AO latches: Reset destroys and recreates every
     // render target, so the shadow-buffer set and depth container are dead
@@ -1898,6 +1899,18 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
     if (VirtualProtect(&vtbl[slotSRS], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
         vtbl[slotSRS] = (void *)HookedSetRenderState;
         VirtualProtect(&vtbl[slotSRS], sizeof(void *), oldProtect, &oldProtect);
+    }
+    // Texture filtering (08d_texfilter.c). Hot path - called several thousand
+    // times a frame - so the body early-outs on two compares for any state
+    // other than the four filtering ones, exactly like SetRenderState above.
+    // Installed unconditionally even when AnisoLevel=0, because the CENSUS is
+    // half the point: a release log then answers "what filtering is this game
+    // actually asking for" without a special build.
+    int slotSS2 = offsetof(IDirect3DDevice9Vtbl, SetSamplerState) / sizeof(void *);
+    g_origSetSamplerState = (PFN_SetSamplerState)ResolveOrigSlot(vtbl[slotSS2]);
+    if (VirtualProtect(&vtbl[slotSS2], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+        vtbl[slotSS2] = (void *)HookedSetSamplerState;
+        VirtualProtect(&vtbl[slotSS2], sizeof(void *), oldProtect, &oldProtect);
     }
     // SetViewport, log-only. Same install pattern as SetRenderTarget above.
     // The retired version that crashed also SCALED the viewport; this one only
