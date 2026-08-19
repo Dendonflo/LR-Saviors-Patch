@@ -363,7 +363,7 @@ static HRESULT STDMETHODCALLTYPE HookedCreateTexture(
     // issues" reports need a way to tell a sampler problem from a content
     // problem, and a large surface texture created with exactly one level is
     // the content one.
-    TexFilterNoteTexture(Width, Height, Levels, Usage);
+    TexFilterNoteTexture(Width, Height, Levels, Usage, Format);
 #if ENABLE_SHADOW_SCALE
     // RETIRED (ENABLE_SHADOW_SCALE). Superseded by ShadowMapRes, which writes
     // the engine's own resolution field so the texture, the light projection

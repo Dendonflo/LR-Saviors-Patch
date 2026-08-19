@@ -257,11 +257,29 @@ static void TexFilterFrameTick(IDirect3DDevice9 *dev)
 // chains by design, and anything under 64x64 is a UI/lookup asset where a
 // single level is correct. What is left is surface textures, where a single
 // level IS the defect.
-static void TexFilterNoteTexture(UINT Width, UINT Height, UINT Levels, DWORD Usage)
+static void TexFilterNoteTexture(UINT Width, UINT Height, UINT Levels,
+                                 DWORD Usage, D3DFORMAT Format)
 {
+    UINT big;
+    int bucket;
     if (Usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL | D3DUSAGE_DYNAMIC)) return;
     if (Width < 64 || Height < 64) return;
     InterlockedIncrement(&g_tfTexTotal);
-    if (Levels == 1) InterlockedIncrement(&g_tfTexSingle);
-    else             InterlockedIncrement(&g_tfTexFull);
+    if (Levels != 1) { InterlockedIncrement(&g_tfTexFull); return; }
+    InterlockedIncrement(&g_tfTexSingle);
+    // Bucket on the LARGER edge: a 1024x64 strip is a big texture wearing an
+    // awkward shape, and it is the large dimension that decides whether a
+    // missing mip chain will be visible.
+    big = Width > Height ? Width : Height;
+    bucket = big >= 1024 ? 4 : (big >= 512 ? 3 : (big >= 256 ? 2 : (big >= 128 ? 1 : 0)));
+    InterlockedIncrement(&g_tfTexSingleBucket[bucket]);
+    // Compressed = authored art, i.e. a world surface. Uncompressed at these
+    // sizes is overwhelmingly UI, lookup tables and other mods' uploads, all
+    // of which are CORRECTLY single-level. This is the split that decides
+    // whether the count means anything.
+    if (Format == D3DFMT_DXT1 || Format == D3DFMT_DXT2 || Format == D3DFMT_DXT3 ||
+        Format == D3DFMT_DXT4 || Format == D3DFMT_DXT5)
+        InterlockedIncrement(&g_tfTexSingleDxt);
+    else
+        InterlockedIncrement(&g_tfTexSingleRaw);
 }

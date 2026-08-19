@@ -97,6 +97,14 @@ static volatile LONG g_tfAnisoHist[6];     // 1 / 2 / 4 / 8 / 16 / other
 // the two are indistinguishable by eye. Levels==0 means "build the full
 // chain", so it counts as healthy.
 static volatile LONG g_tfTexTotal = 0, g_tfTexSingle = 0, g_tfTexFull = 0;
+// Broken down, because the raw single-level count is NOT self-interpreting.
+// A UI atlas, a lookup table and another mod's HD GUI upload are all
+// legitimately single-level and all clear 64px; a 512 or 1024 DXT block is a
+// world surface and a real defect. Size bucket (64/128/256/512/1024+) and
+// compressed-vs-not separate those two populations, and until they are
+// separated the count cannot support a conclusion either way.
+static volatile LONG g_tfTexSingleBucket[5];
+static volatile LONG g_tfTexSingleDxt = 0, g_tfTexSingleRaw = 0;
 
 // Called when the level changes from the menu. Most of the engine's sampler
 // state is re-set per draw batch, so a change shows up within a frame on its
@@ -110,21 +118,52 @@ static void TexFilterMarkDirty(void)
 }
 
 // ---- the report ----------------------------------------------------------
-// Two lines, emitted only when their content CHANGES. A census that reprints
-// an unchanged line every half second is a census nobody reads, and this one
-// is on the release keep list precisely so an ordinary user log answers the
-// filtering question without asking them for a verbose run.
+// CADENCE REWRITTEN 2026-08-19, after the first census run produced nothing
+// usable. The original emitted whenever the line's TEXT changed, under a cap
+// of 24 lines. Both halves were wrong together: the text contains the
+// histograms, so it changed on every single tick, and the cap was therefore
+// spent at two lines per 500ms - the whole budget gone 13 seconds in, while
+// the game was still LOADING. The user then played and toggled the setting
+// repeatedly, and none of it was recorded. A change-gate over a line that
+// always changes is not a gate.
+//
+// What replaces it:
+//   - a SETTING change always emits, immediately and uncapped. Those are user
+//     actions, there are a handful of them per session, and they are the
+//     events the whole census exists to bracket.
+//   - otherwise a geometric schedule of monitor ticks (they run every 500ms):
+//     10s, 30s, 2min, 10min, then every 10min. Bounded at roughly six lines
+//     an hour, and unlike the old cap it is still reporting once the player
+//     is actually playing - the only window where the answer means anything,
+//     since boot-time data describes a loading screen.
+//
+// The FILTER HISTOGRAMS are now WINDOWED: reset after every emit, so each line
+// describes the period since the previous one. Cumulative totals were the
+// other half of what made the first run unreadable - a gameplay sample
+// diluted into tens of thousands of loading-screen writes says nothing about
+// gameplay. The texture census on line B stays cumulative, because it is a
+// property of what has been loaded rather than a rate.
 static void TexFilterTick(void)
 {
-    static char lastA[384], lastB[384];
-    static LONG emits = 0;
+    static LONG ticks = 0, lastLvl = -1, lastTri = -1, nextSlot = 20;
     char a[384], b[384];
-    LONG lvl = g_anisoLevel;
+    LONG lvl = g_anisoLevel, tri = g_forceTrilinear;
+    int settingChanged, due;
 
     if (!g_tfCalls) return;
-    if (emits > 24) return;   // a session cannot need more than this
+    ticks++;
+    settingChanged = (lvl != lastLvl || tri != lastTri);
+    due = (ticks >= nextSlot);
+    if (!settingChanged && !due) return;
+    lastLvl = lvl; lastTri = tri;
+    if (due) {
+        if      (nextSlot <= 20)  nextSlot = 60;      // 10s  -> 30s
+        else if (nextSlot <= 60)  nextSlot = 240;     // 30s  -> 2min
+        else if (nextSlot <= 240) nextSlot = 1200;    // 2min -> 10min
+        else                      nextSlot += 1200;   // then every 10min
+    }
 
-    sprintf(a, "[texfilter] aniso=%s trilinear=%s cap=%ldx | engine min P/L/A=%ld/%ld/%ld"
+    sprintf(a, "[texfilter] aniso=%s trilinear=%s cap=%ldx | since last: min P/L/A=%ld/%ld/%ld"
                " mag P/L=%ld/%ld mip N/P/L=%ld/%ld/%ld | engine aniso 1/2/4/8/16/other="
                "%ld/%ld/%ld/%ld/%ld/%ld",
             lvl <= 0 ? "engine" : (lvl == 1 ? "off" : (lvl == 2 ? "2x" :
@@ -141,14 +180,24 @@ static void TexFilterTick(void)
         memcpy(&bias, &g_tfBiasLast, sizeof(bias));
         sprintf(b, "[texfilter] rewrote min=%ld aniso=%ld mip=%ld of %ld writes |"
                    " stages used=0x%04lX mipped=0x%04lX | lodBias nz=%ld last=%.3f"
-                   " maxMipLevel nz=%ld | textures>=64px: %ld single-level of %ld",
+                   " maxMipLevel nz=%ld | 1-level tex %ld of %ld:"
+                   " 64/128/256/512/1k+=%ld/%ld/%ld/%ld/%ld dxt=%ld raw=%ld",
                 g_tfMinUp, g_tfAnisoSet, g_tfMipUp, g_tfCalls,
                 (unsigned long)(g_tfStagesSeen & 0xFFFF),
                 (unsigned long)(g_tfMipStages & 0xFFFF),
                 g_tfBiasWrites, (double)bias, g_tfMaxLevelNZ,
-                g_tfTexSingle, g_tfTexTotal);
+                g_tfTexSingle, g_tfTexTotal,
+                g_tfTexSingleBucket[0], g_tfTexSingleBucket[1], g_tfTexSingleBucket[2],
+                g_tfTexSingleBucket[3], g_tfTexSingleBucket[4],
+                g_tfTexSingleDxt, g_tfTexSingleRaw);
     }
 
-    if (strcmp(a, lastA) != 0) { LogLine(a); strcpy(lastA, a); emits++; }
-    if (strcmp(b, lastB) != 0) { LogLine(b); strcpy(lastB, b); emits++; }
+    LogLine(a);
+    LogLine(b);
+    // Window reset - see the cadence block. Filter histograms only; the
+    // rewrite counters and the texture census are session totals.
+    memset((void *)g_tfMinHist, 0, sizeof(g_tfMinHist));
+    memset((void *)g_tfMagHist, 0, sizeof(g_tfMagHist));
+    memset((void *)g_tfMipHist, 0, sizeof(g_tfMipHist));
+    memset((void *)g_tfAnisoHist, 0, sizeof(g_tfAnisoHist));
 }
