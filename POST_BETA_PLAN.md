@@ -419,3 +419,76 @@ What exists today:
   new information goes back to them — it does not override the decision
   (learned twice: the SAO estimator, the Steam-manifest language
   detection).
+
+---
+
+## 1.0 release work (started 2026-08-19)
+
+1.2 BETA is out, tested by several people, no issues reported. The road to
+the public 1.0 + Nexus post adds two features.
+
+### A. Anisotropic filtering — BUILT, awaiting the first test run
+
+**The vanilla ceiling is confirmed 8x.** Graphics > Texture Filtering has two
+entries and both are three-line handlers writing one DWORD:
+
+| entry | RVA | writes |
+|---|---|---|
+| `Graphics_TextureFiltering_Advanced` | `0x006CAD50` | `settings+0x38 = 8` |
+| `Graphics_TextureFiltering_Standard` | `0x006CAD80` | `settings+0x38 = 1` |
+
+(settings base = `DAT_0511558c`, i.e. RVA `0x04D1558C`. Disassembled against
+the shipped exe, not decompiler output.) So "Standard" is 1x — trilinear only
+— and 8x is the whole range.
+
+**Shipped design.** The engine field is NOT written. All 138 xrefs to that
+global were scanned and only these two handlers touch +0x38, so its consumer
+reads it through an unidentified copy — and it is the field serialised to
+`Configuration.ini`, where an out-of-range enum is a plausible way to trip a
+settings reset. Enforcement lives at `SetSamplerState` instead
+(`12b_texfilter_hook.c`), with the state/counters/report in `08d_texfilter.c`
+(split because d3d9.h does not enter the TU until part 12).
+
+**The qualifying rule** is what keeps this safe, and it is derived from the
+engine rather than hardcoded: *a stage qualifies once the engine has enabled
+mipmapping on it.* Anisotropy refines mip selection, so a sampler with no mip
+chain gains nothing — and the samplers that must not be touched (post passes,
+LUTs, shadow comparisons, our own UI blit) are exactly the ones an engine
+leaves at `MIPFILTER NONE`.
+
+**Menu:** Off / 2x / 4x / 8x / 16x, replacing the vanilla pair. `AnisoLevel`
+in the ini. Status panel has an `Anisotropic` row whose amber condition —
+level set, zero MINFILTER upgrades — is the one real failure mode.
+
+**Ships as `AnisoLevel=0` for its FIRST BUILD ONLY.** The census cannot
+measure the engine's own filtering from a session where we have already
+overwritten it, so the default run is the baseline and the menu produces the
+comparison in the same session. A "Game default (census baseline)" entry sits
+in the menu only while the level is 0.
+
+**TODO after the first test run:** flip the code default to 16, drop the
+baseline menu entry, and decide `ForceTrilinear` from the census.
+
+### B. Mipmapping — MEASURING FIRST, no fix written
+
+Reports of "mipmapping issues" exist but nobody has pinned a symptom, so
+nothing is being fixed blind. The `[texfilter]` census measures every
+mechanism that can produce one, in a single line:
+
+- `mip N/P/L` — `MIPFILTER` histogram. **P (POINT) is the classic defect**: a
+  visible arc on the ground where one mip ends and the next begins, sliding
+  with the camera. `ForceTrilinear=1` rewrites it; ships OFF until the census
+  says the game actually does it.
+- `lodBias nz= last=` — `MIPMAPLODBIAS`. A positive bias is the engine
+  deliberately blurring, which reads as "mushy textures" and which no
+  filtering setting can fix.
+- `maxMipLevel nz=` — the engine refusing its own sharpest mip levels, the
+  other route to "blurry at distance" with a perfect texture.
+- `textures>=64px: N single-level of M` — the CONTENT half, from
+  `CreateTexture`. A large surface texture with exactly one level has no mip
+  chain, so it shimmers at every distance and no sampler setting helps. By
+  eye this is indistinguishable from a filtering fault, which is why it is
+  counted separately.
+
+Anything the census shows as healthy is off the list; whatever is left is the
+thing to fix.
