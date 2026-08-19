@@ -78,6 +78,10 @@ static HRESULT STDMETHODCALLTYPE HookedEndScene(IDirect3DDevice9 *This)
     // resolve.
     if (g_msHasContent) { MsaaResolve(This); MsaaRestoreDepth(This); }
     if (g_msR32fHasContent) MsaaResolveR32f(This);
+    // End of frame is the right moment for this: what it pushes survives
+    // into the next frame's draws until the engine overwrites it, which is
+    // the case it exists for. No-op unless the level actually changed.
+    TexFilterFrameTick(This);
     IgPresent(This);
     return g_origEndScene(This);
 }
@@ -355,6 +359,11 @@ static HRESULT STDMETHODCALLTYPE HookedCreateTexture(
         && IsShadowMapCreate(Width, Height, Format, Usage)) {
         g_pendingShadowCapture = 1;
     }
+    // Mip-chain census (08d_texfilter.c). Counts only; the "mipmapping
+    // issues" reports need a way to tell a sampler problem from a content
+    // problem, and a large surface texture created with exactly one level is
+    // the content one.
+    TexFilterNoteTexture(Width, Height, Levels, Usage);
 #if ENABLE_SHADOW_SCALE
     // RETIRED (ENABLE_SHADOW_SCALE). Superseded by ShadowMapRes, which writes
     // the engine's own resolution field so the texture, the light projection

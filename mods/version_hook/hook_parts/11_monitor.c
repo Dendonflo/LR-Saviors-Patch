@@ -153,6 +153,9 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // reliable startup. If it is ever wanted back, it belongs somewhere
         // provably late (first rendered frame, not first monitor tick).
         ApplyShadowResolution();
+        // Prints only when its content changes, so a static scene costs
+        // two lines for the whole session.
+        TexFilterTick();
 #if ENABLE_AO_RECON
         AoReconTick();
 #endif

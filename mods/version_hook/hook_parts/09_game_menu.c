@@ -58,6 +58,11 @@
 #define MENU_RVA_SHADOW_STD 0x006CACC0  // Graphics_Shadowing_Standard (1024)
 #define MENU_RVA_FRATE_VAR  0x006CADB0  // Graphics_FrameRate_Variable
 #define MENU_RVA_FRATE_STAB 0x006CADE0  // Graphics_FrameRate_Stability
+// Texture Filtering. Both handlers write settings+0x38 and nothing else:
+// Advanced = 8, Standard = 1. That is the game's ENTIRE anisotropy range,
+// which is what motivated replacing the pair - see 08d_texfilter.c.
+#define MENU_RVA_TEXFLT_ADV 0x006CAD50  // Graphics_TextureFiltering_Advanced
+#define MENU_RVA_TEXFLT_STD 0x006CAD80  // Graphics_TextureFiltering_Standard
 
 #define MENUMGR_ROOT_HMENU  0x08
 #define MENUMGR_CUR_HMENU   0x44
@@ -407,6 +412,35 @@ static char __cdecl MenuH_Shadow2048(char apply)
 GAMEMENU_VALUE(MenuH_Shadow4096, g_shadowMapRes, 4096)
 GAMEMENU_VALUE(MenuH_Shadow8192, g_shadowMapRes, 8192)
 
+// Texture Filtering popup REPLACEMENT. Off / 2x / 4x / 8x / 16x, all on the
+// mod's own enforcement (08d_texfilter.c) rather than on the engine field,
+// for the reasons in that file's header. GAMEMENU_VALUE is not reused here
+// because each of these has to mark the sampler shadows dirty as well: a
+// stage the engine configures once at load would otherwise keep the old
+// level until something re-set it, which reads as "the option does nothing".
+static void GameMenuSetAniso(LONG level)
+{
+    InterlockedExchange(&g_anisoLevel, level);
+    TexFilterMarkDirty();
+    SaveConfig();
+}
+static char __cdecl MenuH_Aniso1(char apply)
+{ if (apply) GameMenuSetAniso(1);  return (char)(g_anisoLevel == 1); }
+static char __cdecl MenuH_Aniso2(char apply)
+{ if (apply) GameMenuSetAniso(2);  return (char)(g_anisoLevel == 2); }
+static char __cdecl MenuH_Aniso4(char apply)
+{ if (apply) GameMenuSetAniso(4);  return (char)(g_anisoLevel == 4); }
+static char __cdecl MenuH_Aniso8(char apply)
+{ if (apply) GameMenuSetAniso(8);  return (char)(g_anisoLevel == 8); }
+static char __cdecl MenuH_Aniso16(char apply)
+{ if (apply) GameMenuSetAniso(16); return (char)(g_anisoLevel == 16); }
+// Present only while AnisoLevel=0, i.e. during the census build. It is the
+// baseline the comparison needs, and it disappears from the menu the moment
+// the user picks anything else - which is correct: once we are enforcing, an
+// entry meaning "stop enforcing, defer to a menu we deleted" is a trap.
+static char __cdecl MenuH_AnisoEngine(char apply)
+{ if (apply) GameMenuSetAniso(0);  return (char)(g_anisoLevel == 0); }
+
 // FrameRate popup REPLACEMENT. The mod limiter ALWAYS supersedes the
 // engine's (user's call 2026-08-11): the vanilla Variable/Stability entries
 // are deleted outright and only the mod presets remain, every one of which
@@ -722,8 +756,10 @@ static void GameMenuAppend(void)
     //       replacements below delete the very items the needles point at).
     {
         HMENU mPresPop = NULL, mScalePop = NULL, mShadPop = NULL, mFratePop = NULL;
+        HMENU mTexPop = NULL;
         HMENU mTmp = NULL;
         int pTmp = -1, pStd = -1, pAdv = -1, pVar = -1, pStab = -1;
+        int pTStd = -1, pTAdv = -1;
 
         GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_PRES_FS), &mPresPop, &pTmp);
         GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_SCALE_ADV), &mScalePop, &pTmp);
@@ -733,6 +769,9 @@ static void GameMenuAppend(void)
         if (!GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_FRATE_VAR), &mFratePop, &pVar) ||
             !GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_FRATE_STAB), &mTmp, &pStab) ||
             mTmp != mFratePop) { mFratePop = NULL; }
+        if (!GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_TEXFLT_ADV), &mTexPop, &pTAdv) ||
+            !GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_TEXFLT_STD), &mTmp, &pTStd) ||
+            mTmp != mTexPop) { mTexPop = NULL; }
 
         // -- 3. Shadowing popup: Standard/Advanced replaced by four
         //       resolutions on the same engine field.
@@ -764,6 +803,27 @@ static void GameMenuAppend(void)
             GameMenuInsertLeaf(mFratePop, lo + 2, id++,
                                TR(S_UNLIMITED), MenuH_FrUnlimited);
             repFrate = 1;
+        }
+
+        // -- 4b. Texture Filtering popup: Standard/Advanced (1x and 8x, and
+        //        nothing else exists) replaced by the full range. Same shape
+        //        as the Shadowing replacement above - delete the higher
+        //        position first so the lower one stays valid.
+        if (mTexPop) {
+            int lo = pTStd < pTAdv ? pTStd : pTAdv;
+            int n = 0;
+            DeleteMenu(mTexPop, (UINT)(pTStd > pTAdv ? pTStd : pTAdv), MF_BYPOSITION);
+            DeleteMenu(mTexPop, (UINT)lo, MF_BYPOSITION);
+            GameMenuInsertLeaf(mTexPop, lo + n++, id++, TR(S_OFF), MenuH_Aniso1);
+            GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"2x",  MenuH_Aniso2);
+            GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"4x",  MenuH_Aniso4);
+            GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"8x",  MenuH_Aniso8);
+            GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"16x", MenuH_Aniso16);
+            // See MenuH_AnisoEngine: the baseline entry exists only until the
+            // user leaves the baseline.
+            if (g_anisoLevel == 0)
+                GameMenuInsertLeaf(mTexPop, lo + n++, id++,
+                                   L"Game default (census baseline)", MenuH_AnisoEngine);
         }
 
         // -- 5. new groups inside the Graphics popup, slotted next to their

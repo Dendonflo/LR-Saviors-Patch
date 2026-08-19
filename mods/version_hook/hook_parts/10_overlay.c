@@ -1,4 +1,4 @@
-// ---- Control panel (separate Win32 window, not a D3D9 overlay) ------------
+﻿// ---- Control panel (separate Win32 window, not a D3D9 overlay) ------------
 // A D3D9-rendered overlay (ImGui or similar, drawn via the already-hooked
 // Present) was considered and rejected for this: it would need its own
 // input capture wired through the game's own message loop, a font/vertex
@@ -392,7 +392,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      296           // 14 rows + header
+#define STAT_H      314           // 15 rows + header
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -518,6 +518,22 @@ static void DrawStatusPanel(HDC dc)
         sprintf(set, "%ld sync / %ld write", g_msSyncResolves, g_msForeignWrites);
         sprintf(app, "%ld suppressed", sup);
         StatRow(dc, &y, "MSAA scene grabs", set, app, sub > 0 && sup * 2 > sub);
+    }
+    {
+        // Anisotropic filtering. "applied" is the count of MINFILTER
+        // upgrades, and zero of them while a level is set is the one failure
+        // this feature has: every stage the engine uses turned out not to
+        // qualify (no mipmapping), so the level is set and doing nothing.
+        // That is the amber condition, and it is the reason this row exists
+        // rather than the setting simply being trusted.
+        LONG lv = g_anisoLevel;
+        if (lv <= 0)      sprintf(set, "game default");
+        else if (lv == 1) sprintf(set, "off");
+        else              sprintf(set, "%ldx", lv);
+        if (g_tfCapAniso > 0 && lv > g_tfCapAniso) sprintf(set, "%ldx (capped %ldx)", lv, g_tfCapAniso);
+        if (!g_tfCalls)   sprintf(app, "no sampler writes");
+        else              sprintf(app, "%ld min / %ld aniso", g_tfMinUp, g_tfAnisoSet);
+        StatRow(dc, &y, "Anisotropic", set, app, lv > 1 && g_tfCalls > 0 && g_tfMinUp == 0);
     }
     {
         // The engine's built-in FXAA. g_fxaaOff=1 swaps the pass for a

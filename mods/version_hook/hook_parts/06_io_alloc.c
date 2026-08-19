@@ -1299,6 +1299,8 @@ static const char *const g_logKeepTags[] = {
     "[log]",     // the size-cap notice must never filter itself out
     "[grab]",    // MSAA grab-effect hunt: deduped, a handful of lines per
                  // session, and every beta log becomes actionable for it
+    "[texfilter]",  // change-gated: two lines a session, and they answer the
+                    // filtering/mipmapping question without a verbose run
 };
 
 static int LogLineWanted(const char *msg)
