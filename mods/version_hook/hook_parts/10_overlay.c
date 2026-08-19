@@ -392,7 +392,7 @@ static void EnsureOverlayWindow(void)
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
 #define STAT_W      470
-#define STAT_H      314           // 15 rows + header
+#define STAT_H      332           // 16 rows + header
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -534,6 +534,18 @@ static void DrawStatusPanel(HDC dc)
         if (!g_tfCalls)   sprintf(app, "no sampler writes");
         else              sprintf(app, "%ld min / %ld aniso", g_tfMinUp, g_tfAnisoSet);
         StatRow(dc, &y, "Anisotropic", set, app, lv > 1 && g_tfCalls > 0 && g_tfMinUp == 0);
+    }
+    {
+        // Mip LOD bias floor. "clamped" counts how many negative biases were
+        // actually floored - zero while a floor is set means the engine is
+        // not biasing on anything currently on screen, which is the reading
+        // that stops an A/B test from being run against nothing.
+        LONG m = g_mipBiasMode;
+        sprintf(set, "%s", m == 0 ? "engine" : (m == 1 ? "neutral 0.0" :
+                (m == 2 ? "floor -0.5" : "floor -1.0")));
+        if (!m) sprintf(app, "%ld neg seen", g_tfBiasNeg);
+        else    sprintf(app, "%ld clamped", g_tfBiasClamped);
+        StatRow(dc, &y, "Mip LOD bias", set, app, m > 0 && g_tfBiasClamped == 0);
     }
     {
         // The engine's built-in FXAA. g_fxaaOff=1 swaps the pass for a

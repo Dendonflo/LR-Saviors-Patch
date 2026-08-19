@@ -164,11 +164,31 @@ static HRESULT STDMETHODCALLTYPE HookedSetSamplerState(
     }
 
     lvl = g_anisoLevel;
-    if (lvl <= 0 && !g_forceTrilinear)
+    // MipBiasMode belongs in this gate too. Leaving it out would have made the
+    // bias clamp silently inert for anyone running AnisoLevel=0 - exactly the
+    // A/B baseline someone testing the clamp is most likely to be sitting on.
+    if (lvl <= 0 && !g_forceTrilinear && !g_mipBiasMode)
         return g_origSetSamplerState(This, Sampler, Type, Value);
     lvl = TfClampLevel(This, lvl);
 
     switch (Type) {
+    case D3DSAMP_MIPMAPLODBIAS:
+        // A FLOOR on the negative side only - see g_mipBiasMode. Real-time
+        // with no re-push machinery: the engine rewrites this state well over
+        // a million times a session, so a menu change takes effect within a
+        // frame in both directions, which is what makes it an A/B instrument
+        // rather than a restart-required setting.
+        if (g_mipBiasMode > 0) {
+            float bias, floorv;
+            memcpy(&bias, &Value, sizeof(bias));
+            floorv = (g_mipBiasMode == 1) ? 0.0f
+                   : (g_mipBiasMode == 2) ? -0.5f : -1.0f;
+            if (bias < floorv) {
+                memcpy(&Value, &floorv, sizeof(Value));
+                g_tfBiasClamped++;
+            }
+        }
+        break;
     case D3DSAMP_MIPFILTER:
         // Trilinear. Do this FIRST: it can make the stage qualify, and the
         // re-evaluation below depends on the new value being in the shadow.

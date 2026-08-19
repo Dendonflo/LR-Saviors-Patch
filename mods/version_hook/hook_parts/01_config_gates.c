@@ -353,6 +353,29 @@ static volatile LONG g_anisoLevel = 16;
 // engine ever asks for POINT is exactly what the census is measuring - a fix
 // aimed at a defect nobody has confirmed is how you ship a regression.
 static volatile LONG g_forceTrilinear = 0;
+// ini MipBiasMode: clamp how far NEGATIVE the engine is allowed to push
+// MIPMAPLODBIAS. 0 = off (the engine's own value stands), 1 = floor at 0.0
+// (neutral), 2 = floor at -0.5, 3 = floor at -1.0.
+//
+// Why this exists. A negative LOD bias tells the sampler to pick a SHARPER
+// mip than the pixel footprint justifies, which is a shimmer generator by
+// construction - and a distance-weighted one, because up close the selection
+// is already near level 0 and the bias clamps out, while far away it sits
+// mid-chain and the bias is fully active. The census found the engine doing
+// this constantly: 1,319,073 negative writes against 30,036 positive, with
+// the range reaching -5.00. The user then independently reported distant
+// terrain in the Wildlands crawling like "a texture too detailed for the
+// current res", improving with both anisotropy and SSAA - which is the
+// signature of undersampling, not of normal-map or specular aliasing.
+//
+// A FLOOR, not an override: only the negative side is touched. The positive
+// biases are deliberate blur effects (30k of them, on stages 0 and 1 only,
+// reaching +5.0) and nothing writes +5.0 by accident - overriding those to 0
+// would sharpen something the artist meant to be soft.
+//
+// Ships OFF. It is an A/B instrument first: real-time from the menu, and the
+// hypothesis is the user's to confirm by eye before it becomes a default.
+static volatile LONG g_mipBiasMode = 0;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

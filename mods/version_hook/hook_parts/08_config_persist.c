@@ -284,6 +284,10 @@ static NumericSetting g_numerics[] = {
     // the real clamp, per device, and logs what it found.
     { &g_anisoLevel,    "AnisoLevel",    0, 16 },
     { &g_forceTrilinear, "ForceTrilinear", 0, 1 },
+    // 0 = engine's own bias, 1 = floor 0.0, 2 = floor -0.5, 3 = floor -1.0.
+    // An enum rather than a signed value because the numerics table is
+    // unsigned, and because these are the four positions the menu offers.
+    { &g_mipBiasMode,   "MipBiasMode",   0, 3 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
 #if ENABLE_NV_BLUR

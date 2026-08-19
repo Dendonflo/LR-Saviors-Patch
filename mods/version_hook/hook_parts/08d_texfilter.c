@@ -90,6 +90,7 @@ static LONG          g_tfBiasLast   = 0;   // float bits of the last such value
 // the positive side is a candidate defect, so it is counted separately, and
 // the stage mask says whether it lands on many samplers or one special case.
 static volatile LONG g_tfBiasPos = 0, g_tfBiasNeg = 0;
+static volatile LONG g_tfBiasClamped = 0;   // negative biases we floored
 static volatile LONG g_tfBiasPosStages = 0;
 static LONG          g_tfBiasMinBits = 0, g_tfBiasMaxBits = 0;
 static volatile LONG g_tfMaxLevelNZ = 0;   // non-zero MAXMIPLEVEL writes
@@ -165,17 +166,17 @@ static void TexFilterMarkDirty(void)
 // property of what has been loaded rather than a rate.
 static void TexFilterTick(void)
 {
-    static LONG ticks = 0, lastLvl = -1, lastTri = -1, nextSlot = 20;
+    static LONG ticks = 0, lastLvl = -1, lastTri = -1, lastBias = -1, nextSlot = 20;
     char a[416], b[416], c[416];
-    LONG lvl = g_anisoLevel, tri = g_forceTrilinear;
+    LONG lvl = g_anisoLevel, tri = g_forceTrilinear, bias = g_mipBiasMode;
     int settingChanged, due;
 
     if (!g_tfCalls) return;
     ticks++;
-    settingChanged = (lvl != lastLvl || tri != lastTri);
+    settingChanged = (lvl != lastLvl || tri != lastTri || bias != lastBias);
     due = (ticks >= nextSlot);
     if (!settingChanged && !due) return;
-    lastLvl = lvl; lastTri = tri;
+    lastLvl = lvl; lastTri = tri; lastBias = bias;
     if (due) {
         if      (nextSlot <= 20)  nextSlot = 60;      // 10s  -> 30s
         else if (nextSlot <= 60)  nextSlot = 240;     // 30s  -> 2min
@@ -183,12 +184,16 @@ static void TexFilterTick(void)
         else                      nextSlot += 1200;   // then every 10min
     }
 
-    sprintf(a, "[texfilter] aniso=%s trilinear=%s cap=%ldx | since last: min P/L/A=%ld/%ld/%ld"
+    sprintf(a, "[texfilter] aniso=%s trilinear=%s biasFloor=%s cap=%ldx"
+               " | since last: min P/L/A=%ld/%ld/%ld"
                " mag P/L=%ld/%ld mip N/P/L=%ld/%ld/%ld | engine aniso 1/2/4/8/16/other="
                "%ld/%ld/%ld/%ld/%ld/%ld",
             lvl <= 0 ? "engine" : (lvl == 1 ? "off" : (lvl == 2 ? "2x" :
                 (lvl == 4 ? "4x" : (lvl == 8 ? "8x" : "16x")))),
-            g_forceTrilinear ? "forced" : "engine", g_tfCapAniso,
+            g_forceTrilinear ? "forced" : "engine",
+            g_mipBiasMode == 0 ? "engine" : (g_mipBiasMode == 1 ? "0.0" :
+                (g_mipBiasMode == 2 ? "-0.5" : "-1.0")),
+            g_tfCapAniso,
             g_tfMinHist[TF_F_POINT], g_tfMinHist[TF_F_LINEAR], g_tfMinHist[TF_F_ANISO],
             g_tfMagHist[TF_F_POINT], g_tfMagHist[TF_F_LINEAR],
             g_tfMipHist[TF_F_NONE], g_tfMipHist[TF_F_POINT], g_tfMipHist[TF_F_LINEAR],
@@ -201,12 +206,13 @@ static void TexFilterTick(void)
         memcpy(&bmax, &g_tfBiasMaxBits, sizeof(bmax));
         sprintf(b, "[texfilter] rewrote min=%ld aniso=%ld mip=%ld of %ld writes |"
                    " stages used=0x%04lX mipped=0x%04lX | lodBias +/-=%ld/%ld"
-                   " range %.2f..%.2f blurStages=0x%04lX | maxMipLevel nz=%ld",
+                   " range %.2f..%.2f blurStages=0x%04lX clamped=%ld | maxMipLevel nz=%ld",
                 g_tfMinUp, g_tfAnisoSet, g_tfMipUp, g_tfCalls,
                 (unsigned long)(g_tfStagesSeen & 0xFFFF),
                 (unsigned long)(g_tfMipStages & 0xFFFF),
                 g_tfBiasPos, g_tfBiasNeg, (double)bmin, (double)bmax,
-                (unsigned long)(g_tfBiasPosStages & 0xFFFF), g_tfMaxLevelNZ);
+                (unsigned long)(g_tfBiasPosStages & 0xFFFF), g_tfBiasClamped,
+                g_tfMaxLevelNZ);
     }
     sprintf(c, "[texfilter] 1-level tex %ld of %ld:"
                " 64/128/256/512/1k+=%ld/%ld/%ld/%ld/%ld dxt=%ld raw=%ld"

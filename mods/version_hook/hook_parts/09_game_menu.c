@@ -440,6 +440,26 @@ static char __cdecl MenuH_Aniso16(char apply)
 static char __cdecl MenuH_AnisoEngine(char apply)
 { if (apply) GameMenuSetAniso(0);  return (char)(g_anisoLevel == 0); }
 
+// Mip LOD bias floor. Its own group rather than more entries in the Texture
+// Filtering popup: that popup is a single radio list of anisotropy levels,
+// and a second, unrelated radio list sharing it would read as one setting.
+static void GameMenuSetMipBias(LONG mode)
+{
+    InterlockedExchange(&g_mipBiasMode, mode);
+    SaveConfig();
+    // No TexFilterMarkDirty: unlike the anisotropy level, this state is
+    // rewritten by the engine constantly, so both directions are live within
+    // a frame on their own.
+}
+static char __cdecl MenuH_Bias0(char apply)
+{ if (apply) GameMenuSetMipBias(0); return (char)(g_mipBiasMode == 0); }
+static char __cdecl MenuH_BiasNeutral(char apply)
+{ if (apply) GameMenuSetMipBias(1); return (char)(g_mipBiasMode == 1); }
+static char __cdecl MenuH_BiasHalf(char apply)
+{ if (apply) GameMenuSetMipBias(2); return (char)(g_mipBiasMode == 2); }
+static char __cdecl MenuH_BiasOne(char apply)
+{ if (apply) GameMenuSetMipBias(3); return (char)(g_mipBiasMode == 3); }
+
 // FrameRate popup REPLACEMENT. The mod limiter ALWAYS supersedes the
 // engine's (user's call 2026-08-11): the vanilla Variable/Stability entries
 // are deleted outright and only the mod presets remain, every one of which
@@ -832,7 +852,7 @@ static void GameMenuAppend(void)
         //       the HIGHEST anchor first keeps the earlier positions valid.
         {
             HMENU gfx = NULL, gfxCheck = NULL, sub;
-            int presPos = -1, scalePos = -1, shadPos = -1;
+            int presPos = -1, scalePos = -1, shadPos = -1, texPos = -1;
 
             if (mPresPop) GameMenuFindPopupItem(root, mPresPop, &gfx, &presPos);
             if (mScalePop && GameMenuFindPopupItem(root, mScalePop, &gfxCheck, &scalePos) &&
@@ -841,6 +861,10 @@ static void GameMenuAppend(void)
             gfxCheck = NULL;
             if (mShadPop && GameMenuFindPopupItem(root, mShadPop, &gfxCheck, &shadPos) &&
                 gfx && gfxCheck != gfx) shadPos = -1;
+            if (!gfx) gfx = gfxCheck;
+            gfxCheck = NULL;
+            if (mTexPop && GameMenuFindPopupItem(root, mTexPop, &gfxCheck, &texPos) &&
+                gfx && gfxCheck != gfx) texPos = -1;
             if (!gfx) gfx = gfxCheck;
 
             // The replaced popup reads "Shadows", not the vanilla
@@ -884,6 +908,22 @@ static void GameMenuAppend(void)
                 // or restart. A setting that does nothing visible and needs a
                 // reload is a trap in a user-facing menu. ScreenShadowResPct
                 // survives as an ini key for anyone who wants it.
+
+                // Mip LOD bias, directly under Texture Filtering: the two are
+                // the same subject, and during A/B testing they get toggled
+                // against each other.
+                at = (texPos >= 0) ? texPos + 1 : endPos;
+                sub = GameMenuInsertGroup(gfx, at, L"Mip LOD Bias");
+                if (sub) {
+                    // NOT localised yet, deliberately - this ships as an A/B
+                    // instrument and may not survive testing. If it becomes a
+                    // default, these four need entries in gen_i18n.py first.
+                    GameMenuInsertLeaf(sub, 0, id++, L"Engine (vanilla)",  MenuH_Bias0);
+                    GameMenuInsertLeaf(sub, 1, id++, L"Neutral (0.0)",     MenuH_BiasNeutral);
+                    GameMenuInsertLeaf(sub, 2, id++, L"Allow -0.5",        MenuH_BiasHalf);
+                    GameMenuInsertLeaf(sub, 3, id++, L"Allow -1.0",        MenuH_BiasOne);
+                    groups++;
+                }
 
                 at = (scalePos >= 0) ? scalePos + 1 : endPos;
                 // Named "SSAA" rather than "Supersampling": the user maintains
