@@ -309,7 +309,15 @@ static void TexFilterNoteTexture(UINT Width, UINT Height, UINT Levels,
     // A handful of worked examples alongside the counts. Capped hard: this is
     // for identifying WHAT the population is, and eight of them do that as
     // well as eight hundred would.
-    if (dxt && big >= 512 && InterlockedIncrement(&g_tfTexDetail) <= 8) {
+    //
+    // The >300 gate is the 2026-08-19 correction. The first eight examples all
+    // came from the title screen and were all UI-shaped - 512x64, 1024x64,
+    // 660x76 - which says what the MENU loads and nothing about the world.
+    // Sampling after the first 300 textures puts the examples in area loading
+    // instead, so the shapes describe the population the question is actually
+    // about, and any future log answers it without a special run.
+    if (dxt && big >= 512 && g_tfTexTotal > 300 &&
+        InterlockedIncrement(&g_tfTexDetail) <= 8) {
         char who[160], l[256];
         DescribeAddr(ra, who);
         sprintf(l, "[texfilter] 1-level DXT %ux%u fmt=%d usage=0x%lX created by %s",

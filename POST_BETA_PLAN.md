@@ -476,10 +476,68 @@ ini. Its menu entry is retired - with 16x as the default, an entry meaning
 "defer to a menu whose entries we just deleted" is a trap. `MenuH_AnisoEngine`
 stays compiled.
 
-**Still open:** decide `ForceTrilinear` from the census, once a log from a
-16x run has been read.
+**Confirmed in gameplay** (2026-08-19): the engine asks for `ANISOTROPIC` +
+`MAXANISOTROPY=8` on 1,327,208 writes, we raise those to 16 and additionally
+upgrade the 448,074 `LINEAR` writes the engine leaves alone — which is what
+makes the level mean anything for a player whose engine setting is Standard.
+3.5M MINFILTER upgrades and 1.8M level rewrites across 16.4M sampler writes,
+with no framerate cost reported. **Done for 1.0.**
 
-### B. Mipmapping — MEASURING FIRST, no fix written
+`ForceTrilinear` resolved to NO — see section B.
+
+### B. Mipmapping — MEASURED, NO FIX WARRANTED (2026-08-19)
+
+**Closed.** Three census runs; every mechanism that can produce a mipmapping
+fault was measured against real gameplay, and none of them is broken. What
+follows is the evidence, because the negative result is the valuable part —
+it is what stops this being re-opened on the next vague report.
+
+**Read the loading-screen trap first.** The first census build only ever
+captured its first 13 seconds, and two conclusions drawn from that window
+were WRONG in the same direction:
+
+| read from loading | actual gameplay |
+|---|---|
+| "never uses trilinear — `mip N/P/L=0/594/0`" | `10220/99087/1725469`, i.e. ~95% trilinear |
+| "never asks for anisotropy — all 1750 writes are 1x" | `MAXANISOTROPY=8` on 1,327,208 writes |
+
+A loading screen touches 5 sampler stages and no world material. Any future
+census reading must come from a window where `stages used=0xFFFF` and
+`mipped=0xFFFF`, which is the tell that world rendering is actually running.
+
+**The four mechanisms, and the verdict on each:**
+
+- **`MIPFILTER` POINT (mip banding).** 99,087 POINT against 1,725,469 LINEAR
+  — 5.4%, in a game that is otherwise trilinear throughout. Not a defect;
+  those are specific samplers choosing point deliberately. `ForceTrilinear`
+  stays built, gated off, ini-only. **Not a 1.0 feature.**
+- **`MIPMAPLODBIAS`.** Written 1,349,109 times, range −5.00 to +5.00, but
+  **97.8% negative** (1,319,073 sharpening vs 30,036 blurring), and the
+  positive ones land on `blurStages=0x0003` — stages 0 and 1 only. No engine
+  writes +5.0 by accident; this is per-material art direction, not a fault.
+  Leave it alone: a global bias knob would fight the engine's own per-sampler
+  decisions. Note the useful side effect — the engine's heavy NEGATIVE bias
+  sharpens and buys aliasing, which is exactly what our 16x counteracts.
+- **`MAXMIPLEVEL`.** `nz=0` in every window. Clean.
+- **Textures with no mip chain.** 302 of 1242 (24%), 260 compressed, 141 at
+  1024+, and creator attribution kills the HD-GUI-mod hypothesis outright:
+  **game=295, other=7**. These are the game's own. The eight worked examples
+  were all UI-shaped (512x64, 1024x64, 660x76 — non-power-of-two), but they
+  were sampled at the title screen, so they describe the menu and not the
+  world; the sampler now skips the first 300 creations so a future log
+  answers this without a special run.
+
+**Why no fix even so.** Generating the missing chains means asking
+`CreateTexture` for more levels than the game wants, detecting when its own
+level-0 upload has finished, and filtering the rest — against a game whose
+code assumes one level and whose upload path already goes through the
+staging redirect. That is a substantial, risky feature. Against it: no
+confirmed visual symptom exists. Nobody has produced a screenshot, and the
+reports that started this were second-hand. **Not worth building blind.**
+If a symptom is ever pinned to a specific surface, this is where to start
+and the counters are already shipping.
+
+### B-OLD. The original measuring plan (kept for the mechanism notes)
 
 Reports of "mipmapping issues" exist but nobody has pinned a symptom, so
 nothing is being fixed blind. The `[texfilter]` census measures every
