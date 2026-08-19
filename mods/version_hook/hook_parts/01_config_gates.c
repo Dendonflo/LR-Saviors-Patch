@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Lightning Returns: Final Fantasy XIII - asset streaming & stutter mod
  * Copyright (C) 2026  Dendonflo
  *
@@ -333,12 +333,20 @@ static volatile LONG g_inGameUi = 1;
 // 0 = leave the engine alone, 1 = off (trilinear), 2/4/8/16 = that level,
 // clamped to D3DCAPS9.MaxAnisotropy.
 //
-// Ships as 0 for its first build ON PURPOSE. The census in 08d has to
-// observe the engine's own filtering to be worth anything, and it cannot do
-// that from a session where we have already overwritten it - so the default
-// run is the baseline, and the menu is how the same session produces the
-// comparison. Flip to 16 once that run confirms the rewrite lands.
-static volatile LONG g_anisoLevel = 0;
+// SHIPS AT 16 (2026-08-19, confirmed working in game). Anisotropic filtering
+// is close to free on any GPU that can run this game at all - it costs
+// bandwidth only on the samples it actually takes, and it takes the extra
+// ones only where the surface is at a grazing angle. Against that, the
+// vanilla ceiling is 8x and vanilla "Standard" is anisotropy OFF, so the
+// stock game ships noticeably worse ground and wall detail than the hardware
+// has cost-free.
+//
+// 0 briefly WAS the default, for exactly one build: the census in 08d cannot
+// measure the engine's own filtering from a session where we have already
+// overwritten it, so that build's default run was the baseline and the menu
+// produced the comparison. That run is done, so 0 is now just "leave the
+// engine alone" - reachable from the ini, no longer in the menu.
+static volatile LONG g_anisoLevel = 16;
 // ini ForceTrilinear: rewrite MIPFILTER POINT -> LINEAR. Point mip filtering
 // is what produces a visible arc on the ground where one mip level ends and
 // the next begins, sliding with the camera. Ships OFF because whether this

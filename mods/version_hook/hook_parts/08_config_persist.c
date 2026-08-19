@@ -1,4 +1,4 @@
-// ---- Config file persistence ----------------------------------------------
+﻿// ---- Config file persistence ----------------------------------------------
 // Plain "Key=Value" text file next to the exe - no library needed, trivial
 // to hand-edit if something ever needs fixing outside the game. Loaded once
 // at startup (before hooks are installed, so the very first frame already
@@ -148,7 +148,7 @@ static volatile LONG g_advancedMenu = 0;
 // ini written before this key existed (1.0 BETA) has no line to parse, so it
 // keeps this 0 and is recognised as needing migration. See CfgMigrate, which
 // is where the version's meaning and every step live.
-#define CONFIG_VERSION 2
+#define CONFIG_VERSION 3
 static volatile LONG g_configVersion = 0;
 
 static NumericSetting g_numerics[] = {
@@ -557,6 +557,16 @@ static void CfgMigrate(LONG from)
                 " the shipped AO defaults were tuned at 0)");
     }
 #endif
+    // v3 (1.0): AnisoLevel now ships as 16. Only inis written by the single
+    // census build carry an explicit 0, and 0 there meant "baseline for the
+    // measurement run", not a preference - so carrying it forward would leave
+    // those testers on vanilla filtering forever. Any other value is a real
+    // choice from the menu and is left alone.
+    if (from < 3 && g_anisoLevel == 0) {
+        g_anisoLevel = 16;
+        LogLine("[config] migration v3: AnisoLevel 0 -> 16"
+                " (0 was the one-build census baseline, not a setting)");
+    }
     sprintf(l, "[config] config file version %ld -> %d", from, CONFIG_VERSION);
     LogLine(l);
     g_configVersion = CONFIG_VERSION;

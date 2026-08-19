@@ -434,10 +434,9 @@ static char __cdecl MenuH_Aniso8(char apply)
 { if (apply) GameMenuSetAniso(8);  return (char)(g_anisoLevel == 8); }
 static char __cdecl MenuH_Aniso16(char apply)
 { if (apply) GameMenuSetAniso(16); return (char)(g_anisoLevel == 16); }
-// Present only while AnisoLevel=0, i.e. during the census build. It is the
-// baseline the comparison needs, and it disappears from the menu the moment
-// the user picks anything else - which is correct: once we are enforcing, an
-// entry meaning "stop enforcing, defer to a menu we deleted" is a trap.
+// RETIRED from the menu 2026-08-19 (see the insert site). Kept compiled: it
+// costs nothing, and it is the only code path that names the "leave the
+// engine alone" state, which the ini can still select.
 static char __cdecl MenuH_AnisoEngine(char apply)
 { if (apply) GameMenuSetAniso(0);  return (char)(g_anisoLevel == 0); }
 
@@ -819,11 +818,12 @@ static void GameMenuAppend(void)
             GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"4x",  MenuH_Aniso4);
             GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"8x",  MenuH_Aniso8);
             GameMenuInsertLeaf(mTexPop, lo + n++, id++, L"16x", MenuH_Aniso16);
-            // See MenuH_AnisoEngine: the baseline entry exists only until the
-            // user leaves the baseline.
-            if (g_anisoLevel == 0)
-                GameMenuInsertLeaf(mTexPop, lo + n++, id++,
-                                   L"Game default (census baseline)", MenuH_AnisoEngine);
+            // The "Game default (census baseline)" entry that sat here is
+            // RETIRED (2026-08-19): it existed to give the census build a way
+            // back to unmodified filtering for the comparison run, that run is
+            // done, and with 16x as the default an entry meaning "defer to a
+            // menu whose entries we just deleted" is a trap. MenuH_AnisoEngine
+            // is kept compiled - AnisoLevel=0 still works from the ini.
         }
 
         // -- 5. new groups inside the Graphics popup, slotted next to their

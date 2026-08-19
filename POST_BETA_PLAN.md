@@ -460,14 +460,24 @@ leaves at `MIPFILTER NONE`.
 in the ini. Status panel has an `Anisotropic` row whose amber condition —
 level set, zero MINFILTER upgrades — is the one real failure mode.
 
-**Ships as `AnisoLevel=0` for its FIRST BUILD ONLY.** The census cannot
-measure the engine's own filtering from a session where we have already
-overwritten it, so the default run is the baseline and the menu produces the
-comparison in the same session. A "Game default (census baseline)" entry sits
-in the menu only while the level is 0.
+**Ships at `AnisoLevel=16`** (user-confirmed working in game, 2026-08-19).
+Anisotropy costs bandwidth only on the samples it actually takes, and it takes
+the extra ones only at grazing angles - so on any GPU that can run this game
+it is close to free, against a stock game whose ceiling is 8x and whose
+"Standard" is anisotropy OFF.
 
-**TODO after the first test run:** flip the code default to 16, drop the
-baseline menu entry, and decide `ForceTrilinear` from the census.
+`ConfigVersion` 3 migrates `AnisoLevel=0 -> 16`. Only inis written by the
+single census build carry an explicit 0, and 0 there meant "baseline for the
+measurement run", not a preference; any other value is a real menu choice and
+is left alone.
+
+The `AnisoLevel=0` state (leave the engine alone) is still reachable from the
+ini. Its menu entry is retired - with 16x as the default, an entry meaning
+"defer to a menu whose entries we just deleted" is a trap. `MenuH_AnisoEngine`
+stays compiled.
+
+**Still open:** decide `ForceTrilinear` from the census, once a log from a
+16x run has been read.
 
 ### B. Mipmapping — MEASURING FIRST, no fix written
 
