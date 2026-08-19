@@ -81,6 +81,17 @@ static volatile LONG g_tfStagesSeen = 0;   // bitmask of stages the engine uses
 static volatile LONG g_tfMipStages  = 0;   // bitmask of stages with mips on
 static volatile LONG g_tfBiasWrites = 0;   // non-zero MIPMAPLODBIAS writes
 static LONG          g_tfBiasLast   = 0;   // float bits of the last such value
+// LOD bias, broken out (2026-08-19). The first gameplay run showed the engine
+// writing this ~890k times with values on BOTH sides of zero - so "does it
+// touch the bias" is answered and the useful question is now which way and
+// how far. A POSITIVE bias selects a blurrier mip than the pixel footprint
+// calls for, which is one of the two ways to get "mushy textures" that no
+// filtering setting can fix; a negative one sharpens and buys shimmer. Only
+// the positive side is a candidate defect, so it is counted separately, and
+// the stage mask says whether it lands on many samplers or one special case.
+static volatile LONG g_tfBiasPos = 0, g_tfBiasNeg = 0;
+static volatile LONG g_tfBiasPosStages = 0;
+static LONG          g_tfBiasMinBits = 0, g_tfBiasMaxBits = 0;
 static volatile LONG g_tfMaxLevelNZ = 0;   // non-zero MAXMIPLEVEL writes
 static volatile LONG g_tfCapAniso   = 0;   // D3DCAPS9.MaxAnisotropy, 0 = unread
 static volatile LONG g_tfRepush     = 0;   // level changed: re-push every stage
@@ -105,6 +116,15 @@ static volatile LONG g_tfTexTotal = 0, g_tfTexSingle = 0, g_tfTexFull = 0;
 // separated the count cannot support a conclusion either way.
 static volatile LONG g_tfTexSingleBucket[5];
 static volatile LONG g_tfTexSingleDxt = 0, g_tfTexSingleRaw = 0;
+// WHO created it. The size/format split narrowed the single-level population
+// to compressed art, which would be a real defect - but this process also
+// hosts the HD GUI mod, whose replacement textures are large, compressed and
+// legitimately single-level. Nothing about a texture's shape distinguishes
+// those two, and the CALLER does: game-exe creations are the engine loading
+// its own assets, anything else is another module. Same idiom as the halfres
+// probe in 13.
+static volatile LONG g_tfTexSingleGame = 0, g_tfTexSingleForeign = 0;
+static volatile LONG g_tfTexDetail = 0;
 
 // Called when the level changes from the menu. Most of the engine's sampler
 // state is re-set per draw batch, so a change shows up within a frame on its
@@ -146,7 +166,7 @@ static void TexFilterMarkDirty(void)
 static void TexFilterTick(void)
 {
     static LONG ticks = 0, lastLvl = -1, lastTri = -1, nextSlot = 20;
-    char a[384], b[384];
+    char a[416], b[416], c[416];
     LONG lvl = g_anisoLevel, tri = g_forceTrilinear;
     int settingChanged, due;
 
@@ -176,24 +196,30 @@ static void TexFilterTick(void)
             g_tfAnisoHist[3], g_tfAnisoHist[4], g_tfAnisoHist[5]);
 
     {
-        float bias = 0.0f;
-        memcpy(&bias, &g_tfBiasLast, sizeof(bias));
+        float bmin = 0.0f, bmax = 0.0f;
+        memcpy(&bmin, &g_tfBiasMinBits, sizeof(bmin));
+        memcpy(&bmax, &g_tfBiasMaxBits, sizeof(bmax));
         sprintf(b, "[texfilter] rewrote min=%ld aniso=%ld mip=%ld of %ld writes |"
-                   " stages used=0x%04lX mipped=0x%04lX | lodBias nz=%ld last=%.3f"
-                   " maxMipLevel nz=%ld | 1-level tex %ld of %ld:"
-                   " 64/128/256/512/1k+=%ld/%ld/%ld/%ld/%ld dxt=%ld raw=%ld",
+                   " stages used=0x%04lX mipped=0x%04lX | lodBias +/-=%ld/%ld"
+                   " range %.2f..%.2f blurStages=0x%04lX | maxMipLevel nz=%ld",
                 g_tfMinUp, g_tfAnisoSet, g_tfMipUp, g_tfCalls,
                 (unsigned long)(g_tfStagesSeen & 0xFFFF),
                 (unsigned long)(g_tfMipStages & 0xFFFF),
-                g_tfBiasWrites, (double)bias, g_tfMaxLevelNZ,
-                g_tfTexSingle, g_tfTexTotal,
-                g_tfTexSingleBucket[0], g_tfTexSingleBucket[1], g_tfTexSingleBucket[2],
-                g_tfTexSingleBucket[3], g_tfTexSingleBucket[4],
-                g_tfTexSingleDxt, g_tfTexSingleRaw);
+                g_tfBiasPos, g_tfBiasNeg, (double)bmin, (double)bmax,
+                (unsigned long)(g_tfBiasPosStages & 0xFFFF), g_tfMaxLevelNZ);
     }
+    sprintf(c, "[texfilter] 1-level tex %ld of %ld:"
+               " 64/128/256/512/1k+=%ld/%ld/%ld/%ld/%ld dxt=%ld raw=%ld"
+               " | creator game=%ld other=%ld",
+            g_tfTexSingle, g_tfTexTotal,
+            g_tfTexSingleBucket[0], g_tfTexSingleBucket[1], g_tfTexSingleBucket[2],
+            g_tfTexSingleBucket[3], g_tfTexSingleBucket[4],
+            g_tfTexSingleDxt, g_tfTexSingleRaw,
+            g_tfTexSingleGame, g_tfTexSingleForeign);
 
     LogLine(a);
     LogLine(b);
+    LogLine(c);
     // Window reset - see the cadence block. Filter histograms only; the
     // rewrite counters and the texture census are session totals.
     memset((void *)g_tfMinHist, 0, sizeof(g_tfMinHist));

@@ -132,10 +132,27 @@ static HRESULT STDMETHODCALLTYPE HookedSetSamplerState(
         g_tfAnisoHist[TfAnisoBucket(Value)]++;
         break;
     case D3DSAMP_MIPMAPLODBIAS:
-        // Float bit pattern. Any non-zero value here is worth knowing about:
-        // a positive bias is the engine deliberately blurring, which reads as
-        // "the textures are mushy" and no amount of anisotropy will fix it.
-        if (Value != 0) { g_tfBiasWrites++; g_tfBiasLast = (LONG)Value; }
+        // Float bit pattern, so it has to be decoded before it means anything.
+        // A POSITIVE bias picks a blurrier mip than the pixel footprint calls
+        // for - "mushy textures" that no filtering setting can fix - while a
+        // negative one sharpens and buys shimmer. The engine does both, so
+        // the sides are counted separately and the range is kept.
+        if (Value != 0) {
+            float bias, cur;
+            memcpy(&bias, &Value, sizeof(bias));
+            g_tfBiasWrites++;
+            g_tfBiasLast = (LONG)Value;
+            if (bias > 0.0f) {
+                g_tfBiasPos++;
+                if (!(g_tfBiasPosStages & sbit)) InterlockedOr(&g_tfBiasPosStages, sbit);
+            } else {
+                g_tfBiasNeg++;
+            }
+            memcpy(&cur, &g_tfBiasMinBits, sizeof(cur));
+            if (bias < cur) g_tfBiasMinBits = (LONG)Value;
+            memcpy(&cur, &g_tfBiasMaxBits, sizeof(cur));
+            if (bias > cur) g_tfBiasMaxBits = (LONG)Value;
+        }
         break;
     case D3DSAMP_MAXMIPLEVEL:
         // Non-zero = the engine is refusing to use the sharpest mip levels,
@@ -258,10 +275,10 @@ static void TexFilterFrameTick(IDirect3DDevice9 *dev)
 // single level is correct. What is left is surface textures, where a single
 // level IS the defect.
 static void TexFilterNoteTexture(UINT Width, UINT Height, UINT Levels,
-                                 DWORD Usage, D3DFORMAT Format)
+                                 DWORD Usage, D3DFORMAT Format, DWORD ra)
 {
     UINT big;
-    int bucket;
+    int bucket, dxt, fromGame;
     if (Usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL | D3DUSAGE_DYNAMIC)) return;
     if (Width < 64 || Height < 64) return;
     InterlockedIncrement(&g_tfTexTotal);
@@ -277,9 +294,26 @@ static void TexFilterNoteTexture(UINT Width, UINT Height, UINT Levels,
     // sizes is overwhelmingly UI, lookup tables and other mods' uploads, all
     // of which are CORRECTLY single-level. This is the split that decides
     // whether the count means anything.
-    if (Format == D3DFMT_DXT1 || Format == D3DFMT_DXT2 || Format == D3DFMT_DXT3 ||
-        Format == D3DFMT_DXT4 || Format == D3DFMT_DXT5)
-        InterlockedIncrement(&g_tfTexSingleDxt);
-    else
-        InterlockedIncrement(&g_tfTexSingleRaw);
+    dxt = (Format == D3DFMT_DXT1 || Format == D3DFMT_DXT2 || Format == D3DFMT_DXT3 ||
+           Format == D3DFMT_DXT4 || Format == D3DFMT_DXT5);
+    if (dxt) InterlockedIncrement(&g_tfTexSingleDxt);
+    else     InterlockedIncrement(&g_tfTexSingleRaw);
+
+    // Creator attribution. The game loading its own art with no mip chain is
+    // a defect we could fix; another module's texture is none of our business
+    // and must not be counted as evidence either way.
+    fromGame = (g_mainModBase && ra >= g_mainModBase && ra < g_mainModBase + g_mainModSize);
+    if (fromGame) InterlockedIncrement(&g_tfTexSingleGame);
+    else          InterlockedIncrement(&g_tfTexSingleForeign);
+
+    // A handful of worked examples alongside the counts. Capped hard: this is
+    // for identifying WHAT the population is, and eight of them do that as
+    // well as eight hundred would.
+    if (dxt && big >= 512 && InterlockedIncrement(&g_tfTexDetail) <= 8) {
+        char who[160], l[256];
+        DescribeAddr(ra, who);
+        sprintf(l, "[texfilter] 1-level DXT %ux%u fmt=%d usage=0x%lX created by %s",
+                Width, Height, (int)Format, (unsigned long)Usage, who);
+        LogLine(l);
+    }
 }
