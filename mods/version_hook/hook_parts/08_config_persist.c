@@ -592,8 +592,6 @@ static void CfgMigrate(LONG from)
 
 static void LoadConfig(void)
 {
-    // Custom-resolution grace anchor - see g_bootTickMs in 01_config_gates.c.
-    if (!g_bootTickMs) g_bootTickMs = GetTickCount();
     char path[MAX_PATH];
     CfgCaptureDefaults();                // must precede the early return below
     GetConfigPath(path, sizeof(path));

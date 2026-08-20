@@ -492,32 +492,37 @@ static void GameMenuCustomResApply(void)
 // followed immediately by this putting them back).
 //
 // The grace window is the subtlety. Two different actors can make the fields
-// diverge from our pair: the game's own boot-time parser (first seconds,
-// must be OVERWRITTEN), and the user clicking a vanilla resolution entry
-// (any time after, must be OBEYED - clearing our setting so it does not
-// creep back at next boot). They are indistinguishable at the write site,
-// so time separates them: inside the first 15 seconds OF THE PROCESS
-// (g_bootTickMs, captured in LoadConfig) divergence means the parser and we
-// re-apply; after that it means the user and we stand down.
+// diverge from our pair: the game's own boot-time parser (must be
+// OVERWRITTEN), and the user clicking a vanilla resolution entry (must be
+// OBEYED - clearing our setting so it does not creep back at next boot).
+// They are indistinguishable at the write site, so the grace separates them
+// - and its UNIT is the third revision of this logic, because both previous
+// ones produced user-visible bugs:
 //
-// The anchor was originally the first call to THIS function, which happens
-// at the first menu build - and the menu does not exist in fullscreen, so a
-// fullscreen boot deferred the whole grace to the later switch into
-// windowed. A vanilla resolution clicked within 15s of that switch was
-// snapped back to the custom value AFTER the vanilla item had already drawn
-// its checkmark, which is exactly the both-entries-checked state the user
-// reported. Process-anchored, the grace is long expired by the time any
-// human reaches the menu.
+//   rev 1: 15s from the first menu build. The menu does not exist in
+//          fullscreen, so a fullscreen boot deferred the whole grace to the
+//          later switch into windowed - vanilla clicks within 15s of the
+//          switch were snapped back (the both-checked report).
+//   rev 2: 15s from PROCESS start. Fixed that, but 15 wall-clock seconds is
+//          an eternity on a fast machine - the user was in the menu clicking
+//          resolutions inside it, and the clicks would not take.
+//
+// Wall-clock time was the wrong unit both times. The parser runs during
+// INIT, before rendering is up; a human cannot reach the Graphics menu
+// before a few hundred frames have drawn (the intro logos alone are more).
+// So the anchor is ENGINE FRAMES: divergence inside the first 180 is the
+// parser, after that it is a person. g_msFrameSeq only advances once
+// rendering is real, so a slow HDD boot cannot shrink the window the way a
+// wall-clock grace shrinks on a fast machine.
 static void GameMenuCustomResSync(void)
 {
     LONG w = g_customResW, h = g_customResH;
-    if (!g_bootTickMs) g_bootTickMs = GetTickCount();
     if (w < 640 || h < 360) return;
     __try {
         volatile LONG *f = GameMenuResField();
         if (!f) return;
         if (f[0] == w && f[1] == h) return;
-        if (GetTickCount() - g_bootTickMs < 15000) {
+        if (g_msFrameSeq < 180) {
             GameMenuCustomResApply();
         } else {
             char l[128];
