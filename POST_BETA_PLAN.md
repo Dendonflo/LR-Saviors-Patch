@@ -11,11 +11,43 @@ details unknown yet). See the MSAA section at the bottom for orientation.**
 
 ## Release state (facts, verified)
 
-- `MOD_VERSION "1.2"` in `hook.h` — bump per release. Boot banner is the
-  first log line: `[boot] Savior's Patch 1.2 (Performance & graphics) -
+- `MOD_VERSION "1.0"` in `hook.h` — bump per release. Boot banner is the
+  first log line: `[boot] Savior's Patch 1.0 (Performance & graphics) -
   built <date> <time>`. The public release name is carried in the version
   string itself so a reporter's log names the exact build.
-- **1.2 contents** (1.1 BETA was an internal build; its contents ship here):
+- **THE NUMBER GOES BACKWARDS AT THIS POINT AND THAT IS INTENTIONAL.**
+  1.0/1.1/1.2 BETA were the pre-release line; this is the first PUBLIC
+  release and it is 1.0. So a beta log says 1.2 and a release log says 1.0.
+  When triaging a report, **read the build timestamp in the banner, not just
+  the number** — a 1.0 dated after a 1.2 is the newer build. Every future
+  release numbers upward from 1.0 normally.
+- **1.0 (public release) adds, on top of everything in 1.2 BETA below:**
+  - **Anisotropic filtering, `AnisoLevel=16`.** The vanilla menu offered 1x
+    and 8x and nothing else (disassembled — see `08d_texfilter.c`); it is
+    replaced with Off / 2x / 4x / 8x / 16x, enforced at `SetSamplerState`
+    rather than through the engine's settings field. `ConfigVersion` 3
+    migrates an explicit 0 forward.
+  - **Mip LOD bias clamp, `MipBiasMode=1`.** The engine biases mip selection
+    negative constantly (1,319,073 negative writes against 30,036 positive,
+    reaching −5.00), which undersamples and makes distant terrain crawl. A
+    floor on the negative side only fixes it; positive biases are deliberate
+    blur effects and pass through untouched. Graphics → Mip LOD Bias →
+    Off / On, real-time. Floors of −0.5/−1.0 remain as `MipBiasMode=2`/`3`.
+  - **The `[texfilter]` census ships**, on the release keep list. Three lines
+    per reporting slot on a geometric schedule (10s, 30s, 2min, 10min, then
+    every 10min), plus one on any setting change. It makes a filtering or
+    mipmapping report actionable without asking the reporter for a verbose
+    run — which is exactly what it was built to do for us.
+  - Status rows report **liveness, not totals** (`StatLive`, 10_overlay.c).
+- **Shipping defaults worth knowing** (all in `01_config_gates.c`):
+  `AnisoLevel=16`, `MipBiasMode=1`, `ForceTrilinear=0`, `AoRespectFloor=0`,
+  `InGameUi=1`, `ForceDynamicFramerate=1`, `ConfigVersion=3`.
+- **Known cosmetic gap:** the Graphics → **Mip LOD Bias** group NAME is
+  English in every language. Its two entries are localised (`S_OFF`/`S_ON`
+  were already in the table); the group name is a term of art and was left.
+  If it should be translated, add it to `tools/gen_i18n.py` and regenerate.
+- **1.2 BETA contents** (1.1 BETA was an internal build; its contents ship
+  here too):
   - queue item 0 — `AoRespectFloor` now defaults to 0, plus the
     `ConfigVersion` migration machinery that carries existing inis forward.
   - queue item 1 — the engine's own framerate mode is forced back to Dynamic

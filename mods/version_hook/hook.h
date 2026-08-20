@@ -30,7 +30,14 @@
 #define MOD_TAGLINE     "Performance & graphics"
 // Bump for each release. Logged in the boot banner, which is the first line of
 // every log and the one that makes a user's bug report actionable.
-#define MOD_VERSION     "1.2"
+//
+// NUMBERING, because it goes BACKWARDS here and that looks like a mistake.
+// 1.0/1.1/1.2 BETA were the pre-release line. This is the first PUBLIC
+// release and it is 1.0, so a log from the last beta says 1.2 and a log from
+// the release says 1.0. The disambiguator already in the banner is the BUILD
+// TIMESTAMP - a 1.0 dated after a 1.2 is the release, not an older build -
+// so when triaging a report, read the date, not just the number.
+#define MOD_VERSION     "1.0"
 // Wide form of MOD_NAME for MessageBoxW captions, without restating the name.
 #define MOD_WIDEN2(x)   L##x
 #define MOD_WIDEN(x)    MOD_WIDEN2(x)
