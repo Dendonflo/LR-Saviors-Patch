@@ -385,6 +385,24 @@ static volatile LONG g_forceTrilinear = 0;
 // treatment as ForceTrilinear and ScreenShadowResPct - out of the menu,
 // still in the file.
 static volatile LONG g_mipBiasMode = 1;
+// Custom internal resolution (0/0 = not in force). The game's own Resolution
+// menu is eleven hardcoded 16:9 handlers topping out at 3840x2160, with no
+// display enumeration anywhere (POST_BETA_PLAN, "Resolution options" - the
+// whole mechanism is mapped there). These two let the mod offer entries the
+// game does not have, up to 8K: rendering above the desktop is supersampling,
+// and for DLDSR users the DESKTOP ITSELF is 5K+, so the vanilla list cannot
+// even reach native.
+//
+// Values write straight into the engine's settings fields (+0x10/+0x14 on
+// the 0511558c object) and the engine's own screen-set rebuild detector does
+// the apply - the same "write the value the engine reads" approach as
+// ShadowMapRes. Persistence is OURS: the game's Configuration.ini serialiser
+// walks a static table of its eleven, finds no checked handler for a custom
+// value, and simply omits the Graphics_Resolution line (verified by
+// disassembly of FUN_00ac4e60) - so the game forgets the setting across a
+// restart and this pair is what remembers it.
+static volatile LONG g_customResW = 0;
+static volatile LONG g_customResH = 0;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

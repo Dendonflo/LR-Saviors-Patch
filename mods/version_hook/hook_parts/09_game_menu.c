@@ -63,6 +63,10 @@
 // which is what motivated replacing the pair - see 08d_texfilter.c.
 #define MENU_RVA_TEXFLT_ADV 0x006CAD50  // Graphics_TextureFiltering_Advanced
 #define MENU_RVA_TEXFLT_STD 0x006CAD80  // Graphics_TextureFiltering_Standard
+// Resolution anchor: the 3840x2160 handler, first entry of the vanilla
+// Resolution popup. Our above-4K entries insert at its position, so they sit
+// on top of the vanilla list in the same descending order it already uses.
+#define MENU_RVA_RES_3840   0x006CA8B0  // Graphics_Resolution_3840x2160
 
 #define MENUMGR_ROOT_HMENU  0x08
 #define MENUMGR_CUR_HMENU   0x44
@@ -440,6 +444,111 @@ static char __cdecl MenuH_Aniso16(char apply)
 static char __cdecl MenuH_AnisoEngine(char apply)
 { if (apply) GameMenuSetAniso(0);  return (char)(g_anisoLevel == 0); }
 
+// ---- custom internal resolution (above-4K entries) -------------------------
+// The engine object and field offsets are the ones the whole resolution
+// analysis rests on: settings ptr at [0511558c], width +0x10, height +0x14.
+// Same __try + sanity-range discipline as ApplyShadowResolution, which writes
+// field +0x24 of the same object.
+static volatile LONG g_cresWrites = 0;
+static DWORD g_cresBootTick = 0;    // set at first GameMenuAppend
+
+static volatile LONG *GameMenuResField(void)
+{
+    DWORD objPtr;
+    if (!g_mainModBase) return NULL;
+    objPtr = *(DWORD *)(g_mainModBase + SHADOW_SETTINGS_PTR_RVA);
+    if (!objPtr) return NULL;
+    return (volatile LONG *)(objPtr + 0x10);
+}
+
+// Write the pair into the engine's fields. The engine's screen-set rebuild
+// detector notices on its own tick, so this IS the apply - no rebuild poke
+// needed (the resolution fields are exactly what the detector compares).
+static void GameMenuCustomResApply(void)
+{
+    LONG w = g_customResW, h = g_customResH;
+    if (w < 640 || h < 360) return;    // 0/0 = off; tiny values = a bad ini
+    __try {
+        volatile LONG *f = GameMenuResField();
+        if (!f) return;
+        // Sanity: the fields must currently hold something resolution-shaped,
+        // or the pointer is not what this expects.
+        if (f[0] < 320 || f[0] > 16384 || f[1] < 200 || f[1] > 16384) return;
+        if (f[0] != w || f[1] != h) {
+            f[0] = w;
+            f[1] = h;
+            if (InterlockedIncrement(&g_cresWrites) <= 8) {
+                char l[96];
+                sprintf(l, "[menu] custom resolution %ldx%ld written to engine", w, h);
+                LogLine(l);
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// Boot/divergence logic, run at every menu build (which is also where the
+// game lands right after parsing Configuration.ini - FUN_004298c0 tail-jumps
+// into the menu rebuild, so a boot-time parse that overwrote our fields is
+// followed immediately by this putting them back).
+//
+// The grace window is the subtlety. Two different actors can make the fields
+// diverge from our pair: the game's own boot-time parser (first seconds,
+// must be OVERWRITTEN), and the user clicking a vanilla resolution entry
+// (any time after, must be OBEYED - clearing our setting so it does not
+// creep back at next boot). They are indistinguishable at the write site,
+// so time separates them: inside the first 15 seconds divergence means the
+// parser and we re-apply; after that it means the user and we stand down.
+static void GameMenuCustomResSync(void)
+{
+    LONG w = g_customResW, h = g_customResH;
+    if (!g_cresBootTick) g_cresBootTick = GetTickCount();
+    if (w < 640 || h < 360) return;
+    __try {
+        volatile LONG *f = GameMenuResField();
+        if (!f) return;
+        if (f[0] == w && f[1] == h) return;
+        if (GetTickCount() - g_cresBootTick < 15000) {
+            GameMenuCustomResApply();
+        } else {
+            char l[128];
+            sprintf(l, "[menu] custom resolution cleared - a vanilla entry was"
+                       " chosen (%ldx%ld now)", f[0], f[1]);
+            LogLine(l);
+            InterlockedExchange(&g_customResW, 0);
+            InterlockedExchange(&g_customResH, 0);
+            SaveConfig();
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+static void GameMenuSetCustomRes(LONG w, LONG h)
+{
+    InterlockedExchange(&g_customResW, w);
+    InterlockedExchange(&g_customResH, h);
+    GameMenuCustomResApply();
+    SaveConfig();
+}
+static char __cdecl GameMenuCresChecked(LONG w, LONG h)
+{
+    char r = 0;
+    __try {
+        volatile LONG *f = GameMenuResField();
+        if (f && f[0] == w && f[1] == h) r = 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return r;
+}
+static char __cdecl MenuH_Res5120(char apply)
+{ if (apply) GameMenuSetCustomRes(5120, 2880); return GameMenuCresChecked(5120, 2880); }
+static char __cdecl MenuH_Res5760(char apply)
+{ if (apply) GameMenuSetCustomRes(5760, 3240); return GameMenuCresChecked(5760, 3240); }
+static char __cdecl MenuH_Res6400(char apply)
+{ if (apply) GameMenuSetCustomRes(6400, 3600); return GameMenuCresChecked(6400, 3600); }
+static char __cdecl MenuH_Res7680(char apply)
+{ if (apply) GameMenuSetCustomRes(7680, 4320); return GameMenuCresChecked(7680, 4320); }
+
 // Mip LOD bias floor. Its own group rather than more entries in the Texture
 // Filtering popup: that popup is a single radio list of anisotropy levels,
 // and a second, unrelated radio list sharing it would read as one setting.
@@ -669,6 +778,9 @@ static void GameMenuAppend(void)
     // 08c_lang_detect.c for why the game's own menu is the only trustworthy
     // source.
     LangDetectFromMenu(root);
+    // Custom-resolution boot re-apply / divergence handling - see the
+    // function's comment for why it lives on the menu build specifically.
+    GameMenuCustomResSync();
     mOpen  = (MenuOpenFn)(base + MENU_RVA_OPEN);
     mBegin = (MenuVoidFn)(base + MENU_RVA_BEGINSUB);
     mAdd   = (MenuAddFn)(base + MENU_RVA_ADDITEM);
@@ -781,7 +893,8 @@ static void GameMenuAppend(void)
     //       replacements below delete the very items the needles point at).
     {
         HMENU mPresPop = NULL, mScalePop = NULL, mShadPop = NULL, mFratePop = NULL;
-        HMENU mTexPop = NULL;
+        HMENU mTexPop = NULL, mResPop = NULL;
+        int pRes = -1;
         HMENU mTmp = NULL;
         int pTmp = -1, pStd = -1, pAdv = -1, pVar = -1, pStab = -1;
         int pTStd = -1, pTAdv = -1;
@@ -797,6 +910,7 @@ static void GameMenuAppend(void)
         if (!GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_TEXFLT_ADV), &mTexPop, &pTAdv) ||
             !GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_TEXFLT_STD), &mTmp, &pTStd) ||
             mTmp != mTexPop) { mTexPop = NULL; }
+        GameMenuFindByData(root, (ULONG_PTR)(base + MENU_RVA_RES_3840), &mResPop, &pRes);
 
         // -- 3. Shadowing popup: Standard/Advanced replaced by four
         //       resolutions on the same engine field.
@@ -828,6 +942,22 @@ static void GameMenuAppend(void)
             GameMenuInsertLeaf(mFratePop, lo + 2, id++,
                                TR(S_UNLIMITED), MenuH_FrUnlimited);
             repFrate = 1;
+        }
+
+        // -- 4a. Resolution popup: above-4K entries on top of the vanilla
+        //        list, same descending order. Vanilla entries stay untouched
+        //        (they serialise natively through the game's own table); ours
+        //        write the engine's resolution fields directly and persist in
+        //        SaviorsPatch.ini, because the game's serialiser omits values
+        //        its static table does not contain. Rendering above the
+        //        desktop is supersampled down by the engine's own scaling
+        //        draw; for DLDSR users the desktop itself is 5K+ and these
+        //        are the only way to render at its native size.
+        if (mResPop && pRes >= 0) {
+            GameMenuInsertLeaf(mResPop, pRes + 0, id++, L"7680x4320 (8K)", MenuH_Res7680);
+            GameMenuInsertLeaf(mResPop, pRes + 1, id++, L"6400x3600",      MenuH_Res6400);
+            GameMenuInsertLeaf(mResPop, pRes + 2, id++, L"5760x3240",      MenuH_Res5760);
+            GameMenuInsertLeaf(mResPop, pRes + 3, id++, L"5120x2880 (5K)", MenuH_Res5120);
         }
 
         // -- 4b. Texture Filtering popup: Standard/Advanced (1x and 8x, and

@@ -295,6 +295,12 @@ static NumericSetting g_numerics[] = {
     // reads MipBiasMode=1. A migration step is permanent code; there is
     // nothing here for it to fix.
     { &g_mipBiasMode,   "MipBiasMode",   0, 3 },
+    // Custom internal resolution. Bounds are generous rather than a menu
+    // whitelist: the menu offers four presets, but a hand-edited pair works
+    // too (the engine renders any size; the apply guard only requires both
+    // axes sane). 0/0 = off.
+    { &g_customResW,    "CustomResW",    0, 7680 },
+    { &g_customResH,    "CustomResH",    0, 4320 },
     { &g_aoBlurSharpE[0], "AoBlurSharp",     0, 4000 },
     { &g_aoBlurSharpE[1], "AoHbaoBlurSharp", 0, 4000 },
 #if ENABLE_NV_BLUR
