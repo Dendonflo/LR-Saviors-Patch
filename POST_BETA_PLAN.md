@@ -630,3 +630,104 @@ mechanism that can produce one, in a single line:
 
 Anything the census shows as healthy is off the list; whatever is left is the
 thing to fix.
+
+---
+
+## Resolution options — ANALYSIS COMPLETE, nothing built (2026-08-20)
+
+User request: the game's resolution menu is a fixed list that never asks the
+display what it supports; add options. Analysis below is disassembly-verified
+(scratchpad scripts res_ini/res_writer/res_ser.py against the shipped exe).
+
+### The complete mechanism
+
+**Selection.** Eleven hardcoded handlers, registered by the vanilla menu build
+(`FUN_00acaf60`) exactly like every other Graphics setting:
+
+    Graphics_Resolution_3840x2160  FUN_00aca8b0    ... down to
+    Graphics_Resolution_1280x720   FUN_00acab30
+
+Every handler is the same 59-byte shape as the TextureFiltering pair:
+`if (apply) { settings+0x10 = W; settings+0x14 = H; } return (fields == W,H)`.
+All eleven are EXACTLY 16:9 (2160x1215, 2400x1350, 1440x810 included). **No
+display-mode enumeration exists anywhere in the chain** — the list is the
+list, on every machine.
+
+**Application.** Already mapped by the SSAA work and proven live daily:
+`settings+0x10/+0x14` IS the resolution. The engine's screen-set rebuild
+detector compares slot 0x21's recorded dimensions against these fields and
+rebuilds the whole chain (scene target, prepass, post pyramid, viewports,
+window size, swap chain) when they differ. Writing the fields at runtime
+applies within a frame — this is exactly how the retired SSAA reswrite mode
+worked and how ApplySsaaScale's rebuild poke still works. Presentation is
+ALWAYS borderless at desktop size (every Reset logs windowed=1); the chosen
+resolution is the INTERNAL render size, scaled to the desktop-size backbuffer
+by the engine's own scaling draw.
+
+**Persistence — the round-trip is a static table, and this is the crux.**
+At `0x218B4B8` in .rdata: 32 records of `{key_ptr, value_ptr, handler_ptr}`,
+12 bytes each, covering every Configuration.ini line (11 of them are the
+resolutions; value strings are bare "2560x1440" etc.).
+
+- Parser `FUN_00ac4dd0` (called from `FUN_004298c0` after the Validation.ini
+  gate): for each record, read ini value for `key`, `strcmp` against the
+  record's `value`, on match call `handler(1)`. Loop bound is a hardcoded
+  `0x180` (32*12). **Unknown value -> no handler called -> default stands.**
+- Serializer `FUN_00ac4e60`: for each record, call `handler(0)`; if checked,
+  append `key = value` using the format string at `0x218b638`. **If no
+  handler is checked (custom W/H in the fields), the line is simply OMITTED.**
+  No corruption, no out-of-range value - the key just vanishes and the next
+  boot auto-detects. This kills the settings-reset fear for this field.
+
+**Bonus, confirms old queue item 4:** `FUN_004298c0` disassembled: it reads
+Validation.ini, strcmps the content against "Validated"; on MISMATCH it
+returns without ever reading Configuration.ini (-> auto-detect). A MISSING
+Validation.ini still reads the config. So the crash-reset mechanism is
+"Validation.ini present but not 'Validated'", written as "Validated" only on
+clean save. Item 4's hypothesis was right in substance.
+
+### Design options
+
+**(a) RECOMMENDED - mod-owned entries, mod persistence.** Same pattern as
+Shadowing/FrameRate: append/replace entries in the Resolution popup via
+GameMenuInsertLeaf; handlers write `settings+0x10/+0x14` directly (the
+rebuild detector applies it live); persist the choice in SaviorsPatch.ini;
+re-apply at boot from the monitor thread (ApplyShadowResolution pattern) and
+KEEP re-applying briefly (Nova lesson - the game's own parser runs at boot
+and a vanilla-value ini would fight us). When the user picks a resolution
+that IS one of the vanilla eleven, call the vanilla handler instead so it
+serialises natively and the mod ini stays out of it. Custom values: the
+game's ini omits the line, ours carries it. Zero engine-table modification.
+
+**(b) REJECTED - extend the game's static table.** Records are contiguous
+.rdata shared with all 32 settings; extending means relocating the table and
+patching six hardcoded base addresses plus two 0x180 loop bounds across
+parser and serializer. Instruction patching for cosmetic parity (the game's
+own ini carrying the custom value) that design (a) gets for free in ours.
+
+**(c) REJECTED - ini-only field write at boot.** Works (it is what the SSAA
+reswrite era proved) but invisible: no menu, no discoverability.
+
+### What the offered list should be
+
+Enumerate rather than hardcode, or the mod repeats the game's mistake:
+- `EnumDisplaySettings` for the display's real mode list (dedup, sort), plus
+  the desktop resolution itself marked as native.
+- Because presentation is always desktop-size borderless, ANY internal size
+  works - "what the screen supports" is not actually a constraint for this
+  engine. The list is about offering sensible choices, not legal ones.
+  Above-desktop = supersampling (SSAA already productises that properly, with
+  the chosen-res promise); the new list's job is native + below-native + the
+  in-between steps the vanilla list skips (e.g. 1800p on 4K displays).
+
+### The open risk: aspect ratio
+
+Every vanilla resolution is exactly 16:9, the post pyramid has a fixed
+1280x720 (16:9) base, and nothing is known about FOV or UI at other ratios.
+16:10 (1920x1200, Steam Deck 1280x800) and 21:9 (3440x1440) are the obvious
+candidates users will want. **Before designing any menu: one cheap
+experiment** - write a non-16:9 pair (e.g. 2560x1080) into the fields at
+runtime and look. Outcomes: correct wider FOV (great, ultrawide is real),
+stretch (offer only same-ratio options), letterbox (same), or breakage
+(16:9-only list, clamp enforced). Everything downstream branches on that
+one observation.
