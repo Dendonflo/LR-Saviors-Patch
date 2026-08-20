@@ -885,8 +885,14 @@ static HRESULT STDMETHODCALLTYPE HookedSetRenderTarget(
                 // combine these if they want (photo modes). But the projected
                 // cost is logged BEFORE the allocation, so when a session does
                 // fall over the log says why instead of leaving it a mystery.
-                if (!g_msColour || g_msW != sd.Width || g_msH != sd.Height ||
-                    g_msCreatedSamples != samples) {
+                if ((!g_msColour || g_msW != sd.Width || g_msH != sd.Height ||
+                     g_msCreatedSamples != samples) &&
+                    /* Do not re-attempt a combination already proven
+                       impossible - see g_msFailW in 15_msaa.c. Retrying it
+                       cost 30 fps at 8K because the multi-GB colour surface
+                       succeeds and only the depth fails. */
+                    !((LONG)sd.Width == g_msFailW && (LONG)sd.Height == g_msFailH &&
+                      samples == g_msFailSamples)) {
                     if (samples > 1) {
                         unsigned __int64 pairMB2 =
                             ((unsigned __int64)sd.Width * sd.Height * 4 *
@@ -964,7 +970,12 @@ static HRESULT STDMETHODCALLTYPE HookedSetRenderTarget(
                                 (unsigned long)vaFreeMB);
                         LogLine(l);
                     } else {
+                        // Latch BEFORE MsaaRelease: that helper clears the
+                        // latch (it is also the Reset path), so setting it
+                        // first would be undone immediately.
+                        LONG fw = (LONG)sd.Width, fh = (LONG)sd.Height;
                         MsaaRelease();
+                        g_msFailW = fw; g_msFailH = fh; g_msFailSamples = samples;
                         if (InterlockedIncrement(&g_msFailures) <= 4) {
                             char l[176];
                             sprintf(l, "[msaa] create FAILED colour=0x%08lX depth=0x%08lX at x%ld"

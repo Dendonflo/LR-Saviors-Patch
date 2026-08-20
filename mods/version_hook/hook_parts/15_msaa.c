@@ -246,6 +246,19 @@ static volatile LONG g_msActive = 0;       // MS colour is the bound target righ
 static volatile LONG g_msDepthBound = 0;   // MS depth is current; must be undone for non-MS targets
 // (g_msHasContent is a tentative def near the top - the Present hooks need it.)
 static volatile LONG g_msSubstitutions = 0, g_msResolves = 0, g_msFailures = 0;
+// Failed-combination latch. Creation failure releases the pair, which nulls
+// g_msColour, which is exactly the condition the create branch tests - so a
+// failing configuration retried on EVERY scene-target bind, several times a
+// frame. At 15360x8640 x8 (8K + SSAA 2x + MSAA 8x) the colour surface
+// SUCCEEDS at about 4 GB and only the depth fails, so each retry allocated
+// and freed multiple gigabytes. User-measured cost: 54 fps -> 24, with large
+// regular spikes, on a configuration where MSAA was not even engaged.
+//
+// Remembering the exact triple that failed is what makes the latch safe: it
+// suppresses only the combination already proven impossible, so changing
+// resolution, SSAA scale or sample count all retry normally, and a device
+// Reset clears it outright.
+static LONG g_msFailW = 0, g_msFailH = 0, g_msFailSamples = 0;
 static volatile LONG g_msReported = 0;
 // Grab-effect intervention counters (the [grab] wrapper in 16): sync-resolves
 // before a mid-episode read (hole A), foreign writes into the latched scene
@@ -371,6 +384,10 @@ static void MsaaReleaseSurfaces(void)
 static void MsaaRelease(void)
 {
     MsaaReleaseSurfaces();
+    // Full release means a Reset or a teardown, i.e. the conditions that made
+    // creation fail may be gone. Only MsaaReleaseSurfaces (the rebuild path)
+    // leaves the latch standing.
+    g_msFailW = g_msFailH = g_msFailSamples = 0;
     // Drop the latched scene target too. A device Reset recreates the engine's
     // surfaces, so the old pointer is dead - keeping it means substitution
     // silently stops for the rest of the session (which is precisely why
