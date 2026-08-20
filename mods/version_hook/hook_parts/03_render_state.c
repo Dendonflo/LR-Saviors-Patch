@@ -602,10 +602,11 @@ static void CutoutProbeTick(void)
     static LONG ticks = 0, emits = 0;
     LONG i, p;
     ticks++;
-    // Two samples: one early (30s) and one after real play (2min). The first
-    // catches the title/field transition, the second is gameplay.
-    if (!(ticks == 60 || ticks == 240)) return;
-    if (emits++ > 1) return;
+    // Three samples: 30s, 2min and 5min. The third exists because the first
+    // probe run reached world rendering but only five mipped sampler stages -
+    // an early scene, where foliage may simply not have been on screen yet.
+    if (!(ticks == 60 || ticks == 240 || ticks == 600)) return;
+    if (emits++ > 2) return;
     for (i = 0; i < (LONG)CP_N; i++) {
         char l[256];
         int n = sprintf(l, "[cutout] ps_%08X draws:", (unsigned)g_cpHashes[i]);

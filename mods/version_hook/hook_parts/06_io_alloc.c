@@ -1301,6 +1301,11 @@ static const char *const g_logKeepTags[] = {
                  // session, and every beta log becomes actionable for it
     "[texfilter]",  // change-gated: two lines a session, and they answer the
                     // filtering/mipmapping question without a verbose run
+    // A NEW DIAGNOSTIC TAG IS INVISIBLE UNTIL IT IS ON THIS LIST. The cutout
+    // prepass probe was built, shipped and run, and produced nothing in the
+    // log for exactly this reason - LogLineWanted dropped every line. Six
+    // lines twice a session, and the gate compiles it out entirely.
+    "[cutout]",
 };
 
 static int LogLineWanted(const char *msg)
