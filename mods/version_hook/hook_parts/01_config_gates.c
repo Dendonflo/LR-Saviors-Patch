@@ -403,6 +403,17 @@ static volatile LONG g_mipBiasMode = 1;
 // restart and this pair is what remembers it.
 static volatile LONG g_customResW = 0;
 static volatile LONG g_customResH = 0;
+// Process-start anchor for the custom-resolution grace window, captured in
+// LoadConfig (which runs from DllMain-time setup, long before any menu
+// exists). The grace was originally anchored to the FIRST MENU BUILD, which
+// is wrong in exactly one common case: the menu does not exist in
+// fullscreen, so booting fullscreen and switching to windowed minutes later
+// started the "boot" grace at the switch - and a vanilla resolution clicked
+// within 15s of it was snapped back to the custom one, leaving both entries
+// visibly checked (user-reported 2026-08-20). The parser this grace exists
+// to out-wait runs once, at PROCESS start, so that is what it must be
+// anchored to.
+static DWORD g_bootTickMs = 0;
 static volatile LONG g_aoRawView = 0;         // true-raw AO over the frame (not persisted)
 // Which stage the raw view shows: 0 = the AO term, 1 = depth, 2 = the
 // reconstructed normal, 3 = the raw occlusion sum. Diagnostic, not

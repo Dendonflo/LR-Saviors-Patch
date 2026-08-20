@@ -450,7 +450,6 @@ static char __cdecl MenuH_AnisoEngine(char apply)
 // Same __try + sanity-range discipline as ApplyShadowResolution, which writes
 // field +0x24 of the same object.
 static volatile LONG g_cresWrites = 0;
-static DWORD g_cresBootTick = 0;    // set at first GameMenuAppend
 
 static volatile LONG *GameMenuResField(void)
 {
@@ -497,18 +496,28 @@ static void GameMenuCustomResApply(void)
 // must be OVERWRITTEN), and the user clicking a vanilla resolution entry
 // (any time after, must be OBEYED - clearing our setting so it does not
 // creep back at next boot). They are indistinguishable at the write site,
-// so time separates them: inside the first 15 seconds divergence means the
-// parser and we re-apply; after that it means the user and we stand down.
+// so time separates them: inside the first 15 seconds OF THE PROCESS
+// (g_bootTickMs, captured in LoadConfig) divergence means the parser and we
+// re-apply; after that it means the user and we stand down.
+//
+// The anchor was originally the first call to THIS function, which happens
+// at the first menu build - and the menu does not exist in fullscreen, so a
+// fullscreen boot deferred the whole grace to the later switch into
+// windowed. A vanilla resolution clicked within 15s of that switch was
+// snapped back to the custom value AFTER the vanilla item had already drawn
+// its checkmark, which is exactly the both-entries-checked state the user
+// reported. Process-anchored, the grace is long expired by the time any
+// human reaches the menu.
 static void GameMenuCustomResSync(void)
 {
     LONG w = g_customResW, h = g_customResH;
-    if (!g_cresBootTick) g_cresBootTick = GetTickCount();
+    if (!g_bootTickMs) g_bootTickMs = GetTickCount();
     if (w < 640 || h < 360) return;
     __try {
         volatile LONG *f = GameMenuResField();
         if (!f) return;
         if (f[0] == w && f[1] == h) return;
-        if (GetTickCount() - g_cresBootTick < 15000) {
+        if (GetTickCount() - g_bootTickMs < 15000) {
             GameMenuCustomResApply();
         } else {
             char l[128];
@@ -958,6 +967,29 @@ static void GameMenuAppend(void)
             GameMenuInsertLeaf(mResPop, pRes + 1, id++, L"6400x3600",      MenuH_Res6400);
             GameMenuInsertLeaf(mResPop, pRes + 2, id++, L"5760x3240",      MenuH_Res5760);
             GameMenuInsertLeaf(mResPop, pRes + 3, id++, L"5120x2880 (5K)", MenuH_Res5120);
+            // The vanilla items drew their checkmarks BEFORE our sync ran,
+            // so whenever the sync changed the fields (the boot re-apply), a
+            // vanilla entry can be wearing a checkmark the fields no longer
+            // justify - shown simultaneously with ours, which is the
+            // both-checked state. The vanilla build queries its handlers
+            // only at build time, so nothing else would ever correct it
+            // within this rebuild. Re-assert every vanilla item's state from
+            // its own handler now that the fields are settled: dwItemData IS
+            // the handler pointer (the dispatch mechanism depends on that),
+            // so each item can be asked directly.
+            {
+                int n = GetMenuItemCount(mResPop), i;
+                for (i = 4; i < n; i++) {
+                    MENUITEMINFOW mii;
+                    memset(&mii, 0, sizeof(mii));
+                    mii.cbSize = sizeof(mii);
+                    mii.fMask = MIIM_DATA;
+                    if (!GetMenuItemInfoW(mResPop, (UINT)i, TRUE, &mii)) continue;
+                    if (!mii.dwItemData) continue;
+                    CheckMenuItem(mResPop, (UINT)i, MF_BYPOSITION |
+                        (((GameMenuHandler)mii.dwItemData)(0) ? MF_CHECKED : MF_UNCHECKED));
+                }
+            }
         }
 
         // -- 4b. Texture Filtering popup: Standard/Advanced (1x and 8x, and
