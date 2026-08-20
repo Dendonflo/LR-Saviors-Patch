@@ -991,11 +991,28 @@ static void FringePass(IDirect3DDevice9 *This, int indexed,
 #endif
 }
 
+#if ENABLE_CUTOUT_PROBE
+// Six compares on the draw path, diagnostic build only - see CutoutProbeTick.
+static void CutoutProbeDraw(void)
+{
+    LONG pi = g_curPsIdx, p = g_curPass, i;
+    DWORD h;
+    if (pi < 0 || pi >= PS_MAP_MAX) return;
+    if (p < 0 || p >= PASS_COUNT) return;
+    h = g_psMap[pi].hash;
+    for (i = 0; i < (LONG)CP_N; i++)
+        if (g_cpHashes[i] == h) { g_cpDraws[i][p]++; return; }
+}
+#endif
+
 static HRESULT STDMETHODCALLTYPE HookedDrawIndexedPrimitive(
     IDirect3DDevice9 *This, D3DPRIMITIVETYPE Type, INT BaseVertexIndex,
     UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
 {
     HRESULT hr;
+#if ENABLE_CUTOUT_PROBE
+    CutoutProbeDraw();
+#endif
 #if ENABLE_AO_RECON
     // Draw-level consumption check (24_ao_recon.c). Bind-level counting gave
     // a false NEVER: D3D9 sampler state persists across passes, so a texture

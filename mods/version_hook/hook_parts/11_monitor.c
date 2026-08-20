@@ -156,6 +156,9 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // Prints only when its content changes, so a static scene costs
         // two lines for the whole session.
         TexFilterTick();
+#if ENABLE_CUTOUT_PROBE
+        CutoutProbeTick();
+#endif
 #if ENABLE_AO_RECON
         AoReconTick();
 #endif

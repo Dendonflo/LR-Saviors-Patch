@@ -130,6 +130,14 @@
 #define ENABLE_MANAGED_POOL   0
 #define ENABLE_TIMER_RES      0
 #define ENABLE_TEXTURE_POOL   0
+// Cutout prepass probe. Answers ONE question that gates every remaining
+// cutout-AA idea: does foliage go through the DEPTH PREPASS? If it does, the
+// prepass carves the silhouette with texkill - which kills all samples of a
+// pixel at once - so the colour pass can never put a soft edge back, and
+// alpha-to-coverage, a real alpha test and the blended fringe all fail for
+// the same structural reason rather than for the driver reason we recorded.
+// Diagnostic only; set to 0 once the answer is in the log.
+#define ENABLE_CUTOUT_PROBE   1
 
 // ---- Cleanup pass 2 (2026-08-11): diagnostics retired ---------------------
 // Everything below is instrumentation that has already answered its question,

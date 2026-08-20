@@ -573,6 +573,53 @@ static const char *g_passNames[PASS_COUNT] = {
     "DRAW_MENU(UI)", "DRAW_BACK_BUFFER"
 };
 static volatile LONG g_curPass = PASS_NONE;
+
+#if ENABLE_CUTOUT_PROBE
+// ---- Cutout prepass probe -------------------------------------------------
+// The six foliage shaders, already identified in game by tinting (see
+// g_a2cAllow above): four COLOUR-pass shaders and the two the notes call
+// DEPTH/prepass variants. Counting their draws PER PASS says outright which
+// passes each one actually renders in - and specifically whether the cutout
+// silhouette is decided in MS_DEPTH before the colour pass ever runs.
+//
+// Why this is the gate: texkill kills a whole pixel, every MSAA sample of it.
+// If the prepass carves foliage that way, the depth test has already made a
+// binary decision by the time the colour pass shades, so no per-sample
+// coverage written there can soften the silhouette. That would mean the A2C
+// verdict ("the vendor hack is dead") is true but not the whole story, and
+// that the real-alpha-test and fringe ideas are dead too - which is worth
+// knowing BEFORE building either of them.
+static const DWORD g_cpHashes[] = {
+    0x130C02F5u, 0x2B84B7D3u, 0x77D363F6u,   // foliage colour
+    0x513B2A00u,                              // grass (user-identified)
+    0x8676670Cu, 0x658CC589u,                 // believed depth/prepass
+};
+#define CP_N (sizeof(g_cpHashes) / sizeof(g_cpHashes[0]))
+static volatile LONG g_cpDraws[CP_N][PASS_COUNT];
+
+static void CutoutProbeTick(void)
+{
+    static LONG ticks = 0, emits = 0;
+    LONG i, p;
+    ticks++;
+    // Two samples: one early (30s) and one after real play (2min). The first
+    // catches the title/field transition, the second is gameplay.
+    if (!(ticks == 60 || ticks == 240)) return;
+    if (emits++ > 1) return;
+    for (i = 0; i < (LONG)CP_N; i++) {
+        char l[256];
+        int n = sprintf(l, "[cutout] ps_%08X draws:", (unsigned)g_cpHashes[i]);
+        LONG total = 0;
+        for (p = 0; p < PASS_COUNT; p++) {
+            LONG d = g_cpDraws[i][p];
+            total += d;
+            if (d) n += sprintf(l + n, " %s=%ld", g_passNames[p], d);
+        }
+        if (!total) sprintf(l + n, " NONE (never drawn)");
+        LogLine(l);
+    }
+}
+#endif  // ENABLE_CUTOUT_PROBE
 static volatile LONG g_passMaxRtIndex[PASS_COUNT];
 #define PASS_RT_SEEN_MAX 128
 typedef struct { LONG pass; void *surf; } PassRtSeen;
