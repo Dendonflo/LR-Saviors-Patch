@@ -416,6 +416,34 @@ static void EnsureStatusFonts(void)
 
 // One row: label, configured value, value actually applied. `differs` paints
 // the applied column amber - the entire reason the panel exists.
+// ---- liveness from a monotonic counter ------------------------------------
+// A raw counter is the wrong thing to put in front of a player. It answers
+// "how many times since boot", which nobody asked, and it grows without bound
+// until it runs off the panel and over the next column - user-reported
+// 2026-08-19 with "9094300 min / 4770082 aniso", which is both meaningless
+// and wide enough to corrupt the row. StatRow draws at fixed column
+// positions and does not clip, so an overlong value is not truncated, it is
+// painted on top of its neighbour.
+//
+// The question these rows exist to answer is "is this in force RIGHT NOW", so
+// the counter becomes a heartbeat rather than a total: remember its last value
+// and when it last changed, and report active/idle. Sticky for two seconds,
+// because the panel repaints on a 250ms timer and a legitimate quiet gap - a
+// loading screen, a menu, a cutscene - must not make a working feature blink
+// four times a second.
+//
+// The caller owns the two statics, so each row keeps its own history and there
+// is no shared state to get out of step. The exact totals still go to the log
+// every reporting slot; this is the player-facing surface, not the diagnostic
+// one, and the two want different things.
+static int StatLive(volatile LONG *counter, LONG *lastVal, DWORD *lastMove)
+{
+    LONG v = *counter;
+    DWORD now = GetTickCount();
+    if (v != *lastVal) { *lastVal = v; *lastMove = now; }
+    return *lastMove != 0 && (now - *lastMove) < 2000;
+}
+
 static void StatRow(HDC dc, int *y, const char *label, const char *set,
                     const char *applied, int differs)
 {
@@ -527,12 +555,20 @@ static void DrawStatusPanel(HDC dc)
         // That is the amber condition, and it is the reason this row exists
         // rather than the setting simply being trusted.
         LONG lv = g_anisoLevel;
+        static LONG anLast = 0;
+        static DWORD anMove = 0;
+        int live = StatLive(&g_tfMinUp, &anLast, &anMove);
         if (lv <= 0)      sprintf(set, "game default");
         else if (lv == 1) sprintf(set, "off");
         else              sprintf(set, "%ldx", lv);
         if (g_tfCapAniso > 0 && lv > g_tfCapAniso) sprintf(set, "%ldx (capped %ldx)", lv, g_tfCapAniso);
-        if (!g_tfCalls)   sprintf(app, "no sampler writes");
-        else              sprintf(app, "%ld min / %ld aniso", g_tfMinUp, g_tfAnisoSet);
+        // "not applied" is the failure this row exists for: a level is set and
+        // no sampler ever qualified. "idle" is the benign version of the same
+        // shape - nothing being filtered at this instant, which is what a
+        // loading screen looks like - so the two must not read alike.
+        if (lv <= 1)         sprintf(app, "-");
+        else if (!g_tfMinUp) sprintf(app, "not applied");
+        else                 sprintf(app, "%s", live ? "active" : "idle");
         StatRow(dc, &y, "Anisotropic", set, app, lv > 1 && g_tfCalls > 0 && g_tfMinUp == 0);
     }
     {
@@ -541,10 +577,14 @@ static void DrawStatusPanel(HDC dc)
         // not biasing on anything currently on screen, which is the reading
         // that stops an A/B test from being run against nothing.
         LONG m = g_mipBiasMode;
+        static LONG bLast = 0;
+        static DWORD bMove = 0;
+        int live = StatLive(&g_tfBiasClamped, &bLast, &bMove);
         sprintf(set, "%s", m == 0 ? "off (engine)" : (m == 1 ? "on (0.0)" :
                 (m == 2 ? "on (-0.5)" : "on (-1.0)")));
-        if (!m) sprintf(app, "%ld neg seen", g_tfBiasNeg);
-        else    sprintf(app, "%ld clamped", g_tfBiasClamped);
+        if (!m)                    sprintf(app, "-");
+        else if (!g_tfBiasClamped) sprintf(app, "not applied");
+        else                       sprintf(app, "%s", live ? "active" : "idle");
         StatRow(dc, &y, "Mip LOD bias", set, app, m > 0 && g_tfBiasClamped == 0);
     }
     {
