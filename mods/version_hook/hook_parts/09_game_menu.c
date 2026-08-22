@@ -1,5 +1,11 @@
 ﻿// ---- Game-menu integration (the game's own Win32 menu bar) ----------------
-// The windowed-mode menu bar (File / Graphics / Control / [Debug]) is built
+// The game's menu bar (File / Graphics / Control / [Debug]) is built
+// -- NOT "the windowed-mode menu bar". That phrasing sat here and was
+// repeated to the user as a fullscreen limitation more than once, including
+// into the shipped README, which they deleted by hand. The user benchmarks
+// in windowed mode and states plainly it is not a windowed-only feature.
+// Do not reintroduce the claim; see FEATURES.md 2505 for the matching
+// correction. --
 // by the game through a tiny builder API, fully mapped in
 // ghidra_output/menu_system.txt + menu_system2.txt:
 //
