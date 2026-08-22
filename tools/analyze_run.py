@@ -20,6 +20,15 @@ separately, never folded into gameplay totals. Each further mark starts a
 new segment, so a multi-zone run can be marked at every zone change and
 compared zone by zone.
 
+Two workflows, both supported by the same marks:
+
+  LONG RUN      - mark once at the start, play a zone, read the family
+                  histogram. The aggregate is the finding.
+  TRIGGERED     - mark, deliberately trigger one known stutter, repeat.
+                  Each segment then holds one or two captures and is printed
+                  stack-by-stack instead, because a histogram over a single
+                  capture says nothing. Automatic, at DETAIL_MAX captures.
+
 Usage:
     python tools/analyze_run.py <log> [<log> ...]
     python tools/analyze_run.py --whole <log>     # opt in to full-log stats
@@ -33,6 +42,10 @@ from collections import defaultdict
 # Permissive on purpose: matches both the current "[mark] #1  (12:07:54 ..."
 # and the retired "[mark] shadow distance -> 300%  (08:45:29 ..." form, so the
 # pre-2026-08-15 archives stay comparable.
+# Segments with at most this many captures are printed stack-by-stack rather
+# than as a family histogram - see detail().
+DETAIL_MAX = 8
+
 MARK_RE = re.compile(r'^\[mark\]\s*(?:#(\d+))?[^(]*\((\d\d:\d\d:\d\d)')
 STUTTER_RE = re.compile(r'\[stutter\] elapsed_usec=(\d+) EIP=(\S+)')
 
@@ -118,6 +131,22 @@ def census(recs, title, indent='  '):
               f'  {100 * stall / total_stall:5.1f}% stall')
 
 
+def detail(recs, indent='  '):
+    """Print every capture in full.
+
+    Added 2026-08-20 for the TRIGGERED-STUTTER workflow: mark the log, then
+    deliberately trigger one known stutter, so each marked segment holds one
+    or two captures. A family histogram over a single capture says nothing -
+    what is wanted there is the actual stack. Family census stays for the
+    older long-run logs, where the aggregate IS the finding.
+    """
+    for k, r in enumerate(recs, 1):
+        print(f'{indent}capture {k}:  {r["us"] / 1000.0:.1f} ms   [{classify(r)}]')
+        print(f'{indent}  EIP  {r["eip"]}')
+        if r.get('ebp'):
+            print(f'{indent}  ebp  {r["ebp"]}')
+
+
 def row(label, frames, over, recs):
     heavy = sum(1 for r in recs if r['us'] >= 30000)
     stall = sum(r['us'] for r in recs) / 1000.0
@@ -174,9 +203,17 @@ def main():
                 if label.startswith('preamble'):
                     continue
                 recs, _, _ = scan(body)
-                if recs:
+                if not recs:
+                    continue
+                # Few captures -> the stacks ARE the answer. Many -> the
+                # distribution is. DETAIL_MAX is the boundary between the
+                # triggered-stutter workflow and the old long-run one.
+                if len(recs) <= DETAIL_MAX:
+                    print(f'  segment {label}: {len(recs)} capture(s)')
+                    detail(recs, '    ')
+                else:
                     census(recs, f'segment {label}:')
-                    print()
+                print()
             if len(segs) > 2:
                 census(gameplay, 'ALL MARKED SEGMENTS COMBINED:')
         grand += gameplay
