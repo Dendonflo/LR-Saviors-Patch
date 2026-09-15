@@ -185,6 +185,43 @@ static NumericSetting g_numerics[] = {
     // Observed stock values: near 10.0, far 79.2.
     { &g_shadowSplitNearPct, "ShadowSplitNearPct", 0, 2000 },
     { &g_shadowSplitFarPct,  "ShadowSplitFarPct",  0, 2000 },
+    // Percentage of the STOCK 2048 world-space soft-shadow footprint, applied
+    // to the engine's kernel radius and normalised by ShadowMapRes/2048.
+    // 0 = leave alone, 100 = vanilla-Advanced softness at any resolution,
+    // 200 = twice that. See ApplyShadowFilterRadius.
+    { &g_shadowFilterPct, "ShadowFilterPct", 0, 1600 },
+    { &g_shadowFilterMem, "ShadowFilterMem", 25, 1600 },   // remembered On value
+#if ENABLE_SHADOW_PCSS
+    // PCSS replacement of the engine's shadow projection shader (27). Radii
+    // in 2048-map texels (scaled to the live map); LightSize = tan(half sun
+    // angle) x 1000; MinRadius x10; Bias x1e-5 depth units.
+    { &g_shadowPcss,        "ShadowPcss",        0, 1 },
+    { &g_pcssLightSize,     "PcssLightSize",     0, 2000 },
+    { &g_pcssMinRadius,     "PcssMinRadiusX10",  0, 400 },
+    { &g_pcssMaxRadius,     "PcssMaxRadius",     1, 128 },
+    { &g_pcssSearchRadius,  "PcssSearchRadius",  1, 128 },
+    { &g_pcssBias,          "PcssBias",          0, 100000 },
+#endif
+    // 1 (DEFAULT) always uniform: no whole-shadow resolution flip, pair with
+    // a high ShadowMapRes. 0 engine (perspective with the on-screen-sun
+    // fallback = the flip). 2 always perspective (testing only). Ini and the
+    // Ini only, by design (no menu, no panel). See 28_shadow_proj.c.
+    { &g_shadowProjMode,    "ShadowProjMode",    0, 2 },
+    // NPC population distances, world units (engine: pop 80, depop 100).
+    // 0 = engine. Depop is kept >= pop + 20 automatically. See 29_npc_pop.c.
+    // Master switch (Graphics > NPC Spawn Distance). Off = every Npc* value
+    // below is ignored and the engine keeps its own numbers.
+    { &g_npcSpawnFix,       "NpcSpawnFix",       0, 1 },
+    { &g_npcPopLength,      "NpcPopLength",      0, 2000 },
+    { &g_npcDepopLength,    "NpcDepopLength",    0, 2000 },
+    // NPC manager pool sizes, patched immediates (29_npc_pop.c). 0 = engine
+    // (A 128, B 48, C 20). Capped at 4x: the slot arrays are ~295 wide.
+    { &g_npcPoolA,          "NpcPoolA",          0, 295 },
+    { &g_npcPoolB,          "NpcPoolB",          0, 295 },
+    { &g_npcPoolC,          "NpcPoolC",          0, 295 },
+    // Mob pop window radius (POPWNearLenMob, engine 150). 0 = follows
+    // NpcPopLength + 50 when that is set, else engine.
+    { &g_npcMobWindow,      "NpcMobWindow",      0, 2000 },
     // Cutscene-aware revert (21_cutscene_shadow.c). Cutscenes are authored
     // against the engine's own splits, so the option above breaks shadows in
     // some of them; while a cutscene plays the split is held at the engine
@@ -512,6 +549,21 @@ static const char *const g_aoTweakKeys[] = {
     "AoResDiv",
 };
 
+// The shadow tuning panel's reset scope (26b_shadow_panel.c): the filter
+// percentage and the PCSS numbers - never ShadowMapRes, the cascade splits
+// or the projection mode (ini-only, not shown anywhere).
+static const char *const g_shadowTweakKeys[] = {
+    "ShadowFilterPct", "ShadowPcss",
+    "PcssLightSize", "PcssMinRadiusX10", "PcssMaxRadius", "PcssSearchRadius", "PcssBias",
+};
+static int CfgIsShadowTweakKey(const char *key)
+{
+    size_t i;
+    for (i = 0; i < sizeof(g_shadowTweakKeys) / sizeof(g_shadowTweakKeys[0]); i++)
+        if (strcmp(key, g_shadowTweakKeys[i]) == 0) return 1;
+    return 0;
+}
+
 static int CfgIsAoTweakKey(const char *key)
 {
     size_t i;
@@ -522,7 +574,24 @@ static int CfgIsAoTweakKey(const char *key)
 
 static void SaveConfig(void);
 
-// aoOnly = 0 resets everything persisted, = 1 only the AO tuning values.
+// Reset just the listed numeric keys to their compile-time defaults. The
+// shadow panel's reset uses this so it touches only the MODE that is
+// selected (PCSS numbers, or the softness percentage), never the rest.
+static void CfgResetKeys(const char *const *keys, size_t n)
+{
+    size_t i, k;
+    if (!g_defCaptured) return;
+    for (i = 0; i < NUM_NUMERICS; i++)
+        for (k = 0; k < n; k++)
+            if (strcmp(g_numerics[i].key, keys[k]) == 0) {
+                InterlockedExchange(g_numerics[i].val, g_defNum[i]);
+                break;
+            }
+    SaveConfig();
+}
+
+// aoOnly = 0 resets everything persisted, = 1 only the AO tuning values,
+// = 2 only the shadow tuning values (the shadow panel's reset).
 static void CfgResetDefaults(int aoOnly)
 {
     size_t i;
@@ -531,7 +600,8 @@ static void CfgResetDefaults(int aoOnly)
         for (i = 0; i < NUM_TOGGLES; i++)
             InterlockedExchange(g_toggles[i].flag, g_defTog[i]);
     for (i = 0; i < NUM_NUMERICS; i++) {
-        if (aoOnly && !CfgIsAoTweakKey(g_numerics[i].key)) continue;
+        if (aoOnly == 1 && !CfgIsAoTweakKey(g_numerics[i].key)) continue;
+        if (aoOnly == 2 && !CfgIsShadowTweakKey(g_numerics[i].key)) continue;
         InterlockedExchange(g_numerics[i].val, g_defNum[i]);
     }
     // A reset produces a CURRENT config by definition - it just wrote today's
@@ -542,7 +612,8 @@ static void CfgResetDefaults(int aoOnly)
     SaveConfig();
     {
         char l[96];
-        sprintf(l, "[config] reset to defaults (%s)", aoOnly ? "AO tuning only" : "everything");
+        sprintf(l, "[config] reset to defaults (%s)",
+                aoOnly == 1 ? "AO tuning only" : aoOnly == 2 ? "shadow tuning only" : "everything");
         LogLine(l);
     }
 }

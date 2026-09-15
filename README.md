@@ -21,10 +21,25 @@ bar — there is no separate window and nothing is loaded from disk at runtime.
 | `SimDeltaFix` | unquantises the simulation delta, which the engine truncated to whole 59.94 Hz periods |
 | `ForceStdD3D9` | pushes the game off D3D9Ex so the runtime manages texture memory itself |
 
-**Graphics additions** — native SSAA (scene only, UI excluded), MSAA, shadow
-map resolution up to 8192, shadow cascade distance, FXAA removal, frame-rate
-target (30 / 60 / unlimited), and a frame-time overlay that graphs the *engine
-tick* rather than presents.
+**Graphics additions**
+
+- native SSAA (scene only, UI excluded) and MSAA
+- shadow map resolution up to 8192, shadow cascade distance
+- shadow softness: the engine's soft-shadow kernel, resolution-normalised, or
+  a PCSS replacement of the shadow projection shader (contact-hardening,
+  32-tap) with an in-game tuning panel
+- a uniform shadow projection by default: the engine's perspective map
+  dropped to a coarser fit whenever the sun was on screen, which read as the
+  whole shadow changing resolution on a small pan
+- SSAO / HBAO+ with an in-game tuning panel
+- FXAA removal, frame-rate target (30 / 60 / unlimited)
+- optional extended NPC spawning distance (placed NPCs pop in at 200 units
+  instead of 80, the random-NPC window and cap raised to match; off by
+  default)
+- a frame-time overlay that graphs the *engine tick* rather than presents.
+- a two-column status panel (version and build first) that shows every
+  setting beside what is actually in force: shadows, AA, AO, NPC spawning,
+  the streaming fixes, and which code hooks installed or failed.
 
 ## Building
 

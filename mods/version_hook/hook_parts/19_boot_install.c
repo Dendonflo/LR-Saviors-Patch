@@ -890,6 +890,9 @@ void InstallPrefetchHook(void)
     // that exists.
     ok[FN_A01A00] = 0;
     ok[FN_A015B0] = 0;
+    // Shadow projection: LiSPSM fallback threshold redirect (28_shadow_proj.c).
+    InstallProjModeHook(base);
+    InstallNpcPoolPatch(base);
     // FUN_00a41570 (v17): confirmed safe via the same "no inbound refs into
     // the prologue, standard PUSH EBP/MOV EBP,ESP/SUB ESP prologue" check
     // that has been correct for every hook except FN_A01A00/FN_A015B0 (which
@@ -919,10 +922,12 @@ void InstallPrefetchHook(void)
     LogLine(line);
 
     int csOk = InstallCriticalSectionHook();
+    HookRegNote("EnterCriticalSection IAT", csOk);
     sprintf(line, "EnterCriticalSection IAT hook installed: %d", csOk);
     LogLine(line);
 
     int wfsoOk = InstallWfsoHook();
+    HookRegNote("WaitForSingleObject IAT", wfsoOk);
     sprintf(line, "WaitForSingleObject IAT hook installed: %d", wfsoOk);
     LogLine(line);
 
@@ -948,10 +953,12 @@ void InstallPrefetchHook(void)
 #endif
 
     int raiseOk = InstallRaiseExceptionHook();
+    HookRegNote("RaiseException IAT", raiseOk);
     sprintf(line, "RaiseException IAT hook installed: %d", raiseOk);
     LogLine(line);
 
     int idealOk = InstallIdealProcessorHook();
+    HookRegNote("SetThreadIdealProcessor IAT", idealOk);
     sprintf(line, "SetThreadIdealProcessor IAT hook installed: %d", idealOk);
     LogLine(line);
 
@@ -961,6 +968,7 @@ void InstallPrefetchHook(void)
     // aren't hooked yet - a miss there would just mean an untracked
     // allocation, not a crash, but there's no reason to accept the gap.
     int allocTrackOk = InstallAllocTrackingHooks();
+    HookRegNote("OS allocator IAT", allocTrackOk);
     sprintf(line, "HeapAlloc/VirtualAlloc tracking hooks installed: %d", allocTrackOk);
     LogLine(line);
 
@@ -969,6 +977,7 @@ void InstallPrefetchHook(void)
     // (no window where dispatches route through our wrapper before this is
     // ready to catch what it calls).
     int allocatorHookOk = InstallAllocatorHook();
+    HookRegNote("FUN_00b454a0 (named heap)", allocatorHookOk);
     sprintf(line, "FUN_00b454a0 (named-heap allocator) hook installed: %d", allocatorHookOk);
     LogLine(line);
 
@@ -976,16 +985,19 @@ void InstallPrefetchHook(void)
     // throwaway-device probe actually calls into d3d9.dll, which carries a
     // real deadlock risk from DllMain (see ProbeD3D9ForVtable's comment).
     int d3dOk = InstallD3D9Hook();
+    HookRegNote("D3D9 device vtable", d3dOk);
     sprintf(line, "D3D9 instrumentation installed (throwaway-device vtable probe): %d", d3dOk);
     LogLine(line);
 
     InstallForceImmediatePresentHook();
 
     int throttleOk = InstallLoaderThrottle();
+    HookRegNote("loader dispatch throttle", throttleOk);
     sprintf(line, "Loader dispatch throttle installed (max=%d concurrent): %d", LOADER_THROTTLE_MAX, throttleOk);
     LogLine(line);
 
     int shaderIdOk = InstallShaderIdentityHook();
+    HookRegNote("shader identity capture", shaderIdOk);
     sprintf(line, "Shader identity capture installed (entry-only, SEH-safe): %d", shaderIdOk);
     LogLine(line);
 

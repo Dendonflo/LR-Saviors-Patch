@@ -183,7 +183,7 @@ __declspec(naked) void Detour_backbuf(void)
 // per-frame flush trades away.
 #define GPU_FENCE_RVA (0x00a96090 - 0x00400000)
 static void *g_trampoline_gpuFence = NULL;
-static volatile LONG g_gpuFenceSkipped = 0;
+// g_gpuFenceSkipped lives in 03_render_state.c (status panel reads it).
 
 __declspec(naked) void Detour_gpuFence(void)
 {

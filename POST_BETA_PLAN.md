@@ -731,3 +731,334 @@ runtime and look. Outcomes: correct wider FOV (great, ultrawide is real),
 stretch (offer only same-ratio options), letterbox (same), or breakage
 (16:9-only list, clamp enforced). Everything downstream branches on that
 one observation.
+
+---
+
+## Next graphics round — recon (2026-09-14, analysis only, nothing built)
+
+Three candidates were investigated statically. Scripts:
+`tools/ghidra_scripts/GfxNextRecon.java`, `FieldGlobalTable.java`,
+`FieldGlobalReaders.java`; output in `ghidra_output/gfx_next_recon.txt`,
+`field_global_readers.txt`. Everything below is decompilation-derived and
+needs the usual runtime confirmation before it is believed.
+
+### A. DoF (and bloom) run at a fixed 720p base — the mechanism, fully mapped
+
+- `FUN_00b00c00` (post pyramid allocator) sizes 25 surfaces from ONE value:
+  `[0511558c]+0x1c` (=720), via `FUN_00b00b90(h, fmt)` (width derived).
+  Slots 0-10 fmt 4 (A8R8G8B8) at full/half/quarter, slots 0xb-0x18 fmt 7
+  (A16F) down to 1/64 — the luminance chain. Change detector `FUN_00b014b0`
+  compares slot 0 against `+0x18/+0x1c` and frees the set (`FUN_00b00640`)
+  on mismatch; the allocator then lazily rebuilds.
+- **Do NOT write `+0x18/+0x1c`.** Zero code writes it after init (only the
+  1280x720 constant), but it has ~50 readers: `FUN_007c0d60/70` getters have
+  34/23 callers, all in the 0x0046..0x0088 range = the 2D/UI/camera layer
+  (`FUN_0065e5a0` builds a projection from it, `FUN_007c0d80` returns h/w).
+  It is the UI's DESIGN resolution. Scaling it = HUD layout breaks.
+- **Viable route: ShadowBufPct's provenance trick, aimed at `FUN_00b00c00`.**
+  Descriptor rewrite in the TextureImp ctor while the allocator executes
+  (that is what made half-res scaling consistent end-to-end: the engine
+  derives viewports from the wrapper dims). One extra piece the shadow case
+  did not need: `FUN_00b014b0` will see slot 0 ≠ `+0x18/+0x1c` and free the
+  set every frame. Either trampoline that 103-byte function with a copy
+  whose third comparison uses the scaled pair, or scale slots 1..0x18 and
+  leave slot 0 alone if slot 0 turns out not to be in the DoF chain.
+- Still unknown, needs the runtime tool: which pyramid slots the DoF pass
+  actually samples, the DoF shader hashes (Standard vs Advanced differ only
+  by the `+0x3e` byte: handlers `FUN_00acac60`/`FUN_00acac30`; Glare is
+  `+0x3f`, ColorCorrection `+0x3d`, Lighting `+0x3c`), and whether the blur
+  shaders carry hardcoded 1/1280,1/720 texel constants. Re-enable
+  `ENABLE_SHADER_DIAG` + the kill list, DoF-heavy scene, Standard then
+  Advanced: the hashes that flip are the DoF shaders.
+- Cost note for a `PostScale` knob: bokeh gather cost is linear in pixels;
+  offer 1x / 1.5x / 2x / 3x (720p / 1080p / 1440p / 2160p base).
+
+### B. Shadow filtering — the kernel is CPU-generated, 8 taps, tunable radius
+
+`FUN_00ac6b00` (MS_SHADOW) calls `FUN_00a525c0` (14 KB, __thiscall, 20
+stack args). Inside, the soft-shadow kernel is built on the CPU and uploaded
+as PS constants:
+
+```
+for i in 0..7:                       // hardcoded 8 (loop bound AND the shader)
+   r     = i * param_17               // param_17 = [DAT_05107a00+0x4a0], default 0.7
+   angle = (i + c) * step             // spiral
+   off   = (cos,sin) * r * (1/w, 1/h)  // w,h = dims of param_7 = the shadow
+                                       //   atlas texture -> taps are in SHADOW
+                                       //   MAP texels, i.e. real PCF
+   wgt   = (pow(..) - pow(..)) * exp(..); normalised by the sum
+```
+
+Shadow object (`DAT_05107a00`) fields, set in ctor `FUN_00a30d80`:
+`+0x4a0` radius step 0.7 (float), `+0x4a4` = 8 (tap count, but NOT passed to
+the renderer — the loop is hardcoded), `+0x4a8` = 1 (byte), `+0x4ac` = 1,
+`+0x4b0` = 20.0, `+0x4b4/+0x4b8` = 1000.0, `+0x4bc` = 0.5.
+
+Consequences:
+- **Why 8192 looked less soft / stair-stepped:** the kernel is 0..4.9 texels
+  wide regardless of map size. At 4x the resolution the world-space
+  footprint is 4x narrower. A `ShadowFilterRadius` write to `+0x4a0`
+  (monitor-thread cadence, like ShadowMapRes) is a zero-shader-work knob;
+  `0.7 * ShadowMapRes/2048` restores the stock softness at any resolution.
+  With only 8 taps, radii much above ~2 will show banding — the honest
+  ceiling of the CPU-side knob.
+- **More taps / PCSS = shader replacement** of the PS bound inside
+  `FUN_00a525c0` (hash from the runtime tool). The shader already has both
+  inputs PCSS needs: the receiver's light-space depth (it computes it for
+  the compare) and the atlas (the blocker depths ARE the map contents).
+  Blocker search = extra taps in the same sampler; directional light so
+  penumbra = (dReceiver - dBlocker) * k with k a "sun size" slider, not the
+  perspective /dBlocker form. Extra constants (tap table, k) ride on our
+  existing SetPixelShaderConstantF hook. Runs on the half-res buffer, so
+  32 blocker + 32 PCF taps is cheap at 4K.
+- `ShadowBufPct` (default 0) may finally earn its keep here: a sharper
+  filter is exactly the case where the half-res buffer stops matching the
+  content detail.
+
+### C. NPC / enemy pop distance — a data-driven global, found
+
+`sys/wdbpack.bin: r_field_global.wdb` (sheet `FieldGlobal`, 217 entries,
+`fVal` + `uConvertType`) is mirrored into a static table of 0x20-byte
+records, `name[16]` at `+0`, exe default at `+0x10`, **live float at
+`+0x14`**, int(live) at `+0x18`. Base `0x024c8a30` (Ghidra base 0x400000),
+111 records. Loader `FUN_005b2f60` runs on field load, looks each name up
+in the WDB (`FUN_0073cfb0`) and writes `+0x14` (so a mod write must come
+after it, i.e. the monitor cadence works). Getters `FUN_005b2f20`
+(float, `[idx*0x20 + 0x024c8a44]`) / `FUN_005b2f40` (int) — the field code
+never references the slots directly.
+
+| idx | name | WDB value | live float (Ghidra VA) |
+|---|---|---|---|
+| 37 | `POPPopLength` | 80 | `0x024c8ee4` |
+| 38 | `POPDepopLength` | 100 | `0x024c8f04` |
+| 39 | `POPWNearLenMob` | 150 | `0x024c8f24` |
+| 33 | `POPWNearLength` | 900 | `0x024c8e64` |
+| 35 | `POPWLoadRes` | 100 | `0x024c8ea4` |
+| 60 | `FEPopRange` | 28 | `0x024c91c4` |
+| 84 | `FEPopRangeDeath` | 8 | `0x024c94c4` |
+| 90 | `DZDepopLength` | 100 | `0x024c9584` |
+
+`POP*` = the NPC population system, `FE*` = field enemies. Neighbours
+`LDAdd/Sub{0,1,2}{Border,Speed,Timer}`, `LDModLevel1..3` (-5/-60/-300),
+`POPSuggBordar` 1400, `POPMobBase` 1490 look like a load-budget controller
+that throttles pops — the plausible reason NPCs appear "REALLY close": not
+the distance constant but the budget denying the pop until late.
+Camera-side character fade is a separate table (`f18CharacterChanging
+AlphaDistanceMax/_PC` in the 0x020a17xx schema).
+
+**First experiment (cheap, needs a run):** write `POPPopLength` 80 → 200
+and `FEPopRange` 28 → 60 from the monitor thread in a busy zone (Luxerion
+market) and watch. Three outcomes: pops move out (done, ship a knob), no
+change (budget-gated: next is the LD controller), or stutter regression
+(this IS the asset-streaming domain; more concurrent NPC loads is exactly
+the load this mod was built to pace).
+
+### B, step 1 — BUILT (2026-09-14): `ShadowFilterPct`, awaiting the first run
+
+`ApplyShadowFilterRadius` (03_render_state.c) writes `scene+0x4a0` per
+frame next to `ApplyCascadeSplitSource`, baseline/last-wrote pattern, sanity
+window (0.01, 64). Ini key `ShadowFilterPct` 0..1600 (0 = untouched); menu
+`Graphics ▸ Shadow Softness ▸ Standard / 150% / 200% / 300% / 400%`
+directly under Shadow Distance (new string `S_SHADOW_SOFT`, 8 languages).
+Status line `[shadow-filter] engine radius=… pct=… writes=…` — the
+`radius` value is the confirmation: 0.700 means the field is the one the
+decomp says it is. Deployed; previous DLL kept as
+`mods/version_hook/dinput8_v_pre_shadowfilter_backup.dll`.
+
+What the run answers: (1) is +0x4a0 the live radius at all (Standard vs
+400% must differ visibly at the same ShadowMapRes); (2) how far 8 taps
+stretch before banding — the number that sets whether the shader
+replacement (more taps / PCSS) is worth doing.
+
+**Run 1 result (2026-09-14):** the field is confirmed live — Standard vs
+400% differ. Two findings, both predicted by the kernel maths and now
+addressed: (1) the effect was inversely proportional to ShadowMapRes (texel
+radius); `ShadowFilterPct` is now normalised by `res/2048`, so 100% = the
+stock 2048 world footprint at any resolution, menu is Standard / 100 / 150 /
+200 / 300. (2) "scatters rather than blurs, grainy at low res": 8 taps
+spread past overlap = dither. Only a denser kernel (shader replacement)
+fixes that. Also fixed: Reset All now selects the vanilla Advanced (2048)
+handler explicitly, since clearing the force left the engine field wherever
+the force had put it.
+
+### B, step 2 — PCSS BUILT (2026-09-14), awaiting the first run
+
+Shader identified by the user with the debug panel identify walk, then
+disassembled (`tools/disasm_ps.py`, D3DDisassemble via d3dcompiler_47):
+- **`ps_C7978054`** = the shadow projection: s0 linear depth, s1 atlas,
+  s2 64x64 noise (per-pixel tap rotation — the "scatter"), c0.x split,
+  c1 1/size, c2-c5 / c6-c9 cascade rows, c10+c15 weights, c11-c14+c16-c19
+  offsets; visibility out in oC0.w. Cascade picked by `-v0.z*depth >= c0.x`.
+- `ps_BE7317DB` = 4-tap depth-aware blur of the mask; `ps_7D468E35` = the
+  half→full bilateral upsample; `ps_EB57E0DA` = point re-fetch;
+  `ps_9FDD8F71` = depth compare/write; `ps_6113EE1F` = passthrough.
+Replacement in `27_shadow_pcss.c`: same contract, 16-tap Poisson blocker
+search + 32-tap PCF, penumbra in world units from |row_x|,|row_z|, rotated
+by the engine's noise, clamped to the cascade's atlas band. Ini:
+`ShadowPcss`, `PcssLightSize` (tan x1000, 30), `PcssMinRadiusX10` (10),
+`PcssMaxRadius` (24), `PcssSearchRadius` (16), `PcssBias` (0); radii in
+2048-map texels scaled to the live map. Menu: Shadow Softness ▸ PCSS.
+Checker covers it (`PASS PCSS`). Status `[pcss] on= state= binds=`.
+
+### The "whole shadow drops to a third of its resolution on a small pan" — SOLVED (2026-09-14)
+
+Cascade watch (`ENABLE_CASCADE_WATCH`, `shaders\cwatch.csv`, constants c0-c9
+captured while ps_C7978054 is bound, draw+unbind snapshots agree): both
+cascades flip between a PERSPECTIVE light matrix (w row live; near cascade
+~12 world units wide, far ~110) and plain ORTHO (w row 0,0,0,1; ~44 / ~230)
+= the engine is LiSPSM with a hard fallback to uniform. Builder
+`FUN_00a87150`: `if (0.99 <= |dot(view, light)|) uniform else LiSPSM` — the
+literal at `DAT_0208f3c8` (shared with two unrelated compares). Fix in
+`28_lispsm.c`: the one `MOVSD xmm3,[0x0208f3c8]` at 0x00a8737d is redirected
+to a mod-owned double driven by ini `ShadowLispsmCos` (x10000, default 9990
+= ~2.6 deg; 9900 = engine; 0 = engine). Also a row in the PCSS tuning
+window. The LiSPSM branch already tends to uniform as sin -> 0 by its own
+formula, so a near-1 threshold is safe in principle; watch for artefacts
+when looking straight along the sun.
+
+Note on c0: in this build c0 = (1/1280, 1/720, 0, 0) — so the shader's
+`-v0.z*depth - c0.y >= 0` cascade test is effectively "always cascade A" and
+the atlas's second half is the LiSPSM/uniform PAIR, not a distance split.
+The PCSS shader copies the engine's test verbatim so it behaves identically;
+the "split" naming in its comments is wrong and should be revisited.
+
+**Correction (run 3):** the 0.99 redirect installed (relocation-aware
+check fixed) and the flip was unchanged, so that compare is NOT the switch:
+it sits in the LiSPSM builder (mode 4) and this build runs projection mode 1
+(`[DAT_05107a00+0x390]` = 0 → `FUN_00a8cfb0` → `FUN_00a8c190`). The real
+decision is `FUN_00a89170(camera, lightDir)`: project the light direction
+and its opposite through the camera; uniform iff both are "inside"
+(w ≤ ε, or |x|<w && |y|<w) — i.e. whenever the sun point or the anti-sun
+point is inside the screen rectangle (whole FOV cone). Perspective builder
+`FUN_00a898d0`, uniform `FUN_00a8b970`. No blend is possible between two
+projections; built `ShadowProjMode` (28_lispsm.c, 6-byte prologue hook on
+FUN_00a89170, cdecl): 0 engine, 1 always uniform ("Stable" in the new
+Shadow Projection menu group), 2 always perspective (test only). At 8192
+uniform ≈ perspective-at-2048 density, and never flips. `ShadowLispsmCos`
+left in at 0 (engine) — harmless, retire later.
+
+**Decision (2026-09-14, run 4):** LiSPSM (engine builder #4) tested — flashing,
+shifting shadows; dormant broken code. Retired along with the 0.99 redirect
+and the builder-field write; `ShadowLispsmCos` key gone. **`ShadowProjMode=1`
+(uniform) ships as the default**: lower near-camera density than the
+engine's perspective map, no whole-shadow resolution pop. Ini + PCSS
+tuning-window checkbox only; no game-menu group (user's call). Shadow
+Softness menu is now Off / On (= normalised 100%) / PCSS / Tuning Panel;
+150-300% remain ini-only via `ShadowFilterPct`. `ENABLE_CASCADE_WATCH` 0.
+Still to do before release: ENABLE_SHADER_DIAG / ENABLE_GUI_PANEL back to 0,
+DumpShaders off, `15b_shadow_ps_probe.c` deletion or gate note, README.
+
+### Cleanup pass (2026-09-14, evening) — shipping state
+- PCSS defaults = user's tuned values: LightSize 5, MinRadiusX10 0,
+  MaxRadius 10, SearchRadius 1 (floored to MaxRadius), Bias 0.
+- `26b_shadow_panel.c`: in-frame Shadow Tuning panel (same machinery as the
+  AO panel: DIB → texture → quad, polled input, painter's-order Z). Mode
+  selector Off / On / PCSS mirrors the menu; On shows the Softness % slider
+  (25..400, defaults to 100 when switched on), PCSS shows the five rows;
+  uniform-projection checkbox; double-click reset = CfgResetDefaults(2)
+  (shadow keys only). Opened from Shadow Softness ▸ Tuning Panel. The Win32
+  window in 10b is now the InGameUi=0 fallback only.
+- Gates: ENABLE_SHADER_DIAG 0, ENABLE_GUI_PANEL 0, ENABLE_CASCADE_WATCH 0
+  (kept, useful), ENABLE_SHADOW_PS_PROBE removed with its file.
+- New strings (8 languages): S_SHADOW_TUNING, S_SOFTNESS, S_LIGHT_SIZE,
+  S_MIN_RADIUS, S_SEARCH_RADIUS, S_UNIFORM_PROJ, S_RESET_SHADOW.
+- README updated. Log keep-tags: [cwatch] [pcss] [shadow-filter] [lispsm].
+
+## NPC spawn distance — DONE (2026-09-15)
+
+`29_npc_pop.c`. Mechanism (FUN_005a02f0, the field NPC manager update):
+296 entity slots registered by the area; per frame, candidates within
+`POPPopLength` are sorted and granted "active" while their CATEGORY's cap
+lasts. Caps are hardcoded immediates in that function: 0x80 (cat 0, placed
+NPCs), 0x14 (cat 1, mob NPCs — its acceptance threshold is POPSuggBordar
+against a POPMobBase-derived score), 0x30 (cat 2, enemies presumably). No
+array is sized by a cap; the 296 slots are the only hard limit. Mob NPCs
+also have their own window radius, POPWNearLenMob (150).
+
+Shipped: `NpcSpawnFix` (menu Graphics ▸ NPC Spawn Distance, default On)
+writes POPPopLength 80→200, POPDepopLength 100→240, POPWNearLenMob →
+pop+50 (250) into the live FieldGlobal table (name-checked, monitor
+cadence, after the loader), and patches the cat-1 immediate 20→80. Hot:
+on within a tick; off reverts the cap instantly and the distances on the
+next area load. Ini: NpcPopLength / NpcDepopLength / NpcMobWindow /
+NpcPoolA/B/C. Table layout proven at runtime by the [npc] dump (live values
+= WDB values on the named rows). LD* rows turned out to be a movement-speed
+controller, not load. Not addressed (by design or not a constant): pops on
+area entry, scheduled appearances, model streaming latency.
+
+Cleanup: shader dump moved to ghidra_output/shader_dump_2026-09-14/
+(the identified ps_C7978054 / BE7317DB / 7D468E35 chain is in there);
+game-folder shaders\ removed. Gates all 0 except ENABLE_SHADOW_PCSS.
+
+## 1.1 release prep (2026-09-15)
+
+`MOD_VERSION` 1.1; no CONFIG_VERSION bump (every new key is absent from a
+1.0 ini and takes its default; the file catches up on the first SaveConfig -
+there is NO boot-time rewrite, the `g_configRewritten` flag is declared and
+never set). `release/` holds the 1.1 archive, README.txt and the Nexus
+changelog (`NEXUS_1.1_changelog.txt`, BBCode).
+
+Status panel rebuilt as two 470 px columns (10_overlay.c): left = graphics
+(mod name + version as the first line, shadows incl. softness/PCSS params/
+projection, AA, AO incl. live estimator numbers, NPC spawning), right =
+build stamp, frame pacing, every streaming toggle with its live counter,
+D3D9 provenance, and a hook registry (`HookRegNote` in 03, fed by
+InstallJmpHook and the IAT/vtable installers in 19) that lists failed hooks
+by name. Known reading: `D3D9 device vtable` FAILS under the HD GUI mod -
+the throwaway-probe timing thunks are skipped on a wrapped device (12,
+HookDeviceVtable); the real device hooks report on the "device hooked"
+row. Left as a failure on purpose (user, 2026-09-15): it is one.
+
+## STATE OF THE PROJECT (2026-09-15, after the shadow + NPC round)
+
+Shipping build = `mods/version_hook/dinput8_new.dll` (deployed). Gates at
+release state: only ENABLE_SHADOW_PCSS, ENABLE_AO_SSAO, ENABLE_AO_RECON,
+ENABLE_FOV_PROBE are 1 (the last two are load-bearing for AO, not
+diagnostics). `28_lispsm.c` renamed `28_shadow_proj.c` (it only holds the
+projection-decision hook). Dev DLL copies from this round removed.
+
+Features landed this round (all hot, all in the game menu unless noted):
+- Shadow Softness: Off / On (remembered %, normalised so 100 = vanilla
+  Advanced at any map size) / PCSS (defaults light 5, min 0.5 texel, max
+  15, search = max, bias 0) / Tuning Panel (in-frame, mode selector,
+  per-mode reset). Engine shader ps_C7978054 replaced on bind.
+- Uniform shadow projection (ShadowProjMode=1, ini only): removes the
+  whole-shadow resolution pop (engine LiSPSM-style perspective map falling
+  back to uniform whenever the sun/anti-sun point is on screen).
+- NPC Spawning Distance: Default / Extended (pop 80->200, depop 100->240,
+  mob window 150->250, mob cap 20->80). Off by default.
+- AO panel: Off / SSAO / HBAO+ selector, reset scoped to the live
+  estimator; menu ticks refresh from the panels.
+- Reset All selects vanilla Advanced (2048) shadows explicitly.
+
+Tried and retired (reasoning in the shader / file comments): LiSPSM builder
+#4 (flashing), the 0.99 threshold redirect (not the switch), PCSS nearest /
+weighted / min-max blocker rules (halo or too soft), the draw-time Get*
+shader probe (crashed), the Win32 PCSS window (fallback only).
+
+Open / not done:
+- DoF (and bloom) still at a fixed 720p base — mechanism fully mapped in
+  "Next graphics round" A, nothing built. Needs the provenance-gated
+  descriptor rewrite plus a FUN_00b014b0 trampoline.
+- PCSS: character-vs-canopy intersection softening accepted.
+- NPC: pops on area entry / scheduled appearances / streaming latency not
+  addressed; a streaming-priority probe was offered and declined for now.
+- Release housekeeping still owed before a public build: version bump,
+  CONFIG_VERSION migration if any default changes for existing inis (none
+  needed: new keys default correctly when absent), NEXUS text.
+
+**DoF/bloom 720p — moved out of this mod (2026-09-15).** To be done in the
+HD textures & shaders mod instead. Hand-off, all verified here: post
+pyramid allocator `FUN_00b00c00` (prologue 55 8B EC 83 EC 18, 6 bytes
+clean) sizes 25 surfaces from `[0511558c]+0x1c` via `FUN_00b00b90(h, fmt)`;
+change detector `FUN_00b014b0` compares slot 0 of `[05115724]` against
+`+0x18/+0x1c` and frees the set via `FUN_00b00640` (lazy realloc). Do NOT
+write `+0x18/+0x1c` (UI design resolution, ~50 readers). Working recipe =
+ShadowBufPct's: descriptor rewrite in the TextureImp ctor (`FUN_00aa3ce0`,
+desc w @+0x0c h @+0x10) gated on the allocator being on the stack, plus a
+detector gate that treats "slot 0 == scaled(+0x18/+0x1c)" as matching,
+plus LINEAR on shrinking blits into the set (the scene->pyramid copy is
+POINT). DoF shader constants: c0 = (1/1280, 1/720) in ps_C7978054's
+neighbour chain — check whether the DoF/blur shaders take texel size from
+the wrapper dims or from the settings pair before trusting the result.
+Shader dump for the whole chain: ghidra_output/shader_dump_2026-09-14/.

@@ -391,8 +391,9 @@ static void EnsureOverlayWindow(void)
 // they answer different questions and are useful simultaneously.
 #define STAT_FONT_H 13           // small + dense: this panel is read, not glanced
 #define STAT_ROW_H  17
-#define STAT_W      470
-#define STAT_H      332           // 16 rows + header
+#define STAT_COLW   470          // one column; the panel is two of them
+#define STAT_W      (STAT_COLW * 2)
+#define STAT_H      480           // ~24 rows + header per column
 #define STAT_COL_L  12           // label
 #define STAT_COL_S  170          // configured value
 #define STAT_COL_A  310          // value actually in force
@@ -444,24 +445,53 @@ static int StatLive(volatile LONG *counter, LONG *lastVal, DWORD *lastMove)
     return *lastMove != 0 && (now - *lastMove) < 2000;
 }
 
+static int g_statColX;   // set by DrawStatusPanel per column
 static void StatRow(HDC dc, int *y, const char *label, const char *set,
                     const char *applied, int differs)
 {
     SetTextColor(dc, RGB(145, 145, 160));
-    TextOutA(dc, STAT_COL_L, *y, label, (int)strlen(label));
+    TextOutA(dc, STAT_COL_L + g_statColX, *y, label, (int)strlen(label));
     SetTextColor(dc, RGB(195, 195, 210));
-    TextOutA(dc, STAT_COL_S, *y, set, (int)strlen(set));
+    TextOutA(dc, STAT_COL_S + g_statColX, *y, set, (int)strlen(set));
     SetTextColor(dc, differs ? RGB(240, 185, 70) : RGB(120, 205, 140));
-    TextOutA(dc, STAT_COL_A, *y, applied, (int)strlen(applied));
+    TextOutA(dc, STAT_COL_A + g_statColX, *y, applied, (int)strlen(applied));
     *y += STAT_ROW_H;
 }
 
+// Column offset: the panel is two columns of STAT_COLW; StatRow draws at
+// STAT_COL_* + g_statColX so the row code is identical on both sides.
+// (g_statColX is declared above StatRow.)
+
+static void StatHeader(HDC dc, int *y, const char *title)
+{
+    SelectObject(dc, g_statFontB);
+    SetTextColor(dc, RGB(235, 235, 245));
+    TextOutA(dc, STAT_COL_L + g_statColX, *y, title, (int)strlen(title));
+    SetTextColor(dc, RGB(105, 105, 120));
+    TextOutA(dc, STAT_COL_S + g_statColX, *y, "SETTING", 7);
+    TextOutA(dc, STAT_COL_A + g_statColX, *y, "APPLIED NOW", 11);
+    *y += STAT_ROW_H + 6;
+    SelectObject(dc, g_statFont);
+}
+
+// Section label in the label column, no values: a visual break between
+// groups so a 20-row column can be scanned rather than read.
+static void StatSection(HDC dc, int *y, const char *title)
+{
+    *y += 4;
+    SetTextColor(dc, RGB(105, 105, 120));
+    TextOutA(dc, STAT_COL_L + g_statColX, *y, title, (int)strlen(title));
+    *y += STAT_ROW_H;
+}
+
+static const char *StatOnOff(LONG v) { return v ? "on" : "off"; }
+
 static void DrawStatusPanel(HDC dc)
 {
-    char set[64], app[64];
+    char set[64], app[64], title[96];
     RECT full = { 0, 0, STAT_W, STAT_H };
     HBRUSH bg = CreateSolidBrush(RGB(14, 14, 18));
-    int y = 9;
+    int y = 9, yR;
     EnsureStatusFonts();
     FillRect(dc, &full, bg);
     DeleteObject(bg);
@@ -469,14 +499,12 @@ static void DrawStatusPanel(HDC dc)
     // what gave the first version its blocky, chopped-up look.
     SetBkMode(dc, TRANSPARENT);
 
-    SelectObject(dc, g_statFontB);
-    SetTextColor(dc, RGB(235, 235, 245));
-    TextOutA(dc, STAT_COL_L, y, "MOD STATUS", 10);
-    SetTextColor(dc, RGB(105, 105, 120));
-    TextOutA(dc, STAT_COL_S, y, "SETTING", 7);
-    TextOutA(dc, STAT_COL_A, y, "APPLIED NOW", 11);
-    y += STAT_ROW_H + 6;
-    SelectObject(dc, g_statFont);
+    // ===================== LEFT: graphics ====================================
+    g_statColX = 0;
+    // First line: the mod and its version, the one thing a screenshot in a
+    // bug report must carry (user request 2026-09-15).
+    sprintf(title, "%s %s", MOD_NAME, MOD_VERSION);
+    StatHeader(dc, &y, title);
 
     // --- the live state this panel was built for --------------------------
     {
@@ -507,8 +535,7 @@ static void DrawStatusPanel(HDC dc)
         else sprintf(app, "off");
         StatRow(dc, &y, "Shadow far split", set, app, held);
     }
-    y += 7;
-    // --- the rest of the graphics state -----------------------------------
+    StatSection(dc, &y, "SHADOWS");
     {
         LONG r = g_shadowMapRes;
         if (r > 0) sprintf(set, "%ld", r); else sprintf(set, "game default");
@@ -521,6 +548,48 @@ static void DrawStatusPanel(HDC dc)
         else       { sprintf(set, "game default"); sprintf(app, "-"); }
         StatRow(dc, &y, "Shadow buffer", set, app, 0);
     }
+    {
+        // Softness: Off / On (engine kernel, resolution-normalised, %) / PCSS.
+        // "applied" is a heartbeat on the writes (On) or the shader binds
+        // (PCSS); a mode that is set and never bites reads "not applied".
+        static LONG sfLast = 0, pbLast = 0;
+        static DWORD sfMove = 0, pbMove = 0;
+        int sfLive = StatLive(&g_shadowFilterWrites, &sfLast, &sfMove);
+        int pbLive = StatLive(&g_pcssBinds, &pbLast, &pbMove);
+        int differs = 0;
+#if ENABLE_SHADOW_PCSS
+        if (g_shadowPcss) {
+            sprintf(set, "PCSS");
+            if (!g_pcssBinds) { sprintf(app, "not bound"); differs = 1; }
+            else sprintf(app, "%s (%ld binds)", pbLive ? "active" : "idle", g_pcssBinds);
+        } else
+#endif
+        if (g_shadowFilterPct > 0) {
+            sprintf(set, "on %ld%%", g_shadowFilterPct);
+            if (!g_shadowFilterWrites) { sprintf(app, "not applied"); differs = 1; }
+            else sprintf(app, "%s", sfLive ? "active" : "idle");
+        } else { sprintf(set, "off"); sprintf(app, "engine kernel"); }
+        StatRow(dc, &y, "Shadow softness", set, app, differs);
+    }
+#if ENABLE_SHADOW_PCSS
+    if (g_shadowPcss) {
+        sprintf(set, "L%ld min%.1f max%ld", g_pcssLightSize, g_pcssMinRadius / 10.0, g_pcssMaxRadius);
+        sprintf(app, "search %ld bias %ld", g_pcssSearchRadius, g_pcssBias);
+        StatRow(dc, &y, "PCSS params", set, app, 0);
+    }
+#endif
+    {
+        // Projection: which shadow map builder the engine is allowed to use.
+        // Uniform (default) is what removed the whole-shadow resolution pop;
+        // the hook has to have landed for the setting to mean anything.
+        LONG m = g_shadowProjMode;
+        sprintf(set, "%s", m == 1 ? "uniform (stable)" : m == 2 ? "perspective" : "engine choice");
+        if (m == 0)                    sprintf(app, "engine");
+        else if (g_projDecideHooked)   sprintf(app, "hooked");
+        else                           sprintf(app, "hook missing");
+        StatRow(dc, &y, "Shadow projection", set, app, m != 0 && !g_projDecideHooked);
+    }
+    StatSection(dc, &y, "ANTI-ALIASING & FILTERING");
     {
         LONG sc = g_ssaaScale;
         int on = (g_ssaaActive != 0);
@@ -598,6 +667,7 @@ static void DrawStatusPanel(HDC dc)
         StatRow(dc, &y, "Built-in FXAA", set, app, off && g_fxaaSubs == 0);
     }
 #if ENABLE_AO_SSAO
+    StatSection(dc, &y, "AMBIENT OCCLUSION");
     {
         // Configured estimator vs whether it has actually drawn. "no draws"
         // in amber is the tell for every way AO can be silently off: latches
@@ -610,6 +680,16 @@ static void DrawStatusPanel(HDC dc)
         else                    sprintf(app, "no draws");
         StatRow(dc, &y, "Ambient occlusion", set, app, e && !g_ssaoDraws);
     }
+    if (g_aoEnable) {
+        // The live estimator's numbers, as the tuning panel shows them.
+        int i = (g_aoEnable == 2) ? 1 : 0;
+        sprintf(set, "str %ld%% int %.2f", g_aoStrengthPctE[i], g_aoIntensityE[i] / 100.0);
+        sprintf(app, "rad %.2f bias %.3f", g_aoRadiusE[i] / 100.0, g_aoBiasE[i] / 1000.0);
+        StatRow(dc, &y, "AO tuning", set, app, 0);
+        sprintf(set, "%s x%ld", g_aoBlur ? "bilateral" : "off", g_aoBlurPassesE[i]);
+        sprintf(app, "sharp %ld step %.2f", g_aoBlurSharpE[i], g_aoBlurStep100E[i] / 100.0);
+        StatRow(dc, &y, "AO blur", set, app, 0);
+    }
     {
         // Configured divisor vs the buffer that actually exists. They differ
         // whenever SSAA is being divided out, which is the whole point of
@@ -621,25 +701,40 @@ static void DrawStatusPanel(HDC dc)
         StatRow(dc, &y, "AO resolution", set, app, g_aoEnable && g_aoRtW == 0);
     }
 #endif
-    // REMOVED: "Output" (resolution + format) and "Display mode"
-    // (fullscreen/windowed). Both read straight from the present parameters
-    // and both were wrong on screen - at a 1080p fullscreen setting on a 4K
-    // display they reported 3840x2160 and "windowed".
-    //
-    // That is not a bug in the readout, it is the same decoupling the SSAA
-    // work already documented: the engine presents into a desktop-sized
-    // backbuffer and lets the display clamp, and it uses a borderless window
-    // rather than exclusive fullscreen, so D3D's own numbers genuinely say
-    // 4K/windowed while the player is looking at 1080p fullscreen. Reporting
-    // the resolution a player would recognise means deriving it from the
-    // engine's internal size instead, which is a different job. Not worth it
-    // for a status row - removed rather than left showing numbers that
-    // disagree with the game's own menu.
+    StatSection(dc, &y, "WORLD");
+    {
+        // NPC spawning distance (29): Default leaves the engine's FieldGlobal
+        // values alone; Extended writes pop/depop/mob window after every
+        // field load and rewrites the manager's pool immediates.
+        static LONG npLast = 0;
+        static DWORD npMove = 0;
+        int live = StatLive(&g_npcPopWrites, &npLast, &npMove);
+        if (!g_npcSpawnFix) { sprintf(set, "default"); sprintf(app, "engine (80/100)"); }
+        else {
+            sprintf(set, "extended %ld/%ld", g_npcPopLength, g_npcDepopLength);
+            if (!g_npcPopWrites) sprintf(app, "not written yet");
+            else sprintf(app, "%s, mob cap %ld", live ? "written" : "in force", g_npcPoolC ? g_npcPoolC : 20);
+        }
+        StatRow(dc, &y, "NPC spawning", set, app, g_npcSpawnFix && !g_npcPopWrites);
+    }
+
+    // ===================== RIGHT: engine, streaming, hooks ==================
+    yR = 9;
+    g_statColX = STAT_COLW;
+    {
+        // Thin divider between the columns.
+        RECT dv = { STAT_COLW - 1, 6, STAT_COLW, STAT_H - 6 };
+        HBRUSH pen = CreateSolidBrush(RGB(40, 40, 50));
+        FillRect(dc, &dv, pen);
+        DeleteObject(pen);
+    }
+    sprintf(title, "built %s %s", __DATE__, __TIME__);
+    StatHeader(dc, &yR, title);
     {
         LONG c = g_targetFpsX100;
         if (c > 0) sprintf(set, "%.2f fps", c / 100.0); else sprintf(set, "unlocked");
         sprintf(app, "p50 %.1f ms", g_liveP50 / 1000.0);
-        StatRow(dc, &y, "Frame cap", set, app, 0);
+        StatRow(dc, &yR, "Frame cap", set, app, 0);
     }
     {
         // The ENGINE's own framerate mode, queried live from its handler
@@ -652,15 +747,114 @@ static void DrawStatusPanel(HDC dc)
         sprintf(set, "%s", g_forceDynamicFps ? "force Dynamic" : "leave alone");
         sprintf(app, "%s%s", fixedNow ? "Fixed (halves cap)" : "Dynamic",
                 (!fixedNow && g_fdfForces > 0) ? " (corrected)" : "");
-        StatRow(dc, &y, "Engine framerate", set, app, fixedNow);
+        StatRow(dc, &yR, "Engine framerate", set, app, fixedNow);
+    }
+    {
+        sprintf(set, "%s / %s", g_unlockFramerateEnabled ? "unlock" : "vanilla",
+                g_simDeltaFix ? "delta fix" : "no delta fix");
+        sprintf(app, "%s", g_forceImmediatePresentEnabled ? "immediate present" : "engine present");
+        StatRow(dc, &yR, "Frame pacing", set, app, 0);
     }
     {
         LONG t = g_stutterThresholdUsec;
         if (t >= 500000) sprintf(set, "off"); else sprintf(set, "%ld ms", t / 1000);
         sprintf(app, "%ld over", g_liveOver16);
-        StatRow(dc, &y, "Stutter watchdog", set, app, 0);
+        StatRow(dc, &yR, "Stutter watchdog", set, app, 0);
     }
-
+    StatSection(dc, &yR, "STREAMING FIXES");
+    {
+        sprintf(set, "%s", StatOnOff(g_discardFixEnabled));
+        sprintf(app, "%s", g_discardFixEnabled ? "LockRect DISCARD" : "vanilla");
+        StatRow(dc, &yR, "Discard fix", set, app, 0);
+    }
+    {
+        sprintf(set, "%s", StatOnOff(g_shaderThrottleEnabled));
+        sprintf(app, "%ld compiled, %ld rep", g_shaderCompileTotal, g_shaderCompileRepeats);
+        StatRow(dc, &yR, "Shader throttle", set, app, 0);
+    }
+    {
+        sprintf(set, "%s", StatOnOff(g_readPaceEnabled));
+        sprintf(app, "%ld reads, %ld ms held", g_readFileCount, g_readPaceDelayTotalUsec / 1000);
+        StatRow(dc, &yR, "Read pace", set, app, 0);
+    }
+    {
+        sprintf(set, "%s", StatOnOff(g_loaderThrottleEnabled));
+        sprintf(app, "%s", g_loaderThrottleEnabled ? "dispatch limited" : "engine");
+        StatRow(dc, &yR, "Loader throttle", set, app, 0);
+    }
+    {
+        sprintf(set, "%s/%s/%s", StatOnOff(g_stagingUploadEnabled), StatOnOff(g_stagingSurfaceEnabled),
+                StatOnOff(g_stagingCubeEnabled));
+        sprintf(app, "%ld tex, %ld MB up", g_createTexCount, g_uploadKB / 1024);
+        StatRow(dc, &yR, "Staging tex/surf/cube", set, app, 0);
+    }
+    {
+        // GpuSyncSkip only skips when the staging paths are on; the counter
+        // says whether the fence is actually being bypassed this session.
+        sprintf(set, "%s", StatOnOff(g_gpuSyncSkip));
+        if (!g_gpuSyncSkip)           sprintf(app, "engine fence");
+        else if (g_gpuFenceSkipped)   sprintf(app, "%ld skipped", g_gpuFenceSkipped);
+        else                          sprintf(app, "not hit yet");
+        StatRow(dc, &yR, "GPU sync skip", set, app, g_gpuSyncSkip && !g_gpuFenceSkipped);
+    }
+    {
+        sprintf(set, "%s", StatOnOff(g_allocatorWarmEnabled));
+        sprintf(app, "%ld warmed", g_warmDone);
+        StatRow(dc, &yR, "Allocator warm", set, app, 0);
+    }
+    {
+        LONG m = g_cutsceneMode;
+        sprintf(set, "mode %ld%s", m, g_cutsceneRevert ? "" : " (revert off)");
+        sprintf(app, "%ld edges", g_cutsceneEdges);
+        StatRow(dc, &yR, "Cutscene detect", set, app, 0);
+    }
+    {
+        sprintf(set, "%s", g_compactorDeferEnabled ? "on" : "off");
+        if (g_compactorDeferEnabled) sprintf(app, "%ld us budget", g_compactorBudgetUs);
+        else                         sprintf(app, "engine");
+        StatRow(dc, &yR, "Compactor defer", set, app, 0);
+    }
+    StatSection(dc, &yR, "HOOKS & RUNTIME");
+    {
+        sprintf(set, "%s", g_forceStdD3D9 ? "system d3d9" : "as loaded");
+        sprintf(app, "%s%s", g_d3d9IsDxvk ? "DXVK" : g_d3d9IsThirdParty ? "third-party" : "system",
+                g_gpuVendor == 0x10DE ? " / NVIDIA" : g_gpuVendor == 0x1002 ? " / AMD" : "");
+        StatRow(dc, &yR, "D3D9", set, app, g_forceStdD3D9 && g_d3d9IsThirdParty);
+    }
+    {
+        sprintf(set, "base 0x%08lX", (unsigned long)(UINT_PTR)g_mainModBase);
+        sprintf(app, "%s", g_devVtblHooked ? "device hooked" : "device NOT hooked");
+        StatRow(dc, &yR, "Game module", set, app, !g_devVtblHooked);
+    }
+    {
+        // The registry every InstallJmpHook / IAT install reports to. Any
+        // failure is named on the rows below, in amber.
+        LONG n = g_hookRegCount, f = g_hookRegFails;
+        sprintf(set, "%ld registered", n);
+        if (f) sprintf(app, "%ld FAILED", f); else sprintf(app, "all installed");
+        StatRow(dc, &yR, "Code hooks", set, app, f != 0);
+        if (f) {
+            int shown = 0;
+            for (LONG i = 0; i < n && i < HOOK_REG_MAX && shown < 4; i++) {
+                if (g_hookRegOk[i]) continue;
+                sprintf(app, "%.24s", g_hookRegName[i]);
+                StatRow(dc, &yR, "  failed", "-", app, 1);
+                shown++;
+            }
+        }
+    }
+    {
+        sprintf(set, "%s", g_inGameUi ? "in-frame" : "win32");
+        sprintf(app, "lang %ld, %s", g_langCfg, g_advancedMenu ? "advanced menu" : "basic menu");
+        StatRow(dc, &yR, "UI", set, app, 0);
+    }
+    {
+        sprintf(set, "ini v%ld", g_configVersion);
+        sprintf(app, "log %s%s", g_logVerbose ? "verbose" : "normal",
+                g_logCapped ? " (capped)" : "");
+        StatRow(dc, &yR, "Config / log", set, app, g_logCapped != 0);
+    }
+    g_statColX = 0;
 }
 
 static LRESULT CALLBACK StatusWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -1267,6 +1461,9 @@ static DWORD WINAPI OverlayThread(LPVOID param)
         // fight, and the window is the thing that mode exists to escape. The
         // hide below covers flipping the ini mid-session with the old window
         // still up.
+#if ENABLE_SHADOW_PCSS
+        PcssTweakPoll();
+#endif
         if (g_inGameUi) {
             if (g_hAoTweak && IsWindowVisible(g_hAoTweak))
                 ShowWindow(g_hAoTweak, SW_HIDE);

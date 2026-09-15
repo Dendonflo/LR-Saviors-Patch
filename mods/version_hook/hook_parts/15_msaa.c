@@ -1010,6 +1010,9 @@ static HRESULT STDMETHODCALLTYPE HookedDrawIndexedPrimitive(
     UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount)
 {
     HRESULT hr;
+#if ENABLE_CASCADE_WATCH
+    CascadeWatchDraw();
+#endif
 #if ENABLE_CUTOUT_PROBE
     CutoutProbeDraw();
 #endif
@@ -1037,6 +1040,9 @@ static HRESULT STDMETHODCALLTYPE HookedDrawPrimitive(
     IDirect3DDevice9 *This, D3DPRIMITIVETYPE Type, UINT StartVertex, UINT PrimitiveCount)
 {
     HRESULT hr;
+#if ENABLE_CASCADE_WATCH
+    CascadeWatchDraw();
+#endif
     if (SsaaMultiDraw(This, 0, Type, 0, 0, 0, StartVertex, PrimitiveCount, &hr)) {
         MsaaNoteDraw(This, hr, PrimitiveCount);
         return hr;

@@ -1157,6 +1157,134 @@ static HRESULT STDMETHODCALLTYPE HookedSetRenderTarget(
     return g_origSetRT(This, RenderTargetIndex, pRT);
 }
 
+#if ENABLE_CASCADE_WATCH
+// ---- cascade watch ---------------------------------------------------------
+// Per-frame trace of what the shadow projection shader (ps_C7978054, see the
+// contract in 27_shadow_pcss.c) receives in c0..c9: split/cutoff (c0), and
+// both cascade matrices (rows x,y,z,w in c2..c5 / c6..c9). Written to
+// shaders\cwatch.csv, one row per frame, so the moment a shadow visibly
+// changes resolution can be matched against every input the shader has.
+//
+// CAPTURE POINT, made robust rather than assumed (the first version sampled
+// whatever was uploaded last in the pass and got the blur's texel offsets):
+// the constants are recorded from every SetPixelShaderConstantF while the
+// projection shader is BOUND, snapshotted (a) at the first hooked draw with
+// it bound and (b) at the moment it is unbound (the next SetPixelShader).
+// (a) is right when the draw is a hooked DrawPrimitive/DrawIndexedPrimitive
+// and constants are uploaded before it; (b) covers an unhooked
+// DrawPrimitiveUP. Both are written with a flag saying which was used and
+// whether they agree, so the row is self-validating.
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetPSConstF_W)(IDirect3DDevice9 *, UINT, const float *, UINT);
+static PFN_SetPSConstF_W g_origSetPSConstF_W = NULL;
+static float g_cwConst[10][4];                // live copy while projection is bound
+static LONG  g_cwSeenMask = 0;                // registers written since the bind
+static LONG  g_cwProjBound = 0;
+static float g_cwDraw[10][4];  static LONG g_cwDrawValid = 0, g_cwDrawMask = 0;
+static FILE *g_cwFile = NULL;
+static LONG  g_cwRows = 0;
+static float g_cwLastNear = 0.0f, g_cwLastFar = 0.0f;
+static LONG  g_cwJumps = 0;
+
+static float CwLen3(const float *r) { return sqrtf(r[0]*r[0] + r[1]*r[1] + r[2]*r[2]); }
+
+static void CascadeWatchEmit(void)
+{
+    // Called at unbind. Pick the draw-time snapshot when it exists.
+    const float (*c)[4] = g_cwDrawValid ? g_cwDraw : g_cwConst;
+    LONG mask = g_cwDrawValid ? g_cwDrawMask : g_cwSeenMask;
+    int agree = 1;
+    if (g_cwDrawValid)
+        for (int i = 0; i < 10 && agree; i++)
+            for (int k = 0; k < 4; k++)
+                if (g_cwDraw[i][k] != g_cwConst[i][k]) { agree = 0; break; }
+    if (!g_cwFile) {
+        char dir[MAX_PATH], path[MAX_PATH];
+        GetModuleFileNameA(NULL, dir, MAX_PATH);
+        char *slash = strrchr(dir, '\\');
+        if (slash) *(slash + 1) = 0;
+        strcat(dir, "shaders");
+        CreateDirectoryA(dir, NULL);
+        sprintf(path, "%s\\cwatch.csv", dir);
+        g_cwFile = fopen(path, "w");
+        if (g_cwFile)
+            fprintf(g_cwFile, "frame,src,agree,mask,c0x,c0y,c0z,c0w,"
+                    "nearW,farW,nearZscale,farZscale,"
+                    "Ax0,Ax1,Ax2,Ax3,Ay0,Ay1,Ay2,Ay3,Az0,Az1,Az2,Az3,Aw0,Aw1,Aw2,Aw3,"
+                    "Bx0,Bx1,Bx2,Bx3,By0,By1,By2,By3,Bz0,Bz1,Bz2,Bz3,Bw0,Bw1,Bw2,Bw3\n");
+    }
+    float ax = CwLen3(c[2]), bx = CwLen3(c[6]);
+    float nearW = ax > 1e-9f ? 1.0f / ax : 0.0f;
+    float farW  = bx > 1e-9f ? 1.0f / bx : 0.0f;
+    if (g_cwFile) {
+        fprintf(g_cwFile, "%ld,%s,%d,0x%lX,%g,%g,%g,%g,%g,%g,%g,%g",
+                g_frameSeq, g_cwDrawValid ? "draw" : "unbind", agree, mask,
+                c[0][0], c[0][1], c[0][2], c[0][3], nearW, farW, CwLen3(c[4]), CwLen3(c[8]));
+        for (int i = 2; i < 10; i++)
+            fprintf(g_cwFile, ",%g,%g,%g,%g", c[i][0], c[i][1], c[i][2], c[i][3]);
+        fputc('\n', g_cwFile);
+        if ((++g_cwRows % 60) == 0) fflush(g_cwFile);
+    }
+    // Jump lines in the main log too, for the quick read.
+    int jump = 0;
+    if (g_cwLastNear > 0.0f && nearW > 0.0f) { float r = nearW / g_cwLastNear; if (r < 0.8f || r > 1.25f) jump = 1; }
+    if (g_cwLastFar  > 0.0f && farW  > 0.0f) { float r = farW  / g_cwLastFar;  if (r < 0.8f || r > 1.25f) jump = 1; }
+    if (jump || g_cwRows == 1 || (g_cwRows % 600) == 0) {
+        char l[300];
+        sprintf(l, "[cwatch] frame=%ld %s src=%s agree=%d mask=0x%lX near %.2f -> %.2f  far %.2f -> %.2f  c0=(%.4g %.4g %.4g %.4g)",
+                g_frameSeq, jump ? "*** JUMP ***" : "periodic",
+                g_cwDrawValid ? "draw" : "unbind", agree, mask,
+                g_cwLastNear, nearW, g_cwLastFar, farW, c[0][0], c[0][1], c[0][2], c[0][3]);
+        LogLine(l);
+        if (jump) InterlockedIncrement(&g_cwJumps);
+    }
+    g_cwLastNear = nearW; g_cwLastFar = farW;
+}
+
+// From HookedSetPixelShader (14), every bind. pShader is the ENGINE's object
+// (recorded before any substitution).
+static void CascadeWatchBind(void *pShader)
+{
+    if (g_pcssOrigObj && pShader == g_pcssOrigObj) {
+        // Constants uploaded before the bind still count: keep g_cwConst as
+        // is, just reset the "since bind" bookkeeping.
+        g_cwProjBound = 1;
+        g_cwDrawValid = 0;
+        return;
+    }
+    if (g_cwProjBound) {
+        g_cwProjBound = 0;
+        CascadeWatchEmit();
+        g_cwSeenMask = 0;
+    }
+}
+
+// From the draw hooks (15): first hooked draw while the projection is bound.
+static void CascadeWatchDraw(void)
+{
+    if (!g_cwProjBound || g_cwDrawValid) return;
+    memcpy(g_cwDraw, g_cwConst, sizeof(g_cwDraw));
+    g_cwDrawMask = g_cwSeenMask;
+    g_cwDrawValid = 1;
+}
+
+static HRESULT STDMETHODCALLTYPE HookedSetPSConstF_W(
+    IDirect3DDevice9 *This, UINT StartRegister, const float *pData, UINT Vector4fCount)
+{
+    if (pData && StartRegister < 10 && (g_curPass == PASS_MS_SHADOW || g_cwProjBound)) {
+        UINT n = Vector4fCount;
+        if (StartRegister + n > 10) n = 10 - StartRegister;
+        for (UINT i = 0; i < n; i++) {
+            g_cwConst[StartRegister + i][0] = pData[i*4+0];
+            g_cwConst[StartRegister + i][1] = pData[i*4+1];
+            g_cwConst[StartRegister + i][2] = pData[i*4+2];
+            g_cwConst[StartRegister + i][3] = pData[i*4+3];
+            g_cwSeenMask |= 1L << (StartRegister + i);
+        }
+    }
+    return g_origSetPSConstF_W(This, StartRegister, pData, Vector4fCount);
+}
+#endif  // ENABLE_CASCADE_WATCH
+
 // (HookedSetViewport removed - see the retirement note at its former install
 // site in HookRealDevicePresent.)
 
@@ -1809,6 +1937,7 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
     // FXAA bind-time substitution (see HookedSetPixelShader).
     int slotSPS = offsetof(IDirect3DDevice9Vtbl, SetPixelShader) / sizeof(void *);
     g_origSetPixelShader = (PFN_SetPixelShader)ResolveOrigSlot(vtbl[slotSPS]);
+    InterlockedExchange(&g_devVtblHooked, 1);   // status panel: device hooked
     if (VirtualProtect(&vtbl[slotSPS], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
         vtbl[slotSPS] = (void *)HookedSetPixelShader;
         VirtualProtect(&vtbl[slotSPS], sizeof(void *), oldProtect, &oldProtect);
@@ -1975,6 +2104,17 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
     // SetViewport while a scaled shadow surface is bound at index 0, so the
     // "square that tracks the camera" is not a viewport problem at all and
     // this whole approach was aimed at the wrong mechanism.
+#if ENABLE_CASCADE_WATCH
+    {
+        int slotW = offsetof(IDirect3DDevice9Vtbl, SetPixelShaderConstantF) / sizeof(void *);
+        g_origSetPSConstF_W = (PFN_SetPSConstF_W)ResolveOrigSlot(vtbl[slotW]);
+        if (VirtualProtect(&vtbl[slotW], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
+            vtbl[slotW] = (void *)HookedSetPSConstF_W;
+            VirtualProtect(&vtbl[slotW], sizeof(void *), oldProtect, &oldProtect);
+        }
+        LogLine("[cwatch] SetPixelShaderConstantF hooked (cascade watch)");
+    }
+#endif
 #if ENABLE_CASCADE_HUNT
     // Two hooks on the hottest methods in the API, kept only while the cascade
     // hunt needed them. See the retirement note at the probe itself.

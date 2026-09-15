@@ -1306,6 +1306,11 @@ static const char *const g_logKeepTags[] = {
     // log for exactly this reason - LogLineWanted dropped every line. Six
     // lines twice a session, and the gate compiles it out entirely.
     "[cutout]",
+    "[cwatch]",  // cascade watch: jump lines only, plus one every ~4 s
+    "[pcss]",    // PCSS: compile/arm/status, a few lines a session
+    "[shadow-filter]",
+    "[lispsm]",  // projection threshold patch: install + value changes
+    "[npc]",     // FieldGlobal table proof + override status, a dozen lines once
 };
 
 static int LogLineWanted(const char *msg)

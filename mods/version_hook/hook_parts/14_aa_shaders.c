@@ -552,6 +552,9 @@ static HRESULT STDMETHODCALLTYPE HookedCreatePixelShader(
     // first sight of any.
     if (SUCCEEDED(hr) && ppShader && *ppShader && pFunction) {
         DWORD h = PsFnv1a(pFunction);
+#if ENABLE_SHADOW_PCSS
+        PcssNoteCreated(h, (void *)*ppShader);
+#endif
         // The passthrough is needed by the FXAA toggle whether or not any
         // kill-list candidate was ever created, so build it on first sight of
         // the FXAA shader too.
@@ -704,6 +707,9 @@ static HRESULT STDMETHODCALLTYPE HookedSetPixelShader(
 {
     g_curPsObj = (void *)pShader;
     g_curPsIdx = PsIndexOf((void *)pShader);
+#if ENABLE_CASCADE_WATCH
+    CascadeWatchBind((void *)pShader);
+#endif
 
     // ---- General shader identify ----------------------------------------
     // Deliberately NOT restricted to cutout candidates or to blending being
@@ -733,6 +739,12 @@ static HRESULT STDMETHODCALLTYPE HookedSetPixelShader(
     LONG psIdx = g_curPsIdx;
     if (psIdx < 0 || psIdx >= g_psMapCount || psIdx >= PS_MAP_MAX) psIdx = -1;
 
+#if ENABLE_SHADOW_PCSS
+    {
+        HRESULT phr;
+        if (PcssBind((void *)This, (void *)pShader, &phr)) return phr;
+    }
+#endif
     if (g_fxaaOff && g_fxaaPassthrough && psIdx >= 0 &&
         g_psMap[psIdx].hash == FXAA_SHADER_HASH_REAL) {
         InterlockedIncrement(&g_fxaaSubs);

@@ -635,6 +635,64 @@ static volatile LONG g_pendingShadowCapture;
 // addresses; the hook that uses them lives with the real-device hooks.
 static volatile LONG g_shadowSplitNearPct;
 static volatile LONG g_shadowSplitFarPct;
+// Shadow filter (PCF kernel) radius percentage, 0 = leave alone. Same
+// ownership shape as the split percentages: defined here for g_numerics[],
+// applied per frame right after ApplyCascadeSplitSource.
+static volatile LONG g_shadowFilterPct;
+// Last non-zero softness percentage, persisted, so Off -> On brings the
+// tuned value back instead of resetting to 100 (user report 2026-09-15).
+static volatile LONG g_shadowFilterMem = 100;
+// PCSS (27_shadow_pcss.c). Radii are in 2048-map texels and scale with the
+// live ShadowMapRes; light size is tan(half sun angle) x 1000.
+static volatile LONG g_shadowPcss = 0;
+static volatile LONG g_pcssLightSize = 5;       // tuned in game 2026-09-14
+static volatile LONG g_pcssMinRadius = 5;       // x10 -> 0.5 texel: kills the aliasing on very close casters (glasses, swords)
+static volatile LONG g_pcssMaxRadius = 15;
+static volatile LONG g_pcssSearchRadius = 1;    // floored to MaxRadius at bind
+static volatile LONG g_pcssBias = 0;            // x1e-5 depth units
+// State owned by 27_shadow_pcss.c, defined here for the status line in 18.
+static void *g_pcssOrigObj = NULL;
+static LONG g_pcssState = 0;
+static volatile LONG g_pcssBinds = 0;
+static volatile LONG g_pcssTweakOpen = 0;       // tuning window (10b), not persisted
+// Shadow projection mode (28_shadow_proj.c): 0 engine (perspective, uniform
+// fallback when the sun/anti-sun point is inside the view frustum),
+// 1 always uniform (stable, no flip), 2 always perspective (test only).
+static volatile LONG g_shadowProjMode = 1;      // default: uniform (Stable)
+static LONG g_projDecideHooked = 0;             // 28: FUN_00a89170 hook landed
+
+// ---- hook registry (status panel) -----------------------------------------
+// Every code hook and IAT hook reports its install outcome here by name, so
+// the status panel can say "N hooks installed, M failed" and name the
+// failures on screen instead of leaving them as an untagged log line nobody
+// reads. Filled once at boot from InstallJmpHook (07) and the boot
+// installer (19); read-only afterwards.
+static volatile LONG g_gpuFenceSkipped = 0;     // 17: per-frame GPU fence bypasses
+static volatile LONG g_devVtblHooked = 0;       // 16: D3D9 device vtable patched
+#define HOOK_REG_MAX 64
+static const char *g_hookRegName[HOOK_REG_MAX];
+static LONG g_hookRegOk[HOOK_REG_MAX];
+static volatile LONG g_hookRegCount = 0, g_hookRegFails = 0;
+static void HookRegNote(const char *name, int ok)
+{
+    LONG i = InterlockedIncrement(&g_hookRegCount) - 1;
+    if (!ok) InterlockedIncrement(&g_hookRegFails);
+    if (i < HOOK_REG_MAX) { g_hookRegName[i] = name ? name : "?"; g_hookRegOk[i] = ok ? 1 : 0; }
+}
+// NPC pop/depop distance overrides (29_npc_pop.c), world units, 0 = engine
+// (80 / 100 from r_field_global.wdb).
+// Tuned 2026-09-15 (pop 200 / depop 240 / mob cap 80), gated by NpcSpawnFix.
+static volatile LONG g_npcSpawnFix = 0;         // ships Default; Extended is opt-in
+static volatile LONG g_npcPopLength = 200;
+static volatile LONG g_npcDepopLength = 240;
+static volatile LONG g_npcPopWrites = 0;
+// NPC manager pool immediates (29_npc_pop.c), 0 = engine: A = the 0x80 pair
+// (128), B = the 0x30 pair (48), C = the 0x14 (20). Which is the mob cap is
+// what the first run establishes.
+static volatile LONG g_npcPoolA = 0;
+static volatile LONG g_npcPoolB = 0;
+static volatile LONG g_npcPoolC = 80;
+static volatile LONG g_npcMobWindow = 0;        // POPWNearLenMob override, 0 = follow pop distance
 
 // Cutscene-aware override. Cutscenes are authored against the engine's own
 // cascade splits, so scaling them breaks shadows in some of them (reported in
@@ -1014,6 +1072,83 @@ static void ApplyCascadeSplitSource(void)
         // by our own output on re-enable.
         if (nearPct <= 0) { *nearF = baseNear > 0.0f ? baseNear : n; }
         if (farPct  <= 0) { *farA  = baseFarA > 0.0f ? baseFarA : a; }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// ---- Shadow filter radius (soft-shadow kernel) ----------------------------
+// FUN_00ac6b00 (DRAW_MULTI_SAMPLE_SHADOW) passes *(float *)(DAT_05107a00 +
+// 0x4a0) into FUN_00a525c0, the screen-space shadow renderer, which builds
+// its soft-shadow kernel ON THE CPU and uploads it as pixel-shader constants:
+//
+//   for (i = 0; i < 8; i++) {                    // 8 hardcoded, loop AND shader
+//       r      = i * radius;                     // radius = [+0x4a0], ctor default 0.7
+//       offset = (cos a, sin a) * r * (1/atlasW, 1/atlasH);   // SHADOW MAP texels
+//       weight = (pow(..) - pow(..)) * exp(..);  // normalised by the sum
+//   }
+//
+// So the kernel is ~0..4.9 shadow-map texels wide whatever the map size.
+// Raising ShadowMapRes 2048 -> 8192 shrinks the world-space footprint 4x,
+// which is why 8192 reads as harder-edged and stair-stepped, not softer.
+// This percentage is RESOLUTION-NORMALISED: the applied radius is
+//     base * pct/100 * (shadowMapRes / 2048)
+// so 100% is the stock 2048 world-space footprint at every ShadowMapRes,
+// and 150/200/300 are softer than that in world terms. (The first cut scaled
+// the raw texel value, which tested exactly as the maths predicts: "400% at
+// 8K looks soft, 400% at 1K looks like a smudge".) The resolution comes from
+// the engine's own field (settings+0x24), i.e. whatever the force or the
+// vanilla popup last wrote.
+//
+// Grain: the kernel is the SAME 8 taps whatever the radius. At 2048 they sit
+// 0.7 texels apart - overlapping bilinear PCF footprints, a real blur. Spread
+// over 20 texels (8192 at 100%) they no longer overlap and the result reads
+// as a dither. That ceiling is the shader's; moving it means replacing the
+// pixel shader with a denser kernel (POST_BETA_PLAN.md, section B).
+//
+// Set in the shadow-object ctor (FUN_00a30d80, +0x4a0 = DAT_020994a0 = 0.7f);
+// no per-frame writer has been found, but the baseline/last-wrote pattern
+// from ApplyCascadeSplitSource is used anyway so an engine rewrite (per-area
+// lighting data, say) is tracked rather than fought, and so switching the
+// option off restores the engine's value instead of leaving ours behind.
+// (2026-09-14 recon, POST_BETA_PLAN.md "Next graphics round", section B.)
+static volatile LONG g_shadowFilterWrites = 0;
+static float g_shadowFilterSeenBase = 0.0f;
+
+static void ApplyShadowFilterRadius(void)
+{
+    if (g_mainModBase == 0) return;
+    LONG pct = g_shadowFilterPct;
+    static float base = 0.0f, lastWrote = 0.0f;
+    __try {
+        DWORD obj = *(DWORD *)(g_mainModBase + SCENE_PTR_RVA);
+        if (!obj) return;
+        volatile float *radius = (volatile float *)(obj + 0x4a0);
+        float cur = *radius;
+        float resScale = 1.0f;
+        {
+            DWORD settings = *(DWORD *)(g_mainModBase + SHADOW_SETTINGS_PTR_RVA);
+            DWORD res = settings ? *(DWORD *)(settings + 0x24) : 0;
+            if (res >= 256 && res <= 16384) resScale = (float)res / 2048.0f;
+        }
+        // Sanity: the ctor default is 0.7 and it is a texel step, so anything
+        // outside (0.01, 64) is not the field this expects.
+        if (!(cur > 0.01f && cur < 64.0f)) return;
+        if (cur != lastWrote) base = cur;         // engine value -> new baseline
+        g_shadowFilterSeenBase = base;
+        if (pct <= 0) {
+            // Option off: put the engine's value back once and stop touching it.
+            if (lastWrote != 0.0f && cur == lastWrote && base > 0.0f) {
+                *radius = base;
+                lastWrote = 0.0f;
+            }
+            return;
+        }
+        float want = base * (pct / 100.0f) * resScale;
+        if (cur != want) {
+            *radius = want;
+            lastWrote = want;
+            InterlockedIncrement(&g_shadowFilterWrites);
+        }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }

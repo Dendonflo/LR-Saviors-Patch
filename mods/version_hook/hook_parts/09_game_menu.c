@@ -251,8 +251,21 @@ static char __cdecl MenuH_ResetAll(char apply)
         // receiving the keystroke that answers it.
         HWND owner = g_gameHwnd ? g_gameHwnd : GameMenuFindWindow();
         if (MessageBoxW(owner, TR(S_RESET_ASK_ALL), MOD_NAME_W,
-                        MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND) == IDYES)
+                        MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND) == IDYES) {
             CfgResetDefaults(0);
+            // ShadowMapRes just went back to 0 (= "stop forcing"), but the
+            // engine's resolution field still holds whatever the force last
+            // wrote, and its own persisted Graphics_Shadowing is whatever the
+            // player picked before ever using the force - so "after reset" was
+            // whichever of those won, and reported as the lowest setting
+            // (2026-09-14). Select the vanilla Advanced (2048) handler
+            // explicitly: same engine field write, same registry persistence,
+            // and the Shadows popup shows a checked entry again.
+            if (g_mainModBase) {
+                GameMenuHandler adv = (GameMenuHandler)(g_mainModBase + MENU_RVA_SHADOW_ADV);
+                adv(1);
+            }
+        }
     }
     return 0;
 }
@@ -401,6 +414,89 @@ static char __cdecl MenuH_Far200(char apply)
 {
     if (apply) GameMenuSetFarSplit(200);
     return (char)(g_shadowSplitFarPct == 200);
+}
+
+// Shadow filter radius (soft-shadow kernel step) - see ApplyShadowFilterRadius.
+// Percent of the STOCK 2048 FOOTPRINT, resolution-normalised there: 100% is
+// the same world-space softness as vanilla Advanced at every ShadowMapRes,
+// which is what 4096/8192 lose on their own. (First cut was a raw texel
+// percentage - "400% at 8K looks soft, 400% at 1K looks like a smudge".)
+static void GameMenuSetShadowFilter(LONG pct)
+{
+    InterlockedExchange(&g_shadowFilterPct, pct);
+#if ENABLE_SHADOW_PCSS
+    InterlockedExchange(&g_shadowPcss, 0);
+#endif
+    SaveConfig();
+}
+// Softness mode: 0 off, 1 on (remembered percentage, 100 the first time),
+// 2 PCSS. Shared by the menu leaves and the in-frame panel so both keep the
+// tuned percentage across Off/On instead of resetting it.
+static void ShadowSoftSetMode(int m)
+{
+    if (g_shadowFilterPct > 0) InterlockedExchange(&g_shadowFilterMem, g_shadowFilterPct);
+    if (m == 2) {
+        InterlockedExchange(&g_shadowFilterPct, 0);
+#if ENABLE_SHADOW_PCSS
+        InterlockedExchange(&g_shadowPcss, 1);
+#endif
+    } else {
+#if ENABLE_SHADOW_PCSS
+        InterlockedExchange(&g_shadowPcss, 0);
+#endif
+        InterlockedExchange(&g_shadowFilterPct, m == 1 ? (g_shadowFilterMem > 0 ? g_shadowFilterMem : 100) : 0);
+    }
+    SaveConfig();
+}
+#if ENABLE_SHADOW_PCSS
+static char __cdecl MenuH_SoftPcss(char apply)
+{
+    if (apply) ShadowSoftSetMode(2);
+    return (char)(g_shadowPcss != 0);
+}
+#define PCSS_OFF (g_shadowPcss == 0)
+static char __cdecl MenuH_PcssPanel(char apply)
+{
+    if (apply) InterlockedExchange(&g_pcssTweakOpen, 1);
+    return 0;   // a button, never checked
+}
+#else
+#define PCSS_OFF 1
+#endif
+// NPC spawn distance fix (29_npc_pop.c): pop/depop distance, mob window and
+// mob cap, all live. The numbers stay in the ini; this is the switch.
+GAMEMENU_VALUE(MenuH_NpcFixOff, g_npcSpawnFix, 0)
+GAMEMENU_VALUE(MenuH_NpcFixOn,  g_npcSpawnFix, 1)
+static char __cdecl MenuH_SoftStd(char apply)
+{
+    if (apply) ShadowSoftSetMode(0);
+    return (char)(g_shadowFilterPct == 0 && PCSS_OFF);
+}
+// "On" = the remembered percentage (100 the first time), not a fixed 100.
+static char __cdecl MenuH_SoftOn(char apply)
+{
+    if (apply) ShadowSoftSetMode(1);
+    return (char)(g_shadowFilterPct > 0 && PCSS_OFF);
+}
+static char __cdecl MenuH_Soft150(char apply)
+{
+    if (apply) GameMenuSetShadowFilter(150);
+    return (char)(g_shadowFilterPct == 150 && PCSS_OFF);
+}
+static char __cdecl MenuH_Soft200(char apply)
+{
+    if (apply) GameMenuSetShadowFilter(200);
+    return (char)(g_shadowFilterPct == 200 && PCSS_OFF);
+}
+static char __cdecl MenuH_Soft300(char apply)
+{
+    if (apply) GameMenuSetShadowFilter(300);
+    return (char)(g_shadowFilterPct == 300 && PCSS_OFF);
+}
+static char __cdecl MenuH_Soft100(char apply)
+{
+    if (apply) GameMenuSetShadowFilter(100);
+    return (char)(g_shadowFilterPct == 100 && PCSS_OFF);
 }
 
 // Shadowing popup REPLACEMENT. Standard/Advanced wrap the vanilla handlers
@@ -774,6 +870,41 @@ static int GameMenuFindPopupItem(HMENU menu, HMENU target, HMENU *outParent, int
     return 0;
 }
 
+// Re-assert every leaf's check state from its handler(0), whole tree. The
+// game only rebuilds the menu when one of ITS commands is dispatched, so
+// a value changed from the in-frame panels (estimator selector, shadow
+// mode) left the bar showing the old tick until the next menu click.
+// dwItemData is the handler pointer for vanilla and mod leaves alike.
+static void GameMenuRefreshChecksIn(HMENU menu, int depth)
+{
+    int n = GetMenuItemCount(menu);
+    if (depth > 6) return;
+    for (int i = 0; i < n; i++) {
+        MENUITEMINFOW mii;
+        memset(&mii, 0, sizeof(mii));
+        mii.cbSize = sizeof(mii);
+        mii.fMask = MIIM_SUBMENU | MIIM_DATA;
+        if (!GetMenuItemInfoW(menu, (UINT)i, TRUE, &mii)) continue;
+        if (mii.hSubMenu) { GameMenuRefreshChecksIn(mii.hSubMenu, depth + 1); continue; }
+        if (!mii.dwItemData) continue;
+        CheckMenuItem(menu, (UINT)i, MF_BYPOSITION |
+            (((GameMenuHandler)mii.dwItemData)(0) ? MF_CHECKED : MF_UNCHECKED));
+    }
+}
+static void GameMenuRefreshChecks(void)
+{
+    unsigned char *base = (unsigned char *)g_mainModBase;
+    void *mgr;
+    HMENU root;
+    if (!base) return;
+    __try {
+        mgr = *(void **)(base + MENU_RVA_MGR_PTR);
+        if (!mgr) return;
+        root = *(HMENU *)((char *)mgr + MENUMGR_ROOT_HMENU);
+        if (root && IsMenu(root)) GameMenuRefreshChecksIn(root, 0);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 // ---- the appended tree ----------------------------------------------------
 
 static void GameMenuAppend(void)
@@ -1071,6 +1202,45 @@ static void GameMenuAppend(void)
                     GameMenuInsertLeaf(sub, 2, id++, L"200%",     MenuH_Dist200);
                     GameMenuInsertLeaf(sub, 3, id++, L"300%",     MenuH_Dist300);
                     groups++;
+                }
+
+                // Shadow Softness, directly under Shadow Distance: scales the
+                // engine's soft-shadow kernel radius (ApplyShadowFilterRadius).
+                // Exists because the kernel is a fixed 8 taps in shadow-map
+                // texels, so every ShadowMapRes step above 2048 makes shadows
+                // harder, not softer; the normalised 100% puts the stock
+                // footprint back at any resolution.
+                at = (shadPos >= 0) ? shadPos + 2 : endPos;
+                sub = GameMenuInsertGroup(gfx, at, TR(S_SHADOW_SOFT));
+                if (sub) {
+                    // Off / On / PCSS (user decision 2026-09-14). "On" is
+                    // the resolution-normalised 100% = vanilla-Advanced
+                    // softness at any ShadowMapRes; the 150-300% steps stay
+                    // reachable through the ini key.
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_OFF), MenuH_SoftStd);
+                    GameMenuInsertLeaf(sub, 1, id++, TR(S_ON),  MenuH_SoftOn);
+#if ENABLE_SHADOW_PCSS
+                    GameMenuInsertLeaf(sub, 2, id++, L"PCSS",   MenuH_SoftPcss);
+                    GameMenuInsertLeaf(sub, 3, id++, TR(S_TUNING_PANEL), MenuH_PcssPanel);
+#endif
+                    groups++;
+                    // The anchors below were captured before this insert;
+                    // shift the ones that sit after it so their groups keep
+                    // landing where they did before this group existed.
+                    if (texPos   >= at) texPos++;
+                    if (scalePos >= at) scalePos++;
+                    if (presPos  >= at) presPos++;
+                }
+                // NPC spawn distance, after Shadow Softness.
+                at = (shadPos >= 0) ? shadPos + 3 : endPos;
+                sub = GameMenuInsertGroup(gfx, at, TR(S_NPC_SPAWN));
+                if (sub) {
+                    GameMenuInsertLeaf(sub, 0, id++, TR(S_DEFAULT),  MenuH_NpcFixOff);
+                    GameMenuInsertLeaf(sub, 1, id++, TR(S_EXTENDED), MenuH_NpcFixOn);
+                    groups++;
+                    if (texPos   >= at) texPos++;
+                    if (scalePos >= at) scalePos++;
+                    if (presPos  >= at) presPos++;
                 }
 
                 // The separate "Shadow Distance (Far)" group existed for one

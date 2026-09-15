@@ -46,13 +46,14 @@
 // ---- geometry (texture space, 1:1 with backbuffer pixels) ------------------
 #define IG_W        428
 #define IG_TITLE_H  24
+#define IG_MODE_H   26          // Off / SSAO / HBAO+ selector row (2026-09-14)
 #define IG_ROW_H    34
 #define IG_LABEL_W  120
 #define IG_TRACK_W  230
 #define IG_VAL_W    50
 #define IG_PAD      10
 // rows + raw checkbox + resolution row + reset button + bottom pad
-#define IG_H (IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 22 + 26 + 26 + IG_PAD)
+#define IG_H (IG_TITLE_H + IG_PAD + IG_MODE_H + (int)AO_ROWS * IG_ROW_H + 22 + 26 + 26 + IG_PAD)
 // The open dropdown extends PAST the panel's normal bottom, exactly as a real
 // one does. The texture is always allocated tall enough for that; only the
 // drawn height changes, so opening the list costs nothing but a taller quad.
@@ -96,18 +97,34 @@ static IDirect3DPixelShader9 *g_igPs = NULL;
 static LONG g_igPsState = 0;
 
 typedef struct { float x, y, z, rhw, u, v; } IgVtx;
+// IgFill/IgText paint through this so a second panel (26b_shadow_panel.c)
+// can borrow them for its own DIB; IgPaint points it at g_igDc.
+static HDC g_igPaintDc = NULL;
+#if ENABLE_SHADOW_PCSS
+static int  SpInput(LONG mx, LONG my);
+static int  SpPrep(IDirect3DDevice9 *dev, int haveMouse, LONG mx, LONG my);
+static void SpDraw(IDirect3DDevice9 *dev);
+static void SpCursorTex(IDirect3DBaseTexture9 **tex, float *wu, float *wv);
+#endif
 
 // ---- layout helpers (shared by paint and hit-test, so they cannot skew) ----
 static void IgRowTrack(int i, RECT *r)
 {
     r->left = IG_PAD + IG_LABEL_W;
-    r->top = IG_TITLE_H + IG_PAD + i * IG_ROW_H + 8;
+    r->top = IG_TITLE_H + IG_PAD + IG_MODE_H + i * IG_ROW_H + 8;
     r->right = r->left + IG_TRACK_W;
     r->bottom = r->top + 16;
 }
+// The estimator selector, mirroring the AO menu: Off / SSAO / HBAO+.
+static void IgModeRect(int seg, RECT *r)
+{
+    int w = (IG_W - 2 * IG_PAD) / 3;
+    r->left = IG_PAD + seg * w; r->right = r->left + w - 2;
+    r->top = IG_TITLE_H + IG_PAD; r->bottom = r->top + IG_MODE_H - 4;
+}
 static void IgCheckRect(RECT *r)
 {
-    r->left = IG_PAD; r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 2;
+    r->left = IG_PAD; r->top = IG_TITLE_H + IG_PAD + IG_MODE_H + (int)AO_ROWS * IG_ROW_H + 2;
     r->right = IG_W - IG_PAD; r->bottom = r->top + 20;
 }
 // AO resolution: a REAL dropdown. Two earlier shapes were wrong for the same
@@ -129,7 +146,7 @@ static void IgResRect(RECT *r)
 {
     r->left = IG_PAD + IG_LABEL_W;
     r->right = r->left + IG_TRACK_W + 8 + IG_VAL_W;
-    r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 24;
+    r->top = IG_TITLE_H + IG_PAD + IG_MODE_H + (int)AO_ROWS * IG_ROW_H + 24;
     r->bottom = r->top + 22;
 }
 static void IgDropItemRect(int i, RECT *r)
@@ -143,7 +160,7 @@ static int IgPanelH(void) { return IG_H + (g_igDropOpen ? IG_DROP_EXTRA : 0); }
 static void IgResetRect(RECT *r)
 {
     r->left = IG_PAD + IG_LABEL_W;
-    r->top = IG_TITLE_H + IG_PAD + (int)AO_ROWS * IG_ROW_H + 50;
+    r->top = IG_TITLE_H + IG_PAD + IG_MODE_H + (int)AO_ROWS * IG_ROW_H + 50;
     r->right = r->left + IG_TRACK_W + 8 + IG_VAL_W; r->bottom = r->top + 22;
 }
 static void IgCloseRect(RECT *r)
@@ -184,16 +201,16 @@ static int IgEnsureGdi(void)
 static void IgFill(RECT *r, COLORREF c)
 {
     HBRUSH b = CreateSolidBrush(c);
-    FillRect(g_igDc, r, b);
+    FillRect(g_igPaintDc, r, b);
     DeleteObject(b);
 }
 
 static void IgText(int x, int y, int w, const wchar_t *s, COLORREF c, HFONT f, UINT align)
 {
     RECT r = { x, y, x + w, y + 20 };
-    SelectObject(g_igDc, f);
-    SetTextColor(g_igDc, c);
-    DrawTextW(g_igDc, s, -1, &r, DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER | align);
+    SelectObject(g_igPaintDc, f);
+    SetTextColor(g_igPaintDc, c);
+    DrawTextW(g_igPaintDc, s, -1, &r, DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER | align);
 }
 
 // Paint the whole panel into the DIB. Runs every open frame - deliberately no
@@ -206,6 +223,7 @@ static void IgPaint(int mx, int my)
     wchar_t buf[64];
     LONG est = (g_aoEnable == 2) ? 1 : 0;
 
+    g_igPaintDc = g_igDc;
     SetBkMode(g_igDc, TRANSPARENT);
     r.left = 0; r.top = 0; r.right = IG_W; r.bottom = IgPanelH();
     IgFill(&r, RGB(28, 30, 34));
@@ -219,6 +237,30 @@ static void IgPaint(int mx, int my)
         IgFill(&r, RGB(140, 40, 40));
     IgText(r.left, 2, r.right - r.left, L"\x2715", RGB(220, 220, 220),
            g_igFont, DT_CENTER);
+
+    // Rows follow the live estimator. The overlay thread retargets them at
+    // 4Hz for the Win32 window; since the selector below can switch the
+    // estimator from this very panel, do it here as well so the sliders
+    // never show the other estimator's values for a quarter second.
+    for (size_t i = 0; i < AO_ROWS; i++) {
+        g_aoRows[i].val = g_aoRows[i].vals[est];
+        g_aoRows[i].lo = g_aoRows[i].loE[est];
+        g_aoRows[i].hi = g_aoRows[i].hiE[est];
+    }
+    {
+        static const wchar_t *const segs[3] = { NULL, L"SSAO", L"HBAO+" };
+        int cur = (int)g_aoEnable;
+        if (cur < 0 || cur > 2) cur = 0;
+        for (int s = 0; s < 3; s++) {
+            int hot;
+            IgModeRect(s, &r);
+            hot = (mx >= r.left && mx < r.right && my >= r.top && my < r.bottom);
+            IgFill(&r, (s == cur) ? RGB(58, 108, 178) : hot ? RGB(66, 72, 84) : RGB(52, 56, 64));
+            IgText(r.left, r.top + 1, r.right - r.left, s == 0 ? TR(S_OFF) : segs[s],
+                   (s == cur) ? RGB(255, 255, 255) : RGB(210, 210, 210),
+                   (s == cur) ? g_igFontBold : g_igFont, DT_CENTER);
+        }
+    }
 
     for (size_t i = 0; i < AO_ROWS; i++) {
         RECT t;
@@ -442,6 +484,18 @@ static void IgInput(LONG mx, LONG my)
             g_igPrevDown = down;
             return;
         }
+        for (int s = 0; s < 3; s++) {
+            IgModeRect(s, &r);
+            if (lx >= r.left && lx < r.right && ly >= r.top && ly < r.bottom) {
+                if ((LONG)s != g_aoEnable) {
+                    InterlockedExchange(&g_aoEnable, (LONG)s);
+                    SaveConfig();
+                    GameMenuRefreshChecks();
+                }
+                g_igPrevDown = down;
+                return;
+            }
+        }
         for (size_t i = 0; i < AO_ROWS; i++) {
             RECT t;
             IgRowTrack((int)i, &t);
@@ -468,8 +522,25 @@ static void IgInput(LONG mx, LONG my)
         if (ly >= r.top && ly < r.bottom && lx >= r.left && lx < r.right) {
             DWORD now = GetTickCount();
             if (g_igResetArm && now - g_igResetArm < 3000) {
+                // Only the SELECTED estimator's values (user request
+                // 2026-09-14); the other estimator's tuning and the shared
+                // resolution stay. With AO off there is nothing to reset.
+                static const char *const ssaoKeys[] = {
+                    "AoStrengthPct", "AoIntensity100", "AoRadius100", "AoBias1000",
+                    "AoRadiusMaxPct", "AoBlurSharp", "AoBlurPasses", "AoBlurStep100",
+                };
+                static const char *const hbaoKeys[] = {
+                    "AoHbaoStrengthPct", "AoHbaoIntensity100", "AoHbaoRadius100", "AoHbaoBias1000",
+                    "AoHbaoRadiusMaxPct", "AoHbaoBlurSharp", "AoHbaoBlurPasses", "AoHbaoBlurStep100",
+                };
                 g_igResetArm = 0;
-                CfgResetDefaults(1);
+                if (g_aoEnable == 2) {
+                    CfgResetKeys(hbaoKeys, sizeof(hbaoKeys) / sizeof(hbaoKeys[0]));
+                    LogLine("[config] AO panel: HBAO+ values reset");
+                } else if (g_aoEnable == 1) {
+                    CfgResetKeys(ssaoKeys, sizeof(ssaoKeys) / sizeof(ssaoKeys[0]));
+                    LogLine("[config] AO panel: SSAO values reset");
+                }
             } else {
                 g_igResetArm = now;
             }
@@ -697,12 +768,17 @@ static void IgPresent(IDirect3DDevice9 *dev)
     int haveMouse;
 
     int wantAo, wantOvl, wantStat;
+    static int spReady = 0;
+    int wantSp = 0;
 
     if (!dev || !g_inGameUi) return;
     wantAo   = (g_aoTweakOpen != 0);
     wantOvl  = (g_overlayEnabled != 0);
     wantStat = (g_statusEnabled != 0);
-    if (!wantAo && !wantOvl && !wantStat) return;
+#if ENABLE_SHADOW_PCSS
+    wantSp   = (g_pcssTweakOpen != 0);
+#endif
+    if (!wantAo && !wantOvl && !wantStat && !wantSp) return;
     // EndScene rate, measured once: past ~600 frames, report how many times
     // this ran per frame. >1 means per-pass brackets and the draw runs that
     // many times; the prep never does.
@@ -743,9 +819,11 @@ static void IgPresent(IDirect3DDevice9 *dev)
     // The blit shader is shared by all three surfaces; without the AO panel
     // open nothing else has created it yet.
     if ((wantOvl || wantStat) && !IgEnsureGpu(dev)) { wantOvl = wantStat = 0; }
+    // The shadow panel needs the fonts (IgEnsureGdi) and the blit shader.
+    if (wantSp && (!IgEnsureGdi() || !IgEnsureGpu(dev))) wantSp = 0;
     if (wantOvl && !IgSurfEnsure(dev, &g_igOvlSurf, OVL_W, OVL_H)) wantOvl = 0;
     if (wantStat && !IgSurfEnsure(dev, &g_igStatSurf, STAT_W, STAT_H)) wantStat = 0;
-    if (!wantAo && !wantOvl && !wantStat) return;
+    if (!wantAo && !wantOvl && !wantStat && !wantSp) return;
 
     // ---- input: EVERY call, not once per frame -----------------------------
     // Deliberately outside the prep block below. EndScene runs ~4x per frame
@@ -761,8 +839,20 @@ static void IgPresent(IDirect3DDevice9 *dev)
     // change tests against where the surfaces are actually drawn.
     if (wantOvl) IgAutoPos(&g_overlayX, &g_overlayY, OVL_W, OVL_H, 0);
     if (wantStat) IgAutoPos(&g_statusX, &g_statusY, STAT_W, STAT_H, 1);
-    if (haveMouseS) IgInput(mxS, myS);
+    if (haveMouseS) {
+        int consumed = 0;
+#if ENABLE_SHADOW_PCSS
+        // The shadow panel is drawn over the AO panel, so it is hit-tested
+        // first. When it takes the click, the AO input still has to see the
+        // button state, or the same press reads as a fresh click there next
+        // call - so only its edge tracker is updated.
+        if (wantSp) consumed = SpInput(mxS, myS);
+#endif
+        if (consumed) g_igPrevDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        else IgInput(mxS, myS);
+    }
     if (!g_aoTweakOpen) wantAo = 0;
+    if (!g_pcssTweakOpen) wantSp = 0;
 
     // ---- prep: once per engine frame, however many EndScenes it has -------
     if (g_msFrameSeq != lastPrepFrame) {
@@ -780,6 +870,9 @@ static void IgPresent(IDirect3DDevice9 *dev)
             IgPaint(haveMouseS ? mxS - g_igX : -100, haveMouseS ? myS - g_igY : -100);
             if (!IgUpload()) { IgReleaseGpu(); wantAo = 0; }
         }
+#if ENABLE_SHADOW_PCSS
+        spReady = wantSp ? SpPrep(dev, (int)haveMouseS, mxS, myS) : 0;
+#endif
         // The two display surfaces: their own paint functions, unchanged,
         // pointed at a DIB instead of a window DC - but only every
         // IG_DISPLAY_PERIOD_MS, which is the cadence their Win32 versions
@@ -861,6 +954,9 @@ static void IgPresent(IDirect3DDevice9 *dev)
                 IgQuad(dev, (float)g_statusX, (float)g_statusY,
                        (float)STAT_W, (float)STAT_H, 0.0f, 0.0f, 1.0f, 1.0f);
             }
+#if ENABLE_SHADOW_PCSS
+            if (wantSp && spReady) SpDraw(dev);
+#endif
             if (wantAo) {
                 // Only the LIVE height: the texture is always allocated tall
                 // enough for an open dropdown, but the quad shows just the part
@@ -874,9 +970,15 @@ static void IgPresent(IDirect3DDevice9 *dev)
             // Cursor: crosshair from the white patch. Only while the panel that
             // owns that patch is up - and only when the mapping succeeded, since
             // a wrong cursor is worse than none.
-            if (haveMouse && wantAo) {
+            if (haveMouse && (wantAo || (wantSp && spReady))) {
                 float wu = (IG_WHITE_X + 4.0f) / IG_W, wv = (IG_WHITE_Y + 4.0f) / IG_TEX_H;
-                g_origSetTexture(dev, 12, (IDirect3DBaseTexture9 *)g_igTex);
+                IDirect3DBaseTexture9 *ct = (IDirect3DBaseTexture9 *)g_igTex;
+#if ENABLE_SHADOW_PCSS
+                // Without the AO panel its texture may hold nothing; the
+                // shadow panel paints its own white patch for the cursor.
+                if (!wantAo) SpCursorTex(&ct, &wu, &wv);
+#endif
+                g_origSetTexture(dev, 12, ct);
                 IgQuad(dev, (float)mx - 7, (float)my - 1, 14, 2, wu, wv, wu, wv);
                 IgQuad(dev, (float)mx - 1, (float)my - 7, 2, 14, wu, wv, wu, wv);
             }

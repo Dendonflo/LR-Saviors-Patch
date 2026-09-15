@@ -78,6 +78,41 @@ TABLE = [
         "Shadow Distance", "Distance des ombres", "Schattendistanz",
         "Distanza ombre", "Distancia de sombras",
         "影の描画距離", "陰影距離", "그림자 거리"]),
+    ("S_SHADOW_SOFT", [
+        "Shadow Softness", "Douceur des ombres", "Schattenweichheit",
+        "Morbidezza ombre", "Suavidad de sombras",
+        "影のぼかし", "陰影柔和度", "그림자 부드러움"]),
+    ("S_SHADOW_TUNING", [
+        "Shadow Tuning", "Réglages des ombres", "Schatten-Feineinstellungen",
+        "Regolazione ombre", "Ajustes de sombras",
+        "影の調整", "陰影調整", "그림자 조정"]),
+    ("S_SOFTNESS", [
+        "Softness %", "Douceur %", "Weichheit %", "Morbidezza %",
+        "Suavidad %", "ぼかし %", "柔和度 %", "부드러움 %"]),
+    ("S_LIGHT_SIZE", [
+        "Light size", "Taille du soleil", "Lichtgröße", "Dimensione luce",
+        "Tamaño de la luz", "光源サイズ", "光源大小", "광원 크기"]),
+    ("S_MIN_RADIUS", [
+        "Min radius", "Rayon min.", "Min. Radius", "Raggio min.",
+        "Radio mín.", "最小半径", "最小半徑", "최소 반경"]),
+    ("S_SEARCH_RADIUS", [
+        "Search radius", "Rayon de recherche", "Suchradius", "Raggio di ricerca",
+        "Radio de búsqueda", "探索半径", "搜尋半徑", "탐색 반경"]),
+    ("S_RESET_SHADOW", [
+        "Reset shadow tuning", "Réinitialiser les réglages des ombres",
+        "Schatten-Einstellungen zurücksetzen", "Reimposta la regolazione ombre",
+        "Restablecer los ajustes de sombras", "影の調整をリセット",
+        "重設陰影調整", "그림자 조정 초기화"]),
+    ("S_NPC_SPAWN", [
+        "NPC Spawning Distance", "Distance d'apparition des PNJ", "NPC-Spawn-Distanz",
+        "Distanza di comparsa PNG", "Distancia de aparición de PNJ",
+        "NPCの出現距離", "NPC 出現距離", "NPC 등장 거리"]),
+    ("S_DEFAULT", [
+        "Default", "Par défaut", "Standard", "Predefinito",
+        "Predeterminado", "デフォルト", "預設", "기본"]),
+    ("S_EXTENDED", [
+        "Extended", "Étendue", "Erweitert", "Estesa",
+        "Ampliada", "拡張", "延伸", "확장"]),
     ("S_AO", [
         "Ambient Occlusion", "Occlusion ambiante", "Umgebungsverdeckung",
         "Occlusione ambientale", "Oclusión ambiental",

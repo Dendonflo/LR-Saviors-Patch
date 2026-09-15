@@ -259,6 +259,22 @@ static void LogD3DWindow(void)
                         g_shadowSplitNearPct, g_shadowSplitFarPct);
                 LogLine(line);
             }
+            if (g_npcPopLength > 0 || g_npcDepopLength > 0 || g_npcPoolA || g_npcPoolB || g_npcPoolC) {
+                sprintf(line, "[npc] pop=%ld depop=%ld writes=%ld pools A=%ld B=%ld C=%ld", g_npcPopLength, g_npcDepopLength, g_npcPopWrites, g_npcPoolA, g_npcPoolB, g_npcPoolC);
+                LogLine(line);
+            }
+#if ENABLE_SHADOW_PCSS
+            if (g_shadowPcss || g_pcssBinds) {
+                sprintf(line, "[pcss] on=%ld state=%ld binds=%ld orig=%p",
+                        g_shadowPcss, g_pcssState, g_pcssBinds, g_pcssOrigObj);
+                LogLine(line);
+            }
+#endif
+            if (g_shadowFilterPct > 0 || g_shadowFilterWrites) {
+                sprintf(line, "[shadow-filter] engine radius=%.3f pct=%ld writes=%ld",
+                        g_shadowFilterSeenBase, g_shadowFilterPct, g_shadowFilterWrites);
+                LogLine(line);
+            }
             if (g_shadowMapRes > 0) {
                 sprintf(line, "[shadow] engine res value: want=%ld last_seen=%ld writes=%ld",
                         g_shadowMapRes, g_shadowResLastSeen, g_shadowResWrites);

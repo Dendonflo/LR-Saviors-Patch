@@ -1,7 +1,7 @@
 ================================================================
  SAVIOR'S PATCH
  for Lightning Returns: Final Fantasy XIII (Steam)
- Version 1.0
+ Version 1.1
 ================================================================
 
 This mod reduces stutters, improves the framerate of the game,
@@ -41,23 +41,60 @@ game already had. There is no separate window to open.
 
 New entries you will find under Graphics:
 
+ - Resolution .......... now goes up to 8K
  - Texture Filtering ... now goes up to 16x (the game stopped
                          at 8x, and its "Standard" setting
                          turned filtering off completely)
  - Mip LOD Bias ....... fixes shimmering on distant ground
- - Ambient Occlusion .. SSAO or HBAO+, with a tuning panel
+ - Ambient Occlusion .. off, SSAO ,or HBAO+, with a tuning panel
  - Shadows ............ resolution up to 8192
  - Shadow Distance .... up to 300%
+ - Shadow Softness .... Off, On, or PCSS (contact-hardening: 
+			sharp near the caster, softer 
+			further away). "Tuning Panel"
+                        opens an in-game panel for either mode.
+ - NPC Spawning .......
+   Distance ........... Default, or Extended (townsfolk appear
+                        from about 2.5x further away)
+			/!\ As NPCs spawning is a cause of 
+			stuttering this mod tries to mitigate,
+			it could reintroduce small hitches, 
+			try it out and revert if it causes issues
  - MSAA ............... up to 8x
  - SSAA ............... up to 2x supersampling
  - FXAA ............... the game's built-in blur filter, now
                         switchable
- - Frame Rate ......... 30 / 60 / unlimited
+ - Frame Rate ......... 30 / 60 / unlimited (unlimited is 
+			untested and will probably cause
+			scripting issues)
  - VSync .............. on or off
 
 Under the "Other" menu you will also find a frame time graph, a
 status panel showing what is actually applied, and a button to
 reset every setting back to default if you get lost.
+
+The Ambient Occlusion and Shadow tuning panels each have a mode
+selector at the top and a Reset button that only resets the mode
+currently selected, so trying PCSS never loses your AO numbers.
+
+
+----------------------------------------------------------------
+ NEW IN 1.1
+----------------------------------------------------------------
+
+ - Resolutions up to 8K are now supported
+ - Shadow Softness: Off (default game's smoothness) / On / PCSS
+ - Shadows no longer "pop" to a lower resolution when the camera
+   crosses certain angles relative to the sun. The game switched
+   between two shadow projections mid-pan; the mod now keeps the
+   stable one.
+ - NPC Spawning Distance (Graphics menu): optional, off by
+   default. Placed NPCs pop in at 200 units instead of 80, and
+   the random crowd is sized for the larger area.
+ - In-game Shadow tuning panel, matching the Ambient Occlusion
+   one. Both panels got a mode selector and per-mode reset.
+ - Existing settings files are kept: the new options simply
+   appear with their defaults.
 
 
 ----------------------------------------------------------------

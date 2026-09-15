@@ -183,6 +183,16 @@
 //                        it in its own options menu.
 // ENABLE_SPIN_GUARD    - limiter spin high-water clamp, never confirmed.
 #define ENABLE_SHADER_DIAG    0
+// ENABLE_SHADOW_PCSS - replace the engine's 8-tap shadow projection shader
+//   (ps_C7978054) with a 32-tap PCF + 16-tap blocker search (PCSS). See
+//   27_shadow_pcss.c. Runtime toggle ShadowPcss; off = engine shader.
+#define ENABLE_SHADOW_PCSS     1
+// ENABLE_CASCADE_WATCH - records the MS_SHADOW pixel-shader constants c0-c9
+//   (split + both cascade matrices) via a SetPixelShaderConstantF hook and
+//   logs [cwatch] lines when a cascade's world extent JUMPS between frames.
+//   For the "whole shadow drops to half res at a precise camera angle"
+//   report (2026-09-14). Diagnostic; one compare per constant upload.
+#define ENABLE_CASCADE_WATCH   0
 #define ENABLE_SURFACE_DIAG   0
 #define ENABLE_CUTOUT_AA      0
 // RETIRED 2026-08-15 (release cleanup). Its question was answered - the
@@ -730,6 +740,20 @@ static volatile LONG g_deferUploadsEnabled = 0;
 static volatile LONG g_deferPerFrame = 12;
 static void DrainStagedUploads(void);
 static void ApplyCascadeSplitSource(void);   // per-frame; see the split-source block
+static void ApplyShadowFilterRadius(void);   // per-frame; see the shadow-filter block
+#if ENABLE_SHADOW_PCSS
+static int  PcssBind(void *dev, void *pShader, HRESULT *hr);   // 27_shadow_pcss.c
+static void PcssNoteCreated(DWORD hash, void *obj);
+static void PcssTweakPoll(void);                             // 10b_pcss_tune.c
+#endif
+#if ENABLE_CASCADE_WATCH
+static void CascadeWatchDraw(void);                          // 16, cascade watch
+static void CascadeWatchBind(void *pShader);
+#endif
+static void InstallProjModeHook(unsigned char *base);
+static void ApplyNpcPopDistances(void);                   // 29_npc_pop.c, monitor cadence
+static void ApplyNpcPools(void);
+static void InstallNpcPoolPatch(unsigned char *base);
 static void CutsceneDetectTick(void);        // per-frame; see 21_cutscene_shadow.c
 static void LogFlushNow(void);               // defined in 19_boot_install.c
 #if ENABLE_CRASH_LOG

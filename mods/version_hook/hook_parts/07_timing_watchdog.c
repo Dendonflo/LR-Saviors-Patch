@@ -539,6 +539,7 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     // boundary would carry up to half a second of wrong shadows.
     CutsceneDetectTick();
     ApplyCascadeSplitSource();
+    ApplyShadowFilterRadius();
 
     g_frameStartUsec = NowUsec();
     InterlockedIncrement(&g_frameSeq);
@@ -1149,7 +1150,14 @@ __declspec(naked) void Detour_b46c20(void)
     }
 }
 
+static int InstallJmpHookRaw(HookedFunc *hf, void *detour, void **trampolineOut);
 static int InstallJmpHook(HookedFunc *hf, void *detour, void **trampolineOut)
+{
+    int r = InstallJmpHookRaw(hf, detour, trampolineOut);
+    HookRegNote(hf->name, r);            // status panel: "N installed / M failed"
+    return r;
+}
+static int InstallJmpHookRaw(HookedFunc *hf, void *detour, void **trampolineOut)
 {
     // 16, not 6: hideWindow needs a 7-byte patch (its prologue's last
     // instruction straddles the 6-byte boundary). Every existing caller uses

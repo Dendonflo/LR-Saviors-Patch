@@ -143,6 +143,14 @@ def main():
     for name, label in blurs:
         ok &= compile_one(fxc, extract(csrc, name), [], label)
 
+    # PCSS shadow projection (27_shadow_pcss.c), same macro set PcssEnsure uses.
+    pcss_src = os.path.join(os.path.dirname(SRC), "27_shadow_pcss.c")
+    if os.path.exists(pcss_src):
+        with open(pcss_src, encoding="utf-8", errors="replace") as fh:
+            pcss_c = fh.read()
+        ok &= compile_one(fxc, extract(pcss_c, "g_pcssHlsl"),
+                          [("PCSS_TAPS", "32"), ("PCSS_SEARCH", "16")], "PCSS")
+
     print("ALL SHADERS OK" if ok else "SHADER CHECK FAILED")
     return 0 if ok else 1
 

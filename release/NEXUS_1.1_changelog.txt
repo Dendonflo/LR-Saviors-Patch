@@ -1,0 +1,19 @@
+Savior's Patch 1.1 - Nexus changelog / description addendum (BBCode)
+
+[size=4][b]1.1[/b][/size]
+
+[b]Shadow Softness[/b] (Graphics menu): Off / On / PCSS / Tuning Panel.
+[list]
+[*]The game's own soft-shadow filter is now normalised to the shadow resolution: it looked increasingly grainy above 2K because the blur kernel was measured in shadow-map texels. "On" gives the same softness at every resolution, with a percentage slider in the tuning panel.
+[*][b]PCSS[/b] (new, default): contact-hardening soft shadows. Sharp where the shadow touches its caster, softer as the distance grows. Light size, min/max radius, search radius and bias are all in the in-game panel.
+[/list]
+[b]Shadow resolution "pop" fixed.[/b] Panning the camera past certain angles relative to the sun used to drop an entire shadow to a third of its resolution. The engine was switching between a perspective and a uniform shadow projection mid-pan; the mod now keeps the uniform one. Slightly lower peak resolution at the exact angle the perspective map favoured, in exchange for stable shadows everywhere. [i]ShadowProjMode=0[/i] in SaviorsPatch.ini restores the game's behaviour.
+
+[b]NPC Spawning Distance[/b] (Graphics menu): Default / Extended, off by default. Extended makes placed NPCs appear at 200 units instead of 80 (about 2.5x), and raises the random-crowd cap so the larger area stays as dense as vanilla up close. NPCs bound to area entry, schedules or streaming still appear as before.
+
+[b]Tuning panels.[/b] The Shadow tuning panel is new and works like the Ambient Occlusion one. Both panels have a mode selector at the top (Off / SSAO / HBAO+, Off / On / PCSS); the Reset button resets the selected mode only. The game's own menu checkmarks follow the panel.
+
+[b]Housekeeping.[/b] Existing SaviorsPatch.ini files carry over; new options appear with their defaults. The archive no longer ships an ini - the mod writes one on first launch.
+
+[size=4][b]Files[/b][/size]
+Savior's Patch - 1.1.rar : dinput8.dll, README.txt
