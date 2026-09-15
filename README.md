@@ -66,11 +66,11 @@ no download step. Reproducing it takes about a minute.
 1. Clone the repository.
 2. Open `mods/version_hook/build.cmd` and check the `vcvars32.bat` path on
    its `call` line matches your installation (default:
-   `C:\Program Files\Microsoft Visual Studio8\Community\VC\Auxiliary\Buildcvars32.bat`).
+   `C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars32.bat`).
 3. Run it from a normal command prompt:
 
    ```bat
-   cd modsersion_hook
+   cd mods\version_hook
    build.cmd
    ```
 
