@@ -45,10 +45,79 @@ Source: https://github.com/Dendonflo/LR-Saviors-Patch — releases on Nexus Mods
 
 ## Building
 
-32-bit MSVC. Run `mods/version_hook/build.cmd` — it calls `vcvars32.bat`,
-compiles `dllmain.c` + `hook.c` + `proxy.c`, and links against
-`dinput8.def`. Output is `dinput8_new.dll`; copy it into the game directory as
-`dinput8.dll`.
+The shipped `dinput8.dll` is built from this tree with nothing but the
+Microsoft compiler; there is no third-party code, no package manager, and
+no download step. Reproducing it takes about a minute.
+
+**Prerequisites**
+
+- Windows 10/11.
+- Visual Studio 2026 Community (any edition works) with the
+  *Desktop development with C++* workload, which provides the 32-bit
+  (`x86`) MSVC toolset and the Windows SDK. Nothing else is needed: the
+  DLL links only against Windows system libraries (`user32`, `gdi32`,
+  `comctl32`) and resolves `d3d9.dll` / `d3dx9_43.dll` at runtime from the
+  copies the game itself already loads.
+- Python 3 (optional) for `tools/check_shaders.py`, the pre-release check
+  that the runtime-compiled HLSL actually compiles.
+
+**Steps**
+
+1. Clone the repository.
+2. Open `mods/version_hook/build.cmd` and check the `vcvars32.bat` path on
+   its `call` line matches your installation (default:
+   `C:\Program Files\Microsoft Visual Studio8\Community\VC\Auxiliary\Buildcvars32.bat`).
+3. Run it from a normal command prompt:
+
+   ```bat
+   cd modsersion_hook
+   build.cmd
+   ```
+
+   It does exactly one thing:
+
+   ```bat
+   cl /nologo /O2 /W3 /LD dllmain.c hook.c proxy.c /Fe:dinput8_new.dll ^
+      /link /DEF:dinput8.def user32.lib gdi32.lib comctl32.lib /MAP:dinput8_new.map
+   ```
+
+   Expect a handful of warnings (`C4996 sprintf`, `LNK4222` ordinal notes);
+   there are no errors. Output is `dinput8_new.dll` (~390 KB) and
+   `dinput8_new.map`, which lists every function in the binary by name.
+4. Copy `dinput8_new.dll` into the game folder as `dinput8.dll`.
+
+The whole mod is one translation unit: `hook.c` `#include`s the files in
+`hook_parts/` in order (see its header comment), so everything the DLL
+contains is readable in this tree, top to bottom. The build embeds
+`__DATE__`/`__TIME__` in the boot banner, so two builds differ by those
+bytes and the linker timestamp; everything else is deterministic.
+
+**Why antivirus heuristics dislike it**
+
+Every one of these is what a game hook has to do, and each is readable in
+the source at the file named:
+
+- It is a `dinput8.dll` *proxy*: the game loads it by name and it forwards
+  the real exports to `System32\dinput8.dll` (`proxy.c`). Proxy DLLs are a
+  classic malware pattern *and* the standard way PC game mods load.
+- It patches game code in memory at start-up — 5/6-byte `jmp` hooks on a
+  few dozen engine functions and a handful of immediate rewrites — which
+  needs `VirtualProtect` and `VirtualAlloc(PAGE_EXECUTE_READWRITE)` for the
+  trampolines (`07_timing_watchdog.c` `InstallJmpHook`, `19_boot_install.c`).
+  Every patch site is verified against the expected original bytes first
+  and skipped otherwise.
+- It installs a vectored exception handler to write a crash report into
+  `SaviorsPatch.log` (`19_boot_install.c` `ModCrashVeh`).
+- It patches the D3D9 device vtable to substitute shaders and render
+  targets (`16_output_res_cascade.c`), and compiles its own HLSL at runtime
+  with the game's `d3dx9_43.dll` (`25_ssao.c`, `27_shadow_pcss.c`).
+- It draws its overlay through GDI into a texture and polls input
+  (`26_ingame_ui.c`); it reads and writes one file next to itself,
+  `SaviorsPatch.ini`, and appends to `SaviorsPatch.log`.
+
+It makes no network connections, starts no processes, touches nothing
+outside the game folder, and contains no packed or encrypted code — the
+`.map` file from the build accounts for every byte.
 
 ## Compatibility
 
