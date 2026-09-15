@@ -127,4 +127,5 @@ the mod is the cause before reporting it.
 ----------------------------------------------------------------
 
 GNU General Public License v3. This mod is free software and
-comes with no warranty. Source code is available.
+comes with no warranty. Source code:
+https://github.com/Dendonflo/LR-Saviors-Patch

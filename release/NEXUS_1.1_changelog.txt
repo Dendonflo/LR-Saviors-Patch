@@ -15,5 +15,7 @@ Savior's Patch 1.1 - Nexus changelog / description addendum (BBCode)
 
 [b]Housekeeping.[/b] Existing SaviorsPatch.ini files carry over; new options appear with their defaults. The archive no longer ships an ini - the mod writes one on first launch.
 
+[b]Source:[/b] [url=https://github.com/Dendonflo/LR-Saviors-Patch]https://github.com/Dendonflo/LR-Saviors-Patch[/url] (GPLv3)
+
 [size=4][b]Files[/b][/size]
 Savior's Patch - 1.1.rar : dinput8.dll, README.txt

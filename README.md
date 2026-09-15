@@ -7,6 +7,8 @@ streaming assets, and to add graphics options the original never exposed.
 Ships as a `dinput8.dll` proxy. All options live in the game's own Win32 menu
 bar — there is no separate window and nothing is loaded from disk at runtime.
 
+Source: https://github.com/Dendonflo/LR-Saviors-Patch — releases on Nexus Mods.
+
 ## What it does
 
 **Stutter fixes**
@@ -66,8 +68,9 @@ D3D9 device racing the game's own through a wrapper is what crashed startup.
 mods/version_hook/             the mod itself
 mods/version_hook/hook.c       ordered #include manifest - the mod is ONE
                                translation unit, assembled from:
-mods/version_hook/hook_parts/  19 subsystem files (config, SSAA, MSAA, menu,
-                               watchdog, staging, boot/install, ...)
+mods/version_hook/hook_parts/  35 subsystem files (config, SSAA, MSAA, AO,
+                               shadows/PCSS, menu, panels, watchdog,
+                               staging, NPC spawning, boot/install, ...)
 tools/ghidra_scripts/          headless Ghidra scripts used for the analysis
 tools/clb/                     tools for reading the engine's script resources
 tools/*.ps1                    log monitoring helpers
