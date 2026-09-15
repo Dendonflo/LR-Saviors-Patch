@@ -66,8 +66,13 @@ version_hook_config.ini
 # ---------------------------------------------------------------------------
 PROGRESS.md
 FEATURES.md
+POST_BETA_PLAN.md
+CRASHES.md
+RUN_*.md
 DEBUG_MENU.md
 SCRIPTS_60FPS.md
 GYSAHL_GREENS_FULL.md
 LR_GysahlGreen_RootCause.pdf
 build/shadercheck/
+# The developer's own ini - the archive does not ship one, the DLL writes it.
+release/SaviorsPatch.ini
