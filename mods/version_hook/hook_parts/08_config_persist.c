@@ -12,7 +12,7 @@ static void GetConfigPath(char *outPath, size_t outSize)
 }
 
 // ---- Toggleable fixes (GUI checkbox only - hotkeys removed) ---------------
-// Used to also carry a vkey and a GetAsyncKeyState poll for a hotkey per
+// Used to also carry a vkey and a keyboard-state poll for a hotkey per
 // entry. Dropped: with nine toggles the F-key list had gotten long, and the
 // checkboxes are the only control actually used - one interaction surface
 // instead of two that had to be kept in sync.

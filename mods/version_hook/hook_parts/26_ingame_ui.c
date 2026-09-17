@@ -30,7 +30,7 @@
 //             pre-transformed quad. No glyph atlas, no vertex text, nothing
 //             to break when a label changes language mid-session.
 //   Input   - polled: GetCursorPos mapped into backbuffer space plus
-//             GetAsyncKeyState(VK_LBUTTON). No window messages exist to
+//             GetKeyState(VK_LBUTTON). No window messages exist to
 //             steal focus or run modal loops. The game keeps the foreground
 //             the entire time, which is the point.
 //   Draws   - through g_orig* pointers only (self-interference rule), with
@@ -396,9 +396,15 @@ static int IgCursor(LONG *ox, LONG *oy)
     return 1;
 }
 
+// GetKeyState, NOT GetAsyncKeyState (2026-09-17): the async form reads the
+// global keyboard state from any process without focus - the keylogger
+// primitive, and the one API behind VirusTotal's "checks-user-input" tag on
+// the 1.0/1.1 binaries. GetKeyState reads the calling thread's queue state,
+// which is what we want anyway: this runs on the game's window thread at
+// EndScene, and a click only counts while the game has focus.
 static void IgInput(LONG mx, LONG my)
 {
-    int down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    int down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
     int click = down && !g_igPrevDown;
     LONG lx = mx - g_igX, ly = my - g_igY;
     RECT r;
@@ -832,7 +838,7 @@ static void IgPresent(IDirect3DDevice9 *dev)
     // EDGE happened to be sampled while the cursor was still over the target -
     // which is what "the zone I have to click is very precise" actually was.
     // It is not a hit-test problem; the rects are the full surfaces. Polling
-    // here costs a cached GetCursorPos and a GetAsyncKeyState, and it is only
+    // here costs a cached GetCursorPos and a GetKeyState, and it is only
     // the PAINT that is expensive enough to want frame-rate limiting.
     haveMouseS = IgCursor(&mxS, &myS);
     // Positions before the hit test, so the first sample after a resolution
@@ -848,7 +854,7 @@ static void IgPresent(IDirect3DDevice9 *dev)
         // call - so only its edge tracker is updated.
         if (wantSp) consumed = SpInput(mxS, myS);
 #endif
-        if (consumed) g_igPrevDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        if (consumed) g_igPrevDown = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
         else IgInput(mxS, myS);
     }
     if (!g_aoTweakOpen) wantAo = 0;

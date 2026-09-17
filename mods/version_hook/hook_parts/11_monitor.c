@@ -125,7 +125,10 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         // explain exactly. This thread always runs.
         {
             static int f9Down = 0;
-            int f9 = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+            // GetKeyState needs a message queue, which this thread has not;
+            // GetAsyncKeyState is banned from the binary (see IgInput in 26).
+            // Diagnostic only, gated out of release: F9 here is a no-op.
+            int f9 = 0;
             if (f9 && !f9Down) {
                 g_captureRequest = 1;
                 LogLine("[capture] F9 (monitor thread) - full-frame capture armed");

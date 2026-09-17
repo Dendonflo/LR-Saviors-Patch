@@ -167,7 +167,7 @@ static void SpCursorTex(IDirect3DBaseTexture9 **tex, float *wu, float *wv)
 // ---- input: returns 1 when the click/drag was consumed ----
 static int SpInput(LONG mx, LONG my)
 {
-    int down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    int down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;   // see IgInput: not the async form
     int click = down && !g_spPrevDown;
     LONG lx = mx - g_spX, ly = my - g_spY;
     RECT r;

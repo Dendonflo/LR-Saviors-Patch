@@ -2087,7 +2087,7 @@ static LRESULT CALLBACK PanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 #if ENABLE_SURFACE_DIAG
             {
                 static int f9WasDown = 0;
-                int f9 = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+                int f9 = (GetKeyState(VK_F9) & 0x8000) != 0;   // panel thread pumps messages
                 if (f9 && !f9WasDown) {
                     g_captureRequest = 1;
                     LogLine("[capture] F9 pressed - full-frame capture armed");
