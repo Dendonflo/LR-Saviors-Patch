@@ -663,7 +663,7 @@ static LONG g_projDecideHooked = 0;             // 28: FUN_00a89170 hook landed
 
 // ---- hook registry (status panel) -----------------------------------------
 // Every code hook and IAT hook reports its install outcome here by name, so
-// the status panel can say "N hooks installed, M failed" and name the
+// the status panel can say "N links installed, M failed" and name the
 // failures on screen instead of leaving them as an untagged log line nobody
 // reads. Filled once at boot from InstallJmpHook (07) and the boot
 // installer (19); read-only afterwards.

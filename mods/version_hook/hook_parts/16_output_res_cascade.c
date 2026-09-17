@@ -1801,7 +1801,7 @@ static int DevVtableAlreadyHooked(void **vtbl)
 // REVERTED 2026-08-13. The per-vtable version below was built and shipped and
 // the game crashed on startup with it. The reasoning (two CreateDevice calls,
 // one-shot consumed by the first) is still supported by the log, but the
-// conclusion "so patch both vtables" was wrong or incomplete: widening what
+// conclusion "so tweak both slot tables" was wrong or incomplete: widening what
 // gets patched is exactly what broke it, and under the HD GUI mod the second
 // vtable is the mod's own proxy class. Patching a wrapper's vtable with
 // functions that assume a native device is not a safe substitution.
@@ -1866,8 +1866,8 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
         }
     } else {
         g_origDevicePresentEx = NULL;
-        LogLine("[d3d9] device is not IDirect3DDevice9Ex - PresentEx hook skipped "
-                "(would have written past the end of the vtable)");
+        LogLine("[d3d9] device is not IDirect3DDevice9Ex - PresentEx link skipped "
+                "(would have written past the end of the slot table)");
     }
 
     // Same technique as Present/PresentEx above (real replacement function on
@@ -2112,7 +2112,7 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
             vtbl[slotW] = (void *)HookedSetPSConstF_W;
             VirtualProtect(&vtbl[slotW], sizeof(void *), oldProtect, &oldProtect);
         }
-        LogLine("[cwatch] SetPixelShaderConstantF hooked (cascade watch)");
+        LogLine("[cwatch] SetPixelShaderConstantF linked (cascade watch)");
     }
 #endif
 #if ENABLE_CASCADE_HUNT
@@ -2207,8 +2207,8 @@ static void HookRealDevicePresent(IDirect3DDevice9 *dev)
         }
     }
 
-    sprintf(line, "[d3d9] present hooks installed: Present slot=%d PresentEx=%s EndScene=hooked", slot,
-            g_origDevicePresentEx ? "hooked" : "skipped (device is not Ex)");
+    sprintf(line, "[d3d9] present links installed: Present slot=%d PresentEx=%s EndScene=linked", slot,
+            g_origDevicePresentEx ? "linked" : "skipped (device is not Ex)");
     LogLine(line);
 }
 

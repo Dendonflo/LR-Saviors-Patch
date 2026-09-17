@@ -40,17 +40,17 @@ static volatile LONG g_msDumpState;   // 0 idle, 2 backbuffer pending, 3 done
 
 // One-shot proof that presents actually route through these hooks - the
 // in-game panel renders here, so "panel never appears" with no other line is
-// indistinguishable from "Present never hooked" without it. Shared by both
+// indistinguishable from "Present never linked" without it. Shared by both
 // Present and PresentEx, and [boot]-tagged to survive the release filter.
 static volatile LONG g_presentAliveLogged = 0;
 #define PRESENT_ALIVE_ONCE(which) \
     do { if (InterlockedCompareExchange(&g_presentAliveLogged, 1, 0) == 0) \
-        LogLine("[boot] present hook alive (" which ")"); } while (0)
+        LogLine("[boot] present link alive (" which ")"); } while (0)
 
 // ---- EndScene: the injection point that actually fires ---------------------
 // The chain trace for the in-game panel proved what the retirement note in 16
 // had already recorded: NEITHER device-level Present has ever fired in this
-// game (the "present hook alive" one-shot stayed silent from frame 1), and
+// game (the "present link alive" one-shot stayed silent from frame 1), and
 // the swap-chain Present hook is a confirmed first-frame crash, retired
 // undiagnosed. So anything that must run once per frame inside the frame -
 // the panel, and the MSAA resolve backstop that silently never ran either -
@@ -70,7 +70,7 @@ static HRESULT STDMETHODCALLTYPE HookedEndScene(IDirect3DDevice9 *This)
 {
     static volatile LONG esAlive = 0;
     if (InterlockedCompareExchange(&esAlive, 1, 0) == 0)
-        LogLine("[boot] EndScene hook alive (panel + MSAA backstop moved here)");
+        LogLine("[boot] EndScene link alive (panel + MSAA backstop moved here)");
     // The MSAA backstop, relocated from the Present hooks where it never ran.
     // Resolving here is legal and idempotent: hasContent set means the scene
     // episode is still open, the resolve syncs the engine's texture, and the

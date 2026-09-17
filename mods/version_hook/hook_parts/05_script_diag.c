@@ -59,7 +59,7 @@ static void ApplyTalkTimerScale(void)
         unsigned char *insn = (unsigned char *)(g_mainModBase + TALK_STEP_INSN_RVA);
         if (insn[0] != 0xF2 || insn[1] != 0x0F ||
             insn[2] != 0x5C || insn[3] != 0x05) {
-            LogLine("[talk] step patch REFUSED: not SUBSD XMM0,[disp32] at the "
+            LogLine("[talk] step tweak REFUSED: not SUBSD XMM0,[disp32] at the "
                     "expected RVA - wrong exe build?");
             g_talkStepPatched = -1;
             return;
@@ -70,7 +70,7 @@ static void ApplyTalkTimerScale(void)
         // the 0.05 we identified, this is not the instruction we think it is.
         if (cur < 0.0499 || cur > 0.0501) {
             char l[160];
-            sprintf(l, "[talk] step patch REFUSED: operand at 0x%08X is %.6f, "
+            sprintf(l, "[talk] step tweak REFUSED: operand at 0x%08X is %.6f, "
                        "expected 0.05", disp, cur);
             LogLine(l);
             g_talkStepPatched = -1;
@@ -78,7 +78,7 @@ static void ApplyTalkTimerScale(void)
         }
         DWORD oldProtect;
         if (!VirtualProtect(insn + 4, 4, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            LogLine("[talk] step patch: VirtualProtect failed");
+            LogLine("[talk] step tweak: VirtualProtect failed");
             return;                        // retry on the next tick
         }
         g_talkStepOrigDisp = disp;
@@ -87,7 +87,7 @@ static void ApplyTalkTimerScale(void)
         g_talkStepPatched = 1;
         {
             char l[192];
-            sprintf(l, "[talk] step patched: 0.05 -> %.4f (%ld%%) | operand "
+            sprintf(l, "[talk] step tweaked: 0.05 -> %.4f (%ld%%) | operand "
                        "0x%08X -> 0x%08X | talk entries now live %.1f-%.1f "
                        "frames", g_talkStep, pct, g_talkStepOrigDisp,
                     (DWORD)&g_talkStep, 5.0 / g_talkStep, 10.0 / g_talkStep);

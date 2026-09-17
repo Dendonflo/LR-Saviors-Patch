@@ -466,7 +466,7 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     {
         static volatile LONG tickAnnounced = 0;
         if (InterlockedCompareExchange(&tickAnnounced, 1, 0) == 0)
-            LogLine("[boot] frame tick alive (engine pacer hook is running)");
+            LogLine("[boot] frame tick alive (engine pacer link is running)");
     }
     // Deferred menu/settings poll (defined in 09_game_menu.c, which is later in
     // the TU). THIS is the main thread by definition - g_mainThreadId is

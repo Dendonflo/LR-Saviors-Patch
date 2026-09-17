@@ -730,7 +730,7 @@ static DWORD WINAPI MonitorThread(LPVOID param)
         for (LONG i = 0; i < implCount; i++) {
             if (g_allocImpls[i].logged) continue;
             g_allocImpls[i].logged = 1;
-            sprintf(line, "[allocimpl] #%ld vtable=0x%08X allocFn=0x%08X heap=0x%08X (module_rva_allocFn=0x%08X)",
+            sprintf(line, "[allocimpl] #%ld slot table=0x%08X allocFn=0x%08X heap=0x%08X (module_rva_allocFn=0x%08X)",
                     i,
                     (unsigned int)g_allocImpls[i].vtable,
                     (unsigned int)g_allocImpls[i].allocFn,

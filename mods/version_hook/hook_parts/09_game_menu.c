@@ -1370,7 +1370,7 @@ static void InstallGameMenuHook(void)
 
     if (site[0] != 0xE8 ||
         (unsigned char *)(site + 5 + *(int *)(site + 1)) != build) {
-        sprintf(line, "[menu] call site mismatch at %08X (byte %02X) - hook NOT installed",
+        sprintf(line, "[menu] call site mismatch at %08X (byte %02X) - link NOT installed",
                 (unsigned int)site, site[0]);
         LogLine(line);
         return;
@@ -1378,19 +1378,19 @@ static void InstallGameMenuHook(void)
     // 56 8B 35 <abs> = PUSH ESI; MOV ESI,[DAT_05115554], relocated by ASLR.
     if (build[0] != 0x56 || build[1] != 0x8B || build[2] != 0x35 ||
         *(unsigned int *)(build + 3) != (unsigned int)(base + MENU_RVA_MGR_PTR)) {
-        LogLine("[menu] builder prologue mismatch - hook NOT installed");
+        LogLine("[menu] builder prologue mismatch - link NOT installed");
         return;
     }
 
     if (!VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-        LogLine("[menu] VirtualProtect failed - hook NOT installed");
+        LogLine("[menu] VirtualProtect failed - link NOT installed");
         return;
     }
     *(int *)(site + 1) = (int)GameMenuBuildDetour - (int)(site + 5);
     VirtualProtect(site, 5, oldProtect, &oldProtect);
     FlushInstructionCache(GetCurrentProcess(), site, 5);
     g_menuHookInstalled = 1;
-    LogLine("[menu] game-menu build hook installed (call site 0x6BC32E)");
+    LogLine("[menu] game-menu build link installed (call site 0x6BC32E)");
 }
 
 // ---- deferred poll: things that are not settled at menu-build time ---------

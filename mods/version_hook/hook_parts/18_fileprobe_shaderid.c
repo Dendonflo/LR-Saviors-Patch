@@ -120,7 +120,7 @@ static void LogD3DWindow(void)
     // eligible/firstseen/tracked tell those apart at a glance.
     LONG elig = g_lockRectEligible, firstSeen = g_lockRectFirstSeen;
     if (elig > 0) {
-        sprintf(line, "[d3d9] DISCARD inject=%ld this window (total=%ld) | eligible=%ld firstseen=%ld mipskip=%ld tracked=%ld/%d clears=%ld",
+        sprintf(line, "[d3d9] DISCARD insert=%ld this window (total=%ld) | eligible=%ld firstseen=%ld mipskip=%ld tracked=%ld/%d clears=%ld",
                 discardWindow, discardTotal, elig, firstSeen, g_lockRectMipSkipped,
                 g_seenTextureCount, SEEN_TEX_SLOTS, g_seenTexClears);
         LogLine(line);
@@ -545,7 +545,7 @@ static void LogD3DWindow(void)
             }
 #if ENABLE_TALK_TIMER
             if (g_talkTimerPct > 0 || g_talkStepPatched) {
-                sprintf(line, "[talk] timer rate=%ld%% patched=%d step=%.4f/frame "
+                sprintf(line, "[talk] timer rate=%ld%% tweaked=%d step=%.4f/frame "
                               "(stock 0.05) orig_operand=0x%08X",
                         g_talkTimerPct, g_talkStepPatched, g_talkStep,
                         g_talkStepOrigDisp);
@@ -880,11 +880,11 @@ static void ProbeD3D9ForVtable(void)
     if (g_d3d9IsThirdParty || g_hdTexNotify || wrapperPresent) {
         LogLine(g_d3d9IsThirdParty
                 ? "[d3d9] probe SKIPPED (third-party d3d9.dll) - a second device here "
-                  "is what crashed DXVK; resource hooks now come from the game's own "
+                  "is what crashed DXVK; resource links now come from the game's own "
                   "real device via HookRealDevicePresent"
                 : "[d3d9] probe SKIPPED (device-wrapping mod present) - a second device "
                   "racing the game's own through the wrapper is what crashes it; "
-                  "resource hooks come from the real device via HookRealDevicePresent");
+                  "resource links come from the real device via HookRealDevicePresent");
         return;
     }
 
@@ -919,7 +919,7 @@ static void ProbeD3D9ForVtable(void)
         return;
     }
 
-    LogLine("[d3d9] probe: throwaway HAL device created, patching shared vtable");
+    LogLine("[d3d9] probe: throwaway HAL device created, tweaking shared slot table");
     HookDeviceVtable(dev);
 
     // Safe to tear down immediately: the vtable itself lives in the driver's

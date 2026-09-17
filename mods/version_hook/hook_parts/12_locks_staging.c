@@ -914,7 +914,7 @@ static HRESULT STDMETHODCALLTYPE HookedTexLockRect(IDirect3DTexture9 *This, UINT
                             (pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE)       ? "ONE(vsync, requested by GAME)" :
                             (pp.PresentationInterval == D3DPRESENT_INTERVAL_TWO)       ? "TWO(half refresh)" :
                             (pp.PresentationInterval == D3DPRESENT_INTERVAL_DEFAULT)   ? "DEFAULT(driver decides)" : "OTHER";
-                        sprintf(line, "[d3d9] REAL device swapchain (via GetDevice, not the broken Present hook): "
+                        sprintf(line, "[d3d9] REAL device swapchain (via GetDevice, not the broken Present link): "
                                       "Windowed=%d SwapEffect=%d BackBufferCount=%d RefreshRate=%luHz "
                                       "PresentationInterval=0x%lX %s",
                                 pp.Windowed, (int)pp.SwapEffect, pp.BackBufferCount,
@@ -1209,7 +1209,7 @@ static void HookRealSurfaceLockRect(IDirect3DSurface9 *surf)
         VirtualProtect(&vtbl[slotU], sizeof(void *), oldProtect, &oldProtect);
     }
 
-    LogLine("[d3d9] REAL Surface::LockRect/UnlockRect hooks installed (from a live game surface)");
+    LogLine("[d3d9] REAL Surface::LockRect/UnlockRect links installed (from a live game surface)");
 }
 
 static HRESULT STDMETHODCALLTYPE HookedTexUnlockRect(IDirect3DTexture9 *This, UINT Level)
@@ -1722,7 +1722,7 @@ static void HookResourceVtables(IDirect3DDevice9 *dev)
         }
         IDirect3DCubeTexture9_Release(cube);
         char l[128];
-        sprintf(l, "[d3d9] CubeTexture LockRect/UnlockRect hooks installed (slots %d/%d)", sl, su);
+        sprintf(l, "[d3d9] CubeTexture LockRect/UnlockRect links installed (slots %d/%d)", sl, su);
         LogLine(l);
     }
 
@@ -1774,7 +1774,7 @@ static void HookDeviceVtable(IDirect3DDevice9 *dev)
             char l[320]; char ownerName[MAX_PATH];
             ownerName[0] = '\0';
             if (vtOwner) GetModuleFileNameA(vtOwner, ownerName, MAX_PATH);
-            sprintf(l, "[d3d9] device vtable lives in '%s', not d3d9.dll - wrapped device",
+            sprintf(l, "[d3d9] device slot table lives in '%s', not d3d9.dll - wrapped device",
                     ownerName[0] ? ownerName : "<unknown>");
             LogLine(l);
         }
@@ -1784,7 +1784,7 @@ static void HookDeviceVtable(IDirect3DDevice9 *dev)
         if (!wantThunks) {
             HookResourceVtables(dev);
             LogLine("[d3d9] device-slot timing thunks SKIPPED (wrapped device or "
-                    "third-party d3d9.dll); resource hooks installed as normal");
+                    "third-party d3d9.dll); resource links installed as normal");
             return;
         }
     }
@@ -1819,7 +1819,7 @@ static void HookDeviceVtable(IDirect3DDevice9 *dev)
     HookResourceVtables(dev);
 
     char line[192];
-    sprintf(line, "[d3d9] device vtable hooked, %ld slots instrumented", g_d3dSlotCount);
+    sprintf(line, "[d3d9] device slot table linked, %ld slots instrumented", g_d3dSlotCount);
     LogLine(line);
 }
 

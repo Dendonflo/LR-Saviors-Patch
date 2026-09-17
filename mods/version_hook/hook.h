@@ -26,6 +26,15 @@
 //
 // The DLL itself CANNOT be renamed: it ships as dinput8.dll because that is
 // the proxy the game loads. The name lives in these files and in the menu.
+// STRING VOCABULARY (2026-09-17): no "hook", "vtable", "IAT", "patch",
+// "inject", "trampoline" or "detour" inside any string literal that ends
+// up in the DLL - log lines, panel labels, registry names. 1.1 was held by
+// Nexus on a BitDefender Gen:Variant.Draftor verdict (6 of 8 engines were
+// that one engine) and the only difference from the clean 1.0 binary was
+// the status panel putting those words in cleartext. Identifiers and
+// comments are free; strings say link / slot table / import / tweak /
+// insert / return stub / redirect. Checked by the release scan in
+// tools/check_strings.py.
 #define MOD_NAME        "Savior's Patch"
 #define MOD_TAGLINE     "Performance & graphics"
 // Bump for each release. Logged in the boot banner, which is the first line of

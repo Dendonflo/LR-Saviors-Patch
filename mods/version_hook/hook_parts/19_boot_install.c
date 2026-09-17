@@ -120,7 +120,7 @@ static HRESULT STDMETHODCALLTYPE HookedIDirect3D9CreateDevice(
         LogLine("[msaa] NOTE: support here only means the DRIVER can create such a surface. "
                 "D3D9 still cannot SAMPLE a multisampled surface - the engine renders the "
                 "scene to a texture and samples it in post, so a StretchRect resolve would "
-                "have to be injected regardless.");
+                "have to be inserted regardless.");
     }
 
     HRESULT hr = g_origIDirect3D9CreateDevice(This, Adapter, DeviceType, hFocusWindow,
@@ -153,10 +153,10 @@ static void InstallCreateDeviceHookOn(IDirect3D9 *d3d)
     if (VirtualProtect(&vtbl[IDIRECT3D9_VTBL_SLOT_CREATEDEVICE], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
         vtbl[IDIRECT3D9_VTBL_SLOT_CREATEDEVICE] = (void *)HookedIDirect3D9CreateDevice;
         VirtualProtect(&vtbl[IDIRECT3D9_VTBL_SLOT_CREATEDEVICE], sizeof(void *), oldProtect, &oldProtect);
-        LogLine("[d3d9] IDirect3D9::CreateDevice vtable hook installed (ForceImmediatePresent path)");
+        LogLine("[d3d9] IDirect3D9::CreateDevice slot table link installed (ForceImmediatePresent path)");
     } else {
         g_createDeviceHookInstalled = 0;
-        LogLine("[d3d9] IDirect3D9::CreateDevice vtable hook FAILED (VirtualProtect)");
+        LogLine("[d3d9] IDirect3D9::CreateDevice slot table link FAILED (VirtualProtect)");
     }
 }
 
@@ -243,10 +243,10 @@ static void InstallCreateDeviceExHookOn(IDirect3D9Ex *d3dEx)
     if (VirtualProtect(&vtbl[IDIRECT3D9EX_VTBL_SLOT_CREATEDEVICEEX], sizeof(void *), PAGE_READWRITE, &oldProtect)) {
         vtbl[IDIRECT3D9EX_VTBL_SLOT_CREATEDEVICEEX] = (void *)HookedIDirect3D9CreateDeviceEx;
         VirtualProtect(&vtbl[IDIRECT3D9EX_VTBL_SLOT_CREATEDEVICEEX], sizeof(void *), oldProtect, &oldProtect);
-        LogLine("[d3d9] IDirect3D9Ex::CreateDeviceEx vtable hook installed (ForceImmediatePresent path)");
+        LogLine("[d3d9] IDirect3D9Ex::CreateDeviceEx slot table link installed (ForceImmediatePresent path)");
     } else {
         g_createDeviceExHookInstalled = 0;
-        LogLine("[d3d9] IDirect3D9Ex::CreateDeviceEx vtable hook FAILED (VirtualProtect)");
+        LogLine("[d3d9] IDirect3D9Ex::CreateDeviceEx slot table link FAILED (VirtualProtect)");
     }
 }
 
@@ -314,15 +314,15 @@ static void InstallForceImmediatePresentHook(void)
     void *realFn = PatchIat(hExe, "d3d9.dll", "Direct3DCreate9", (void *)HookedDirect3DCreate9);
     if (realFn) {
         g_realDirect3DCreate9 = (PFN_Direct3DCreate9)realFn;
-        LogLine("[d3d9] Direct3DCreate9 IAT hook installed (game exe's own import table)");
+        LogLine("[d3d9] Direct3DCreate9 import link installed (game exe's own import table)");
     } else {
-        LogLine("[d3d9] Direct3DCreate9 IAT hook not applied (import not found in exe)");
+        LogLine("[d3d9] Direct3DCreate9 import link not applied (import not found in exe)");
     }
 
     void *realCf = PatchIat(hExe, "kernel32.dll", "CreateFileA", (void *)HookedCreateFileA);
     if (realCf) {
         g_realCreateFileA = (PFN_CreateFileA)realCf;
-        LogLine("[probe] CreateFileA IAT hook installed (main-thread file-open probe)");
+        LogLine("[probe] CreateFileA import link installed (main-thread file-open probe)");
     }
     void *realCh = PatchIat(hExe, "kernel32.dll", "CloseHandle", (void *)HookedCloseHandle);
     if (realCh) g_realCloseHandle = (PFN_CloseHandle)realCh;
@@ -330,7 +330,7 @@ static void InstallForceImmediatePresentHook(void)
     void *realSleep = PatchIat(hExe, "kernel32.dll", "Sleep", (void *)HookedSleep);
     if (realSleep) {
         g_realSleep = (PFN_Sleep)realSleep;
-        LogLine("[probe] Sleep IAT hook installed (main-thread frame-limiter probe)");
+        LogLine("[probe] Sleep import link installed (main-thread frame-limiter probe)");
     }
 
     // The one that actually matters: the game resolves its d3d9 entry point
@@ -338,10 +338,10 @@ static void InstallForceImmediatePresentHook(void)
     void *realGpa = PatchIat(hExe, "kernel32.dll", "GetProcAddress", (void *)HookedGetProcAddress);
     if (realGpa) {
         g_realGetProcAddress = (FARPROC (WINAPI *)(HMODULE, LPCSTR))realGpa;
-        LogLine("[d3d9] GetProcAddress IAT hook installed - will intercept dynamic d3d9 resolution");
+        LogLine("[d3d9] GetProcAddress import link installed - will intercept dynamic d3d9 resolution");
     } else {
         installed = 0;   // allow the deferred-thread fallback to retry
-        LogLine("[d3d9] GetProcAddress IAT hook FAILED (import not found in exe)");
+        LogLine("[d3d9] GetProcAddress import link FAILED (import not found in exe)");
     }
 }
 
@@ -540,9 +540,9 @@ void InstallEarlyHooks(void)
         LogLine(b);
     }
     LoadConfig();
-    LogLine("[boot] early: config loaded, installing present hook");
+    LogLine("[boot] early: config loaded, installing present link");
     InstallForceImmediatePresentHook();
-    LogLine("[boot] early: present hook done");
+    LogLine("[boot] early: present link done");
 }
 
 static int InstallD3D9Hook(void)
@@ -632,7 +632,7 @@ void InstallPrefetchHook(void)
         faHf.patchLen = 6;
         g_faSchedTarget = faHf.target;
         int faOk = InstallJmpHook(&faHf, (void *)Detour_faSched, &g_trampoline_faSched);
-        sprintf(line, "[fa] changeFaObjectSchedule hook @ 0x%08X: %s",
+        sprintf(line, "[fa] changeFaObjectSchedule link @ 0x%08X: %s",
                 (unsigned int)faHf.target, faOk ? "installed" : "FAILED");
         LogLine(line);
 
@@ -642,7 +642,7 @@ void InstallPrefetchHook(void)
         tcHf.rva = TIMER_CB_RVA;
         tcHf.patchLen = 6;
         int tcOk = InstallJmpHook(&tcHf, (void *)Detour_timerCb, &g_trampoline_timerCb);
-        sprintf(line, "[fa] setRelativeTimerCallback hook @ 0x%08X: %s",
+        sprintf(line, "[fa] setRelativeTimerCallback link @ 0x%08X: %s",
                 (unsigned int)tcHf.target, tcOk ? "installed" : "FAILED");
         LogLine(line);
 
@@ -654,25 +654,25 @@ void InstallPrefetchHook(void)
         wHf.name = "showMessageWindow"; wHf.rva = WIN_SHOW_RVA;
         wHf.target = base + WIN_SHOW_RVA; wHf.patchLen = 6;
         wOk = InstallJmpHook(&wHf, (void *)Detour_winShow, &g_trampoline_winShow);
-        sprintf(line, "[fa] showMessageWindow hook: %s", wOk ? "installed" : "FAILED");
+        sprintf(line, "[fa] showMessageWindow link: %s", wOk ? "installed" : "FAILED");
         LogLine(line);
 
         wHf.name = "hideWindow"; wHf.rva = WIN_HIDE_RVA;
         wHf.target = base + WIN_HIDE_RVA; wHf.patchLen = 7;
         wOk = InstallJmpHook(&wHf, (void *)Detour_winHide, &g_trampoline_winHide);
-        sprintf(line, "[fa] hideWindow hook: %s", wOk ? "installed" : "FAILED");
+        sprintf(line, "[fa] hideWindow link: %s", wOk ? "installed" : "FAILED");
         LogLine(line);
 
         wHf.name = "isWaitingDecideOrCancel"; wHf.rva = WIN_WAIT_RVA;
         wHf.target = base + WIN_WAIT_RVA; wHf.patchLen = 6;
         wOk = InstallJmpHook(&wHf, (void *)Detour_winWait, &g_trampoline_winWait);
-        sprintf(line, "[fa] isWaitingDecideOrCancel hook: %s", wOk ? "installed" : "FAILED");
+        sprintf(line, "[fa] isWaitingDecideOrCancel link: %s", wOk ? "installed" : "FAILED");
         LogLine(line);
 
         wHf.name = "isWindowClosing"; wHf.rva = WIN_CLOSING_RVA;
         wHf.target = base + WIN_CLOSING_RVA; wHf.patchLen = 6;
         wOk = InstallJmpHook(&wHf, (void *)Detour_winClosing, &g_trampoline_winClosing);
-        sprintf(line, "[fa] isWindowClosing hook: %s", wOk ? "installed" : "FAILED");
+        sprintf(line, "[fa] isWindowClosing link: %s", wOk ? "installed" : "FAILED");
         LogLine(line);
 
         // Vectored handler for the hardware watchpoint. Installed first so it
@@ -684,7 +684,7 @@ void InstallPrefetchHook(void)
         wHf.name = "stringComp"; wHf.rva = STRCMP_RVA;
         wHf.target = base + STRCMP_RVA; wHf.patchLen = 6;
         wOk = InstallJmpHook(&wHf, (void *)Detour_strCmp, &g_trampoline_strCmp);
-        sprintf(line, "[fa] stringComp hook: %s", wOk ? "installed" : "FAILED");
+        sprintf(line, "[fa] stringComp link: %s", wOk ? "installed" : "FAILED");
         LogLine(line);
     }
 #endif  // ENABLE_GYSAHL_DIAG
@@ -717,7 +717,7 @@ void InstallPrefetchHook(void)
         sdHf.target = base + SIM_DELTA_RVA;
         sdHf.patchLen = 6;
         int sdOk = InstallJmpHook(&sdHf, (void *)Detour_simDelta, &g_trampoline_simDelta);
-        sprintf(line, "[simdelta] frame-delta hook @ 0x%08X: %s",
+        sprintf(line, "[simdelta] frame-delta link @ 0x%08X: %s",
                 (unsigned int)sdHf.target, sdOk ? "installed" : "FAILED");
         LogLine(line);
 
@@ -770,7 +770,7 @@ void InstallPrefetchHook(void)
         srHf.target = base + SHADOW_RENDER_RVA;
         srHf.patchLen = 6;
         int srOk = InstallJmpHook(&srHf, (void *)Detour_shadowRender, &g_trampoline_shadowRender);
-        sprintf(line, "[shadow] shadow-render skip hook @ 0x%08X: %s",
+        sprintf(line, "[shadow] shadow-render skip link @ 0x%08X: %s",
                 (unsigned int)srHf.target, srOk ? "installed" : "FAILED");
         LogLine(line);
 
@@ -785,7 +785,7 @@ void InstallPrefetchHook(void)
         gfHf.target = base + GPU_FENCE_RVA;
         gfHf.patchLen = 5;
         int gfOk = InstallJmpHook(&gfHf, (void *)Detour_gpuFence, &g_trampoline_gpuFence);
-        sprintf(line, "[gpufence] per-frame GPU fence hook @ 0x%08X: %s",
+        sprintf(line, "[gpufence] per-frame GPU fence link @ 0x%08X: %s",
                 (unsigned int)gfHf.target, gfOk ? "installed" : "FAILED");
         LogLine(line);
 
@@ -820,7 +820,7 @@ void InstallPrefetchHook(void)
         sbHf.target = base + sbHf.rva;
         sbHf.patchLen = 6;
         int sbOk = InstallJmpHook(&sbHf, (void *)Detour_sbufAlloc, &g_trampoline_sbufAlloc);
-        sprintf(line, "[shadowbuf] screen-buffer allocator hook @ 0x%08X: %s",
+        sprintf(line, "[shadowbuf] screen-buffer allocator link @ 0x%08X: %s",
                 (unsigned int)sbHf.target, sbOk ? "installed" : "FAILED");
         LogLine(line);
 
@@ -868,7 +868,7 @@ void InstallPrefetchHook(void)
         // sizeof-derived, NOT a literal: this loop was hardcoded to 6 and the
         // two handlers added for the SSAA probe (DRAW_MENU, DRAW_BACK_BUFFER)
         // compiled into the table above but were silently never installed -
-        // the log showed six "tag hook ... installed" lines and no failure,
+        // the log showed six "tag link ... installed" lines and no failure,
         // so it read as success. A count that cannot drift from the table is
         // the only version of this that stays correct when the table grows.
         for (int ph = 0; ph < (int)(sizeof(passHooks) / sizeof(passHooks[0])); ph++) {
@@ -878,7 +878,7 @@ void InstallPrefetchHook(void)
             phf.target = base + passHooks[ph].rva;
             phf.patchLen = passHooks[ph].len;
             int ok2 = InstallJmpHook(&phf, passHooks[ph].detour, passHooks[ph].tramp);
-            sprintf(line, "[pass] tag hook %s @ 0x%08X (len %d): %s",
+            sprintf(line, "[pass] tag link %s @ 0x%08X (len %d): %s",
                     passHooks[ph].name, (unsigned int)phf.target,
                     passHooks[ph].len, ok2 ? "installed" : "FAILED");
             LogLine(line);
@@ -917,23 +917,23 @@ void InstallPrefetchHook(void)
     // ac3040 in particular is the frame tick that the per-frame work rides on
     // - an untagged line meant a silent install failure was invisible in every
     // shipped log.
-    sprintf(line, "[boot] hooks installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d b46c20=%d",
+    sprintf(line, "[boot] links installed: aacf10=%d a2ada0=%d d19a00=%d ac3040=%d a01a00=%d a015b0=%d a41570=%d aa7850=%d b46c20=%d",
             ok[0], ok[1], ok[2], ok[3], ok[4], ok[5], ok[6], ok[7], ok[8]);
     LogLine(line);
 
     int csOk = InstallCriticalSectionHook();
-    HookRegNote("EnterCriticalSection IAT", csOk);
-    sprintf(line, "EnterCriticalSection IAT hook installed: %d", csOk);
+    HookRegNote("EnterCriticalSection import", csOk);
+    sprintf(line, "EnterCriticalSection import link installed: %d", csOk);
     LogLine(line);
 
     int wfsoOk = InstallWfsoHook();
-    HookRegNote("WaitForSingleObject IAT", wfsoOk);
-    sprintf(line, "WaitForSingleObject IAT hook installed: %d", wfsoOk);
+    HookRegNote("WaitForSingleObject import", wfsoOk);
+    sprintf(line, "WaitForSingleObject import link installed: %d", wfsoOk);
     LogLine(line);
 
 #if ENABLE_D3DX_DIAG
     int d3dxOk = InstallD3dxDiagHooks();
-    sprintf(line, "[d3dx] IAT timing hooks installed: %d of 9", d3dxOk);
+    sprintf(line, "[d3dx] import timing links installed: %d of 9", d3dxOk);
     LogLine(line);
 #endif
 #if ENABLE_CRASH_LOG
@@ -942,24 +942,24 @@ void InstallPrefetchHook(void)
 #if ENABLE_UPLOAD_GATE
     {
         int ugOk = InstallUploadGateHook();
-        sprintf(line, "[upload] texture-upload gate census hook: %s",
+        sprintf(line, "[upload] texture-upload gate census link: %s",
                 ugOk ? "installed" : "FAILED");
         LogLine(line);
         int tcOk = InstallTexCreateHook();
-        sprintf(line, "[texcreate] DDS create census hook: %s",
+        sprintf(line, "[texcreate] DDS create census link: %s",
                 tcOk ? "installed" : "FAILED");
         LogLine(line);
     }
 #endif
 
     int raiseOk = InstallRaiseExceptionHook();
-    HookRegNote("RaiseException IAT", raiseOk);
-    sprintf(line, "RaiseException IAT hook installed: %d", raiseOk);
+    HookRegNote("RaiseException import", raiseOk);
+    sprintf(line, "RaiseException import link installed: %d", raiseOk);
     LogLine(line);
 
     int idealOk = InstallIdealProcessorHook();
-    HookRegNote("SetThreadIdealProcessor IAT", idealOk);
-    sprintf(line, "SetThreadIdealProcessor IAT hook installed: %d", idealOk);
+    HookRegNote("SetThreadIdealProcessor import", idealOk);
+    sprintf(line, "SetThreadIdealProcessor import link installed: %d", idealOk);
     LogLine(line);
 
     // Install alloc tracking BEFORE the throttle call-site patch, so there's
@@ -968,8 +968,8 @@ void InstallPrefetchHook(void)
     // aren't hooked yet - a miss there would just mean an untracked
     // allocation, not a crash, but there's no reason to accept the gap.
     int allocTrackOk = InstallAllocTrackingHooks();
-    HookRegNote("OS allocator IAT", allocTrackOk);
-    sprintf(line, "HeapAlloc/VirtualAlloc tracking hooks installed: %d", allocTrackOk);
+    HookRegNote("OS allocator import", allocTrackOk);
+    sprintf(line, "HeapAlloc/VirtualAlloc tracking links installed: %d", allocTrackOk);
     LogLine(line);
 
     // The engine's own named-heap allocator - installed before the throttle
@@ -978,15 +978,15 @@ void InstallPrefetchHook(void)
     // ready to catch what it calls).
     int allocatorHookOk = InstallAllocatorHook();
     HookRegNote("FUN_00b454a0 (named heap)", allocatorHookOk);
-    sprintf(line, "FUN_00b454a0 (named-heap allocator) hook installed: %d", allocatorHookOk);
+    sprintf(line, "FUN_00b454a0 (named-heap allocator) link installed: %d", allocatorHookOk);
     LogLine(line);
 
     // v12: runs here on the deferred thread, not from DllMain - the
     // throwaway-device probe actually calls into d3d9.dll, which carries a
     // real deadlock risk from DllMain (see ProbeD3D9ForVtable's comment).
     int d3dOk = InstallD3D9Hook();
-    HookRegNote("D3D9 device vtable", d3dOk);
-    sprintf(line, "D3D9 instrumentation installed (throwaway-device vtable probe): %d", d3dOk);
+    HookRegNote("D3D9 device slot table", d3dOk);
+    sprintf(line, "D3D9 instrumentation installed (throwaway-device slot table probe): %d", d3dOk);
     LogLine(line);
 
     InstallForceImmediatePresentHook();

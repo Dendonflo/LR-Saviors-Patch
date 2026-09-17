@@ -110,7 +110,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hinstDLL);
-        LogStartup("=== dinput8.dll (prefetch hook) attached ===");
+        LogStartup("=== dinput8.dll (prefetch link) attached ===");
         LoadRealDinput8();
         ResolveRealExports();
         // Synchronous, before the game's entry point runs. Only the pieces

@@ -407,7 +407,7 @@ static int InstallAllocTrackingHooks(void)
     if (realReadFile) g_realReadFile = (PFN_ReadFile)realReadFile;
 
     char line[192];
-    sprintf(line, "Census IAT hooks: HeapAlloc=%d VirtualAlloc=%d MapViewOfFile=%d ReadFile=%d",
+    sprintf(line, "Census import links: HeapAlloc=%d VirtualAlloc=%d MapViewOfFile=%d ReadFile=%d",
             realHeapAlloc != NULL, realVirtualAlloc != NULL, realMapView != NULL, realReadFile != NULL);
     LogLine(line);
 

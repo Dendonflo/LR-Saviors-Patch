@@ -1287,12 +1287,12 @@ static void SsaoApply(IDirect3DDevice9 *dev, IDirect3DBaseTexture9 *tex, int raw
                 g_aoMrtLogged = 1;
                 if (oldMrt[0] || oldMrt[1] || oldMrt[2]) {
                     char l[160];
-                    sprintf(l, "[ssao] MRT live at injection: rt1=%p rt2=%p rt3=%p"
+                    sprintf(l, "[ssao] MRT live at insertion: rt1=%p rt2=%p rt3=%p"
                                " - saved and restored around our passes",
                             (void *)oldMrt[0], (void *)oldMrt[1], (void *)oldMrt[2]);
                     LogLine(l);
                 } else {
-                    LogLine("[ssao] MRT slots 1-3 empty at injection (single render target)");
+                    LogLine("[ssao] MRT slots 1-3 empty at insertion (single render target)");
                 }
             }
         }

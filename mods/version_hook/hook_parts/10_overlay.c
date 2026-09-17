@@ -585,8 +585,8 @@ static void DrawStatusPanel(HDC dc)
         LONG m = g_shadowProjMode;
         sprintf(set, "%s", m == 1 ? "uniform (stable)" : m == 2 ? "perspective" : "engine choice");
         if (m == 0)                    sprintf(app, "engine");
-        else if (g_projDecideHooked)   sprintf(app, "hooked");
-        else                           sprintf(app, "hook missing");
+        else if (g_projDecideHooked)   sprintf(app, "linked");
+        else                           sprintf(app, "link missing");
         StatRow(dc, &y, "Shadow projection", set, app, m != 0 && !g_projDecideHooked);
     }
     StatSection(dc, &y, "ANTI-ALIASING & FILTERING");
@@ -814,7 +814,7 @@ static void DrawStatusPanel(HDC dc)
         else                         sprintf(app, "engine");
         StatRow(dc, &yR, "Compactor defer", set, app, 0);
     }
-    StatSection(dc, &yR, "HOOKS & RUNTIME");
+    StatSection(dc, &yR, "LINKS & RUNTIME");
     {
         sprintf(set, "%s", g_forceStdD3D9 ? "system d3d9" : "as loaded");
         sprintf(app, "%s%s", g_d3d9IsDxvk ? "DXVK" : g_d3d9IsThirdParty ? "third-party" : "system",
@@ -823,7 +823,7 @@ static void DrawStatusPanel(HDC dc)
     }
     {
         sprintf(set, "base 0x%08lX", (unsigned long)(UINT_PTR)g_mainModBase);
-        sprintf(app, "%s", g_devVtblHooked ? "device hooked" : "device NOT hooked");
+        sprintf(app, "%s", g_devVtblHooked ? "device linked" : "device NOT linked");
         StatRow(dc, &yR, "Game module", set, app, !g_devVtblHooked);
     }
     {
@@ -832,7 +832,7 @@ static void DrawStatusPanel(HDC dc)
         LONG n = g_hookRegCount, f = g_hookRegFails;
         sprintf(set, "%ld registered", n);
         if (f) sprintf(app, "%ld FAILED", f); else sprintf(app, "all installed");
-        StatRow(dc, &yR, "Code hooks", set, app, f != 0);
+        StatRow(dc, &yR, "Code links", set, app, f != 0);
         if (f) {
             int shown = 0;
             for (LONG i = 0; i < n && i < HOOK_REG_MAX && shown < 4; i++) {

@@ -233,7 +233,7 @@ static void AoReconReport(const char *how)
         if (!any) o += sprintf(buf + o, " (never bound via SetTexture in ANY pass)");
         LogLine(buf);
     }
-    LogLine("[aorecon] recon complete - hook stays passthrough for the rest of the session");
+    LogLine("[aorecon] recon complete - link stays passthrough for the rest of the session");
 }
 
 // ---- Tint probe (v23) -----------------------------------------------------
@@ -991,7 +991,7 @@ static HRESULT STDMETHODCALLTYPE HookedSetVSConstFov(
             // live hook that never matched? - so say which, once.
             if (InterlockedIncrement(&g_fovCalls) == 60000 && !g_fovProbeLogged) {
                 char l[192];
-                sprintf(l, "[fov] hook live: %ld calls, %ld windows examined, "
+                sprintf(l, "[fov] link live: %ld calls, %ld windows examined, "
                            "NO perspective matrix matched (best w-column norm %.4f, want 1.0)",
                         g_fovCalls, g_fovWindows, g_fovBestW);
                 LogLine(l);
@@ -1028,7 +1028,7 @@ static void InstallAoReconHook(void **vtbl)
         vtbl[slot] = (void *)HookedSetTexture;
         VirtualProtect(&vtbl[slot], sizeof(void *), oldProtect, &oldProtect);
     }
-    LogLine("[aorecon] SetTexture hook installed (screen-shadow plumbing recon)");
+    LogLine("[aorecon] SetTexture link installed (screen-shadow plumbing recon)");
 }
 
 #endif // ENABLE_AO_RECON

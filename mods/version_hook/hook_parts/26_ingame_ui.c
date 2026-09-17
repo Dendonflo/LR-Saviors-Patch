@@ -799,7 +799,7 @@ static void IgPresent(IDirect3DDevice9 *dev)
     // leaves a trace.
     if (wantAo) {
         if (InterlockedCompareExchange(&g_igOpenLogged, 1, 0) == 0)
-            LogLine("[menu] AO panel: open request reached the render hook");
+            LogLine("[menu] AO panel: open request reached the render link");
         if (!IgEnsureGdi()) {
             static volatile LONG f = 0;
             if (InterlockedCompareExchange(&f, 1, 0) == 0)

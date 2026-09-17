@@ -69,12 +69,12 @@ static void InstallProjModeHook(unsigned char *base)
     hf.target = base + PROJ_DECIDE_RVA;
     hf.patchLen = 6;
     if (memcmp(hf.target, expect, 6) != 0) {
-        LogLine("[lispsm] projection-decision prologue mismatch - ShadowProjMode hook skipped");
+        LogLine("[lispsm] projection-decision prologue mismatch - ShadowProjMode link skipped");
         HookRegNote("FUN_00a89170 (shadow proj)", 0);
         return;
     }
     g_projDecideHooked = InstallJmpHook(&hf, (void *)Detour_projDecide, &g_trampoline_projDecide);
-    sprintf(l, "[lispsm] projection-decision hook %s (ShadowProjMode=%ld: %s)",
+    sprintf(l, "[lispsm] projection-decision link %s (ShadowProjMode=%ld: %s)",
             g_projDecideHooked ? "installed" : "FAILED", g_shadowProjMode,
             g_shadowProjMode == 1 ? "always uniform" : g_shadowProjMode == 2 ? "always perspective" : "engine");
     LogLine(l);
