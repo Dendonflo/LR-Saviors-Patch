@@ -94,7 +94,11 @@ typedef struct {
     LONG recent;              // draws during the last window - the useful one
     int hasVariant;           // an A2C cutout variant exists for this shader
 } PsMapEntry;
-static PsMapEntry g_psMap[PS_MAP_MAX];
+// Heap-allocated at boot (AllocStaticTables, 19), not a static array: the
+// four big tables put 1.4 MB of zero-initialised .data behind a 5 KB raw
+// section, a virtual/raw ratio packers have and antivirus ML scores
+// (2026-09-17). Same indexing, same lifetime; only the section changes.
+static PsMapEntry *g_psMap;                 // [PS_MAP_MAX]
 static volatile LONG g_psMapCount;
 static volatile LONG g_curPsIdx = -1;       // index of the bound shader, or -1
 // Pointer -> map index, open addressing. SetPixelShader runs thousands of
@@ -103,7 +107,7 @@ static volatile LONG g_curPsIdx = -1;       // index of the bound shader, or -1
 // Must stay comfortably larger than PS_MAP_MAX or the open-addressed probe
 // degrades badly (and a full table would scan all slots on every miss).
 #define PS_LOOKUP_SIZE 65536
-static LONG g_psLookup[PS_LOOKUP_SIZE];     // 0 = empty, else index+1
+static LONG *g_psLookup;                    // [PS_LOOKUP_SIZE] 0 = empty, else index+1 (heap, see g_psMap)
 #define PS_RANK_MAX 24
 static volatile LONG g_psRankIdx[PS_RANK_MAX];
 static volatile LONG g_psRankCount;

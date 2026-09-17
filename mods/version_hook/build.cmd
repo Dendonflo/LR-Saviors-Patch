@@ -12,7 +12,10 @@ if errorlevel 1 (echo vcvars32 failed & exit /b 1)
 cd /d "%~dp0"
 REM /MAP: resolving dinput8.dll+NNNN offsets out of stutter stack walks was
 REM being done by guesswork; the map turns that into a lookup.
-cl /nologo /O2 /W3 /LD dllmain.c hook.c proxy.c ^
+REM Version resource: rc.exe comes with the SDK vcvars32 puts on PATH.
+rc /nologo /fo version.res version.rc
+if errorlevel 1 (echo rc failed & exit /b 1)
+cl /nologo /O2 /W3 /LD dllmain.c hook.c proxy.c version.res ^
    /Fe:dinput8_new.dll ^
    /link /DEF:dinput8.def user32.lib gdi32.lib comctl32.lib ^
    /MAP:dinput8_new.map /MAPINFO:EXPORTS

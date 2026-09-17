@@ -966,7 +966,7 @@ typedef struct {
     DWORD contentSum; // checksum of bytes AT the id pointer, not the pointer itself
     int contentValid;
 } ShaderIdEntry;
-static ShaderIdEntry g_shaderIds[MAX_SHADER_IDS];
+static ShaderIdEntry *g_shaderIds;          // [MAX_SHADER_IDS] heap, see g_psMap in 03
 static CRITICAL_SECTION g_shaderIdLock;
 
 static void *g_trampoline_a957a0_observe = NULL;

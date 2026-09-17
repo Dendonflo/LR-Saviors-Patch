@@ -48,7 +48,8 @@
 // so when triaging a report, read the date, not just the number.
 // 1.1 (2026-09-15): shadow softness / PCSS, uniform shadow projection,
 // NPC spawning distance, in-frame shadow + AO tuning panels.
-#define MOD_VERSION     "1.1"
+#include "version_num.h"
+#define MOD_VERSION     MOD_VERSION_STR
 // Wide form of MOD_NAME for MessageBoxW captions, without restating the name.
 #define MOD_WIDEN2(x)   L##x
 #define MOD_WIDEN(x)    MOD_WIDEN2(x)

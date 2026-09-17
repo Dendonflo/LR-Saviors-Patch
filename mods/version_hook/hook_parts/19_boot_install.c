@@ -520,8 +520,24 @@ static LONG CALLBACK ModCrashVeh(EXCEPTION_POINTERS *ep)
     return EXCEPTION_CONTINUE_SEARCH;   // never swallow it
 }
 
+// The four large lookup tables (03/12/18) live on the process heap rather
+// than in .data - see the note at g_psMap. Zeroed, never freed (process
+// lifetime, like the statics they replace). HeapAlloc is safe inside
+// DllMain; this runs before any hook that indexes them can be installed.
+static void AllocStaticTables(void)
+{
+    HANDLE h = GetProcessHeap();
+    g_psMap        = (PsMapEntry *)    HeapAlloc(h, HEAP_ZERO_MEMORY, PS_MAP_MAX      * sizeof(PsMapEntry));
+    g_psLookup     = (LONG *)          HeapAlloc(h, HEAP_ZERO_MEMORY, PS_LOOKUP_SIZE  * sizeof(LONG));
+    g_seenTextures = (SeenTextureKey *)HeapAlloc(h, HEAP_ZERO_MEMORY, SEEN_TEX_SLOTS  * sizeof(SeenTextureKey));
+    g_shaderIds    = (ShaderIdEntry *) HeapAlloc(h, HEAP_ZERO_MEMORY, MAX_SHADER_IDS  * sizeof(ShaderIdEntry));
+    if (!g_psMap || !g_psLookup || !g_seenTextures || !g_shaderIds)
+        LogLine("[boot] table allocation FAILED - 1.4 MB from the process heap at attach");
+}
+
 void InstallEarlyHooks(void)
 {
+    AllocStaticTables();
     // Both installed first, before anything else can fault. Function calls
     // only - no allocation, no I/O - so they are safe on the DllMain path.
     g_prevUnhandledFilter = SetUnhandledExceptionFilter(ModCrashFilter);

@@ -285,7 +285,7 @@ typedef struct {
     UINT width, height;
     DWORD format;
 } SeenTextureKey;
-static SeenTextureKey g_seenTextures[SEEN_TEX_SLOTS];
+static SeenTextureKey *g_seenTextures;      // [SEEN_TEX_SLOTS] heap, see g_psMap in 03
 static LONG g_seenTextureCount = 0;
 static CRITICAL_SECTION g_seenTextureLock;
 static volatile LONG g_seenTextureLockState = 0; // 0=not started, 1=initializing, 2=ready
@@ -346,7 +346,7 @@ static int HasSeenTextureBefore(DWORD texPtr, UINT level, UINT width, UINT heigh
         if (g_seenTextureCount >= SEEN_TEX_MAX_LOAD) {
             // Full enough that probe chains get long. Drop everything and
             // relearn - see the note above on why this direction is safe.
-            memset(g_seenTextures, 0, sizeof(g_seenTextures));
+            memset(g_seenTextures, 0, SEEN_TEX_SLOTS * sizeof(SeenTextureKey));
             g_seenTextureCount = 0;
             InterlockedIncrement(&g_seenTexClears);
             idx = SeenTexHash(texPtr, level);
