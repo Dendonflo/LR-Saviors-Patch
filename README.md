@@ -92,7 +92,21 @@ contains is readable in this tree, top to bottom. The build embeds
 `__DATE__`/`__TIME__` in the boot banner, so two builds differ by those
 bytes and the linker timestamp; everything else is deterministic.
 
-**Why antivirus heuristics dislike it**
+**Antivirus**
+
+1.1 was held by Nexus on a generic machine-learning verdict (BitDefender
+`Gen:Variant.Draftor`, 8 of 11 engines being that one engine). 1.1.2 cleared
+on upload with no behavioural change. What moved the score, in order of
+weight: no page is ever writable *and* executable (stubs are written, then
+sealed read-execute; game code goes `EXECUTE_WRITECOPY` while patched);
+`GetKeyState` instead of `GetAsyncKeyState`; a `VERSIONINFO` resource; the
+large lookup tables allocated at start-up instead of sitting in `.data`
+(1.5 MB virtual over 5 KB on disk looks packed); and no "hook"/"vtable"/
+"IAT" in string literals. `tools/check_strings.py` gates the last one;
+[capa](https://github.com/mandiant/capa) on the built DLL shows the rest.
+Keep these when adding code.
+
+**Why antivirus heuristics dislike it anyway**
 
 Every one of these is what a game hook has to do, and each is readable in
 the source at the file named:
