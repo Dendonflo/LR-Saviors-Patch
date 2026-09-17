@@ -665,6 +665,34 @@ static volatile LONG g_pcssTweakOpen = 0;       // tuning window (10b), not pers
 static volatile LONG g_shadowProjMode = 1;      // default: uniform (Stable)
 static LONG g_projDecideHooked = 0;             // 28: FUN_00a89170 hook landed
 
+// ---- W^X for our own code (2026-09-17) --------------------------------------
+// No page is ever writable and executable at the same time. The return
+// stubs and slot thunks are allocated READWRITE, filled, then sealed to
+// EXECUTE_READ; a game code page being rewritten goes to EXECUTE_WRITECOPY
+// (executable + copy-on-write, the protection the loader itself uses to
+// apply relocations to a mapped image) and back. Behaviourally identical to
+// the old PAGE_EXECUTE_READWRITE everywhere, and it removes the one
+// property - RWX memory near a thread start or an indirect call - that
+// every static analyser (capa: "spawn thread to RWX shellcode", "execute
+// shellcode via indirect call") and the antivirus models score hardest.
+#define CODE_PAGE_WRITABLE PAGE_EXECUTE_WRITECOPY
+static void *CodeAllocRW(SIZE_T n)
+{
+    return VirtualAlloc(NULL, n, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+}
+static int CodeSeal(void *p, SIZE_T n)          // RW -> RX, after the bytes are in
+{
+    DWORD o;
+    if (!VirtualProtect(p, n, PAGE_EXECUTE_READ, &o)) return 0;
+    FlushInstructionCache(GetCurrentProcess(), p, n);
+    return 1;
+}
+static int CodeUnseal(void *p, SIZE_T n)        // RX -> RW, to rewrite a stub
+{
+    DWORD o;
+    return VirtualProtect(p, n, PAGE_READWRITE, &o) != 0;
+}
+
 // ---- hook registry (status panel) -----------------------------------------
 // Every code hook and IAT hook reports its install outcome here by name, so
 // the status panel can say "N links installed, M failed" and name the

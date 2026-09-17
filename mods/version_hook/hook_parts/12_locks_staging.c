@@ -502,10 +502,12 @@ static int HookVtableSlotEx(void **vtable, int slot, const char *name, void *rep
     }
 
     unsigned char *thunk = g_d3dThunks + id * 16;
+    if (!CodeUnseal(g_d3dThunks, MAX_D3D_SLOTS * 16)) return -1;   // W^X: RW only while writing
     thunk[0] = 0xB8;                                  // mov eax, imm32
     *(LONG *)(thunk + 1) = id;
     thunk[5] = 0xE9;                                  // jmp rel32
     *(int *)(thunk + 6) = (int)(void *)GenericD3DEntry - (int)(thunk + 10);
+    if (!CodeSeal(g_d3dThunks, MAX_D3D_SLOTS * 16)) return -1;
 
     DWORD oldProtect;
     if (!VirtualProtect(entry, sizeof(void *), PAGE_READWRITE, &oldProtect)) return -1;

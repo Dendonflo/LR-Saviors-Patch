@@ -809,8 +809,7 @@ static int InstallAllocatorHook(void)
     unsigned char saved[ALLOCATOR_PATCH_LEN];
     memcpy(saved, g_allocatorTarget, ALLOCATOR_PATCH_LEN);
 
-    unsigned char *tramp = (unsigned char *)VirtualAlloc(
-        NULL, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    unsigned char *tramp = (unsigned char *)CodeAllocRW(128);
     if (!tramp) return 0;
 
     memcpy(tramp, saved, ALLOCATOR_PATCH_LEN);
@@ -818,10 +817,11 @@ static int InstallAllocatorHook(void)
     *(int *)(tramp + ALLOCATOR_PATCH_LEN + 1) =
         (int)((unsigned char *)g_allocatorTarget + ALLOCATOR_PATCH_LEN) -
         (int)(tramp + ALLOCATOR_PATCH_LEN + 5);
+    if (!CodeSeal(tramp, 128)) return 0;
     g_allocatorTrampoline = tramp;
 
     DWORD oldProtect;
-    if (!VirtualProtect(g_allocatorTarget, ALLOCATOR_PATCH_LEN, PAGE_EXECUTE_READWRITE, &oldProtect)) return 0;
+    if (!VirtualProtect(g_allocatorTarget, ALLOCATOR_PATCH_LEN, CODE_PAGE_WRITABLE, &oldProtect)) return 0;
 
     unsigned char *t = (unsigned char *)g_allocatorTarget;
     t[0] = 0xE9;
@@ -860,7 +860,7 @@ static int InstallLoaderThrottle(void)
 
     unsigned char *callSite = base + LOADER_DISPATCH_CALL_SITE_RVA;
     DWORD oldProtect;
-    if (!VirtualProtect(callSite, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) return 0;
+    if (!VirtualProtect(callSite, 5, CODE_PAGE_WRITABLE, &oldProtect)) return 0;
     callSite[0] = 0xE8; // CALL rel32 - same opcode as the original instruction, only the target changes
     *(int *)(callSite + 1) = (int)(void *)LoaderDispatchWrapper - (int)(callSite + 5);
     VirtualProtect(callSite, 5, oldProtect, &oldProtect);

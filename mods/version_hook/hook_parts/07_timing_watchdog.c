@@ -1167,18 +1167,18 @@ static int InstallJmpHookRaw(HookedFunc *hf, void *detour, void **trampolineOut)
     if (hf->patchLen < 5 || hf->patchLen > (int)sizeof(saved)) return 0;
     memcpy(saved, hf->target, hf->patchLen);
 
-    unsigned char *tramp = (unsigned char *)VirtualAlloc(
-        NULL, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    unsigned char *tramp = (unsigned char *)CodeAllocRW(128);
     if (!tramp) return 0;
 
     memcpy(tramp, saved, hf->patchLen);
     tramp[hf->patchLen] = 0xE9;
     *(int *)(tramp + hf->patchLen + 1) =
         (int)((unsigned char *)hf->target + hf->patchLen) - (int)(tramp + hf->patchLen + 5);
+    if (!CodeSeal(tramp, 128)) return 0;
     *trampolineOut = tramp;
 
     DWORD oldProtect;
-    if (!VirtualProtect(hf->target, hf->patchLen, PAGE_EXECUTE_READWRITE, &oldProtect)) return 0;
+    if (!VirtualProtect(hf->target, hf->patchLen, CODE_PAGE_WRITABLE, &oldProtect)) return 0;
 
     unsigned char *t = (unsigned char *)hf->target;
     t[0] = 0xE9;

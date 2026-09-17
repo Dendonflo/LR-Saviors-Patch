@@ -1382,7 +1382,7 @@ static void InstallGameMenuHook(void)
         return;
     }
 
-    if (!VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+    if (!VirtualProtect(site, 5, CODE_PAGE_WRITABLE, &oldProtect)) {
         LogLine("[menu] VirtualProtect failed - link NOT installed");
         return;
     }

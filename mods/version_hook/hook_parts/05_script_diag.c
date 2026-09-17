@@ -77,7 +77,7 @@ static void ApplyTalkTimerScale(void)
             return;
         }
         DWORD oldProtect;
-        if (!VirtualProtect(insn + 4, 4, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        if (!VirtualProtect(insn + 4, 4, CODE_PAGE_WRITABLE, &oldProtect)) {
             LogLine("[talk] step tweak: VirtualProtect failed");
             return;                        // retry on the next tick
         }

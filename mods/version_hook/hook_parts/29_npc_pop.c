@@ -150,7 +150,7 @@ static void NpcPoolWrite(unsigned char *site, int immOff, DWORD want, DWORD engi
     DWORD v = want ? want : engine;
     DWORD oldProtect;
     if (cur == v) return;
-    if (!VirtualProtect(site + immOff, 4, PAGE_EXECUTE_READWRITE, &oldProtect)) return;
+    if (!VirtualProtect(site + immOff, 4, CODE_PAGE_WRITABLE, &oldProtect)) return;
     *(DWORD *)(site + immOff) = v;
     VirtualProtect(site + immOff, 4, oldProtect, &oldProtect);
     FlushInstructionCache(GetCurrentProcess(), site, 8);

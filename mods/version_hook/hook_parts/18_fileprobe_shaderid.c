@@ -1071,16 +1071,17 @@ static int InstallShaderIdentityHook(void)
     unsigned char saved[SHADER_CREATE_PATCH_LEN];
     memcpy(saved, target, SHADER_CREATE_PATCH_LEN);
 
-    unsigned char *tramp = (unsigned char *)VirtualAlloc(NULL, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    unsigned char *tramp = (unsigned char *)CodeAllocRW(32);
     if (!tramp) return 0;
     memcpy(tramp, saved, SHADER_CREATE_PATCH_LEN);
     tramp[SHADER_CREATE_PATCH_LEN] = 0xE9;
     *(int *)(tramp + SHADER_CREATE_PATCH_LEN + 1) =
         (int)(target + SHADER_CREATE_PATCH_LEN) - (int)(tramp + SHADER_CREATE_PATCH_LEN + 5);
+    if (!CodeSeal(tramp, 32)) return 0;
     g_trampoline_a957a0_observe = tramp;
 
     DWORD oldProtect;
-    if (!VirtualProtect(target, SHADER_CREATE_PATCH_LEN, PAGE_EXECUTE_READWRITE, &oldProtect)) return 0;
+    if (!VirtualProtect(target, SHADER_CREATE_PATCH_LEN, CODE_PAGE_WRITABLE, &oldProtect)) return 0;
     target[0] = 0xE9;
     *(int *)(target + 1) = (int)(void *)Detour_a957a0_observe - (int)(target + 5);
     VirtualProtect(target, SHADER_CREATE_PATCH_LEN, oldProtect, &oldProtect);

@@ -564,8 +564,9 @@ void InstallEarlyHooks(void)
 static int InstallD3D9Hook(void)
 {
     g_d3dStackTls = TlsAlloc();
-    g_d3dThunks = (unsigned char *)VirtualAlloc(NULL, MAX_D3D_SLOTS * 16,
-                                                MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    // RW now, sealed RX after the first thunk is written (HookVtableSlotEx
+    // unseals/reseals around each write). Never RWX.
+    g_d3dThunks = (unsigned char *)CodeAllocRW(MAX_D3D_SLOTS * 16);
     if (!g_d3dThunks) return 0;
     ProbeD3D9ForVtable();
     return g_d3dSlotCount > 0;
