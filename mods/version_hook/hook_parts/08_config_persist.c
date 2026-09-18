@@ -222,6 +222,16 @@ static NumericSetting g_numerics[] = {
     // Mob pop window radius (POPWNearLenMob, engine 150). 0 = follows
     // NpcPopLength + 50 when that is set, else engine.
     { &g_npcMobWindow,      "NpcMobWindow",      0, 2000 },
+    // Spare SceneActors the budget governor keeps free (engine pool: 144).
+    // 32: a Flanitor aggro in the Yusnaan plaza takes 25-34 inside a second
+    // and the cuts need about that long to free space; 24 left 12 spare at
+    // the worst moment, 32 leaves ~20 for the price of ~8 background
+    // walkers in that one plaza. Missing from an older ini = 32; the key is
+    // written out with the rest on the next settings change.
+    // Below this the mob cap is cut to the engine's 20, then the distances
+    // fall back to the engine's own, until actors come back; 0 = governor
+    // off (the 1.1.2 behaviour, which crashed in dense areas). 29_npc_pop.c.
+    { &g_npcActorReserve,   "NpcActorReserve",   0, 128 },
     // Cutscene-aware revert (21_cutscene_shadow.c). Cutscenes are authored
     // against the engine's own splits, so the option above breaks shadows in
     // some of them; while a cutscene plays the split is held at the engine

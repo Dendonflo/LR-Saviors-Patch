@@ -754,6 +754,8 @@ static void InstallProjModeHook(unsigned char *base);
 static void ApplyNpcPopDistances(void);                   // 29_npc_pop.c, monitor cadence
 static void ApplyNpcPools(void);
 static void InstallNpcPoolPatch(unsigned char *base);
+static void NpcActorGovernorTick(void);                   // 29_npc_pop.c, per frame (main thread)
+static int  NpcActorPoolRead(LONG *freeOut, LONG *countOut);   // 29_npc_pop.c, crash line + status
 static void CutsceneDetectTick(void);        // per-frame; see 21_cutscene_shadow.c
 static void LogFlushNow(void);               // defined in 19_boot_install.c
 #if ENABLE_CRASH_LOG

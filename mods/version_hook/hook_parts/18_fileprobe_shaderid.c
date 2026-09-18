@@ -260,7 +260,18 @@ static void LogD3DWindow(void)
                 LogLine(line);
             }
             if (g_npcPopLength > 0 || g_npcDepopLength > 0 || g_npcPoolA || g_npcPoolB || g_npcPoolC) {
-                sprintf(line, "[npc] pop=%ld depop=%ld writes=%ld pools A=%ld B=%ld C=%ld", g_npcPopLength, g_npcDepopLength, g_npcPopWrites, g_npcPoolA, g_npcPoolB, g_npcPoolC);
+                // actors: SceneActor pool free/capacity, low-water since the
+                // previous line, the mob cap in force when the governor holds
+                // it under the setting, whether distances are held at the
+                // engine's values, cuts so far. free=-1: pool not located
+                // (governor idle).
+                LONG minFree = InterlockedExchange(&g_npcActorsMinFree, -1);
+                sprintf(line, "[npc] pop=%ld depop=%ld writes=%ld pools A=%ld B=%ld C=%ld | actors free=%ld/%ld min=%ld eff C=%ld dist=%s reserve=%ld cuts=%ld",
+                        g_npcPopLength, g_npcDepopLength, g_npcPopWrites, g_npcPoolA, g_npcPoolB, g_npcPoolC,
+                        g_npcActorsFree, g_npcActorsCount, minFree,
+                        g_npcPoolCEff ? g_npcPoolCEff : (g_npcPoolC ? g_npcPoolC : 20),
+                        g_npcGovVanillaDist ? "engine" : "extended",
+                        g_npcActorReserve, g_npcGovCuts);
                 LogLine(line);
             }
 #if ENABLE_SHADOW_PCSS

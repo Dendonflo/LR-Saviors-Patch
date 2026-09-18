@@ -713,7 +713,16 @@ static void DrawStatusPanel(HDC dc)
         else {
             sprintf(set, "extended %ld/%ld", g_npcPopLength, g_npcDepopLength);
             if (!g_npcPopWrites) sprintf(app, "not written yet");
-            else sprintf(app, "%s, mob cap %ld", live ? "written" : "in force", g_npcPoolC ? g_npcPoolC : 20);
+            else {
+                // Governor (29): the cap in force can sit under the setting
+                // while SceneActors are scarce; show both, and the pool.
+                LONG capC = g_npcPoolCEff ? g_npcPoolCEff : (g_npcPoolC ? g_npcPoolC : 20);
+                if (g_npcActorsFree >= 0)
+                    sprintf(app, "%s, mob cap %ld/%ld, actors %ld/%ld free", live ? "written" : "in force",
+                            capC, g_npcPoolC ? g_npcPoolC : 20, g_npcActorsFree, g_npcActorsCount);
+                else
+                    sprintf(app, "%s, mob cap %ld", live ? "written" : "in force", capC);
+            }
         }
         StatRow(dc, &y, "NPC spawning", set, app, g_npcSpawnFix && !g_npcPopWrites);
     }

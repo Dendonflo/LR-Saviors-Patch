@@ -1,7 +1,7 @@
 ================================================================
  SAVIOR'S PATCH
  for Lightning Returns: Final Fantasy XIII (Steam)
- Version 1.1
+ Version 1.1.3
 ================================================================
 
 This mod reduces stutters, improves the framerate of the game,
@@ -59,7 +59,11 @@ New entries you will find under Graphics:
 			/!\ As NPCs spawning is a cause of 
 			stuttering this mod tries to mitigate,
 			it could reintroduce small hitches, 
-			try it out and revert if it causes issues
+			try it out and revert if it causes issues.
+			The game has a fixed budget of scene
+			actors; in the very densest crowds a few
+			background walkers step out while it is
+			short and come back afterwards.
  - MSAA ............... up to 8x
  - SSAA ............... up to 2x supersampling
  - FXAA ............... the game's built-in blur filter, now
@@ -77,6 +81,20 @@ The Ambient Occlusion and Shadow tuning panels each have a mode
 selector at the top and a Reset button that only resets the mode
 currently selected, so trying PCSS never loses your AO numbers.
 
+
+----------------------------------------------------------------
+ NEW IN 1.1.3
+----------------------------------------------------------------
+
+ - Fixed a crash with NPC Spawning Distance set to Extended in
+   dense crowds (reported in Yusnaan's Reveler's Quarter when
+   Flanitors turn hostile). The game has a hard budget of 144
+   scene actors and crashed when Extended plus a fight used them
+   all; the mod now keeps a reserve free (NpcActorReserve in
+   SaviorsPatch.ini, default 32) by thinning the random crowd
+   first, and only ever down to the game's own numbers.
+ - Existing settings files carry over; the new key appears with
+   its default on the next settings change.
 
 ----------------------------------------------------------------
  NEW IN 1.1

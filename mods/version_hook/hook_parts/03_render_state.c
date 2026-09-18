@@ -725,6 +725,19 @@ static volatile LONG g_npcPoolA = 0;
 static volatile LONG g_npcPoolB = 0;
 static volatile LONG g_npcPoolC = 80;
 static volatile LONG g_npcMobWindow = 0;        // POPWNearLenMob override, 0 = follow pop distance
+// SceneActor budget governor (29_npc_pop.c). The engine reserves 144
+// SceneActors (Scene.cpp) and a field chara whose actor could not be
+// created crashes in its AI activate (CRASHES.md 2026-09-18, Yusnaan). The
+// governor lowers the EFFECTIVE mob cap, then falls back to the engine's
+// own distances, while fewer than NpcActorReserve actors are free, and
+// ramps back. Floors are exactly vanilla, never below. 0 = governor off.
+static volatile LONG g_npcActorReserve = 32;
+static volatile LONG g_npcPoolCEff = 0;         // cap in force for C (0 = follow g_npcPoolC)
+static volatile LONG g_npcGovVanillaDist = 0;   // 1 = distances held at the engine's values
+static volatile LONG g_npcActorsFree = -1;      // last sample (-1 = pool not located)
+static volatile LONG g_npcActorsCount = 0;
+static volatile LONG g_npcActorsMinFree = -1;   // low-water since the last [npc] line
+static volatile LONG g_npcGovCuts = 0;          // cap cuts so far (session)
 
 // Cutscene-aware override. Cutscenes are authored against the engine's own
 // cascade splits, so scaling them breaks shadows in some of them (reported in

@@ -515,6 +515,20 @@ static LONG CALLBACK ModCrashVeh(EXCEPTION_POINTERS *ep)
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
             LogLine(buf);
         }
+        // SceneActor pool state at the fault (29_npc_pop.c). The 2026-09-18
+        // Yusnaan crash was this pool running dry; the number says at once
+        // whether a future one is the same family.
+        {
+            LONG freeN = -1, count = 0;
+            char l[96];
+            if (NpcActorPoolRead(&freeN, &count))
+                sprintf(l, "[crash]   scene actors free=%ld/%ld (mob cap in force %ld, distances %s)", freeN, count,
+                        g_npcPoolCEff ? g_npcPoolCEff : (g_npcPoolC ? g_npcPoolC : 20),
+                        g_npcGovVanillaDist ? "engine" : "extended");
+            else
+                sprintf(l, "[crash]   scene actors: pool not located");
+            LogLine(l);
+        }
         LogFlushNow();
     }
     return EXCEPTION_CONTINUE_SEARCH;   // never swallow it

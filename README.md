@@ -37,7 +37,12 @@ Source: https://github.com/Dendonflo/LR-Saviors-Patch — releases on Nexus Mods
 - FXAA removal, frame-rate target (30 / 60 / unlimited)
 - optional extended NPC spawning distance (placed NPCs pop in at 200 units
   instead of 80, the random-NPC window and cap raised to match; off by
-  default)
+  default). The engine has a fixed budget of 144 scene actors and crashes
+  when it runs out, so Extended is governed live against that budget
+  (`NpcActorReserve`, spare actors kept free, default 32): in the densest
+  crowds it steps back towards the game's own numbers - fewer random
+  walkers first, then the game's own distances - while actors are scarce,
+  and resumes afterwards. It never goes below what the unmodded game shows
 - a frame-time overlay that graphs the *engine tick* rather than presents.
 - a two-column status panel (version and build first) that shows every
   setting beside what is actually in force: shadows, AA, AO, NPC spawning,

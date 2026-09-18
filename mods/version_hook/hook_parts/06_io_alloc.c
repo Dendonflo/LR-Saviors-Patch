@@ -1311,6 +1311,7 @@ static const char *const g_logKeepTags[] = {
     "[shadow-filter]",
     "[lispsm]",  // projection threshold patch: install + value changes
     "[npc]",     // FieldGlobal table proof + override status, a dozen lines once
+    "[mark]",    // the Mark Log button - lost a vanilla run's marks 2026-09-18
 };
 
 static int LogLineWanted(const char *msg)

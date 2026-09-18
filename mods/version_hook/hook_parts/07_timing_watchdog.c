@@ -540,6 +540,11 @@ __declspec(noinline) int __cdecl OnEnter_ac3040_C(void *r)
     CutsceneDetectTick();
     ApplyCascadeSplitSource();
     ApplyShadowFilterRadius();
+    // SceneActor budget (29_npc_pop.c): reads two dwords per frame, writes a
+    // cap immediate only on a change. Per frame for the same reason as the
+    // splits: the field manager admits NPCs every frame, and a 500 ms
+    // reaction is 30 frames of activations into a 144-actor pool.
+    NpcActorGovernorTick();
 
     g_frameStartUsec = NowUsec();
     InterlockedIncrement(&g_frameSeq);

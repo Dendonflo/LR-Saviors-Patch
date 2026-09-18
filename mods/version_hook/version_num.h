@@ -3,5 +3,5 @@
 // include this. Bump here for each release.
 #define MOD_VER_MAJOR   1
 #define MOD_VER_MINOR   1
-#define MOD_VER_PATCH   2
-#define MOD_VERSION_STR "1.1.2"
+#define MOD_VER_PATCH   3
+#define MOD_VERSION_STR "1.1.3"

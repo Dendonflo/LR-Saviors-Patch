@@ -23,6 +23,11 @@
 
 // g_npcPopWrites lives in 03_render_state.c (status line in 18 reads it).
 static LONG g_npcLogged = 0;
+// The loader's own values for the three rows we write, latched each time it
+// runs (it rewrites +0x14 on every field load, before our first write lands
+// on the monitor tick). These are what the governor falls back to; the WDB
+// numbers (80 / 100 / 150) stand in until the first field load.
+static float g_npcEnginePop = 80.0f, g_npcEngineDepop = 100.0f, g_npcEngineMob = 150.0f;
 
 static float *FgLiveSlot(int idx, const char *expectName)
 {
@@ -51,8 +56,14 @@ static void ApplyNpcPopDistances(void)
         {
             static float lastNear = -1.0f;
             float *nearL = FgLiveSlot(33, "POPWNearLength");
+            float *nearMob = FgLiveSlot(FG_IDX_NEARLEN_MOB, "POPWNearLenMob");
             float cur = nearL ? *nearL : -1.0f;
-            if (cur != lastNear && cur != 0.0f) { lastNear = cur; g_npcLogged = 0; }
+            if (cur != lastNear && cur != 0.0f) {
+                lastNear = cur; g_npcLogged = 0;
+                // The loader has just run: the rows hold ITS values right now.
+                if (*pop > 0.0f && *depop > *pop) { g_npcEnginePop = *pop; g_npcEngineDepop = *depop; }
+                if (nearMob && *nearMob > 0.0f) g_npcEngineMob = *nearMob;
+            }
         }
         if (g_npcLogged == 0 && *pop > 0.0f) {
             // Layout proof: every POP*/FE* record's name and live value.
@@ -73,8 +84,14 @@ static void ApplyNpcPopDistances(void)
         // next field load, and until then the last written value stands (a
         // distance, harmless). Restore immediately from the exe default at
         // +0x10 is NOT done: that slot is the exe fallback, not the WDB value.
-        float wantPop   = (g_npcSpawnFix && g_npcPopLength   > 0) ? (float)g_npcPopLength   : 0.0f;
-        float wantDepop = (g_npcSpawnFix && g_npcDepopLength > 0) ? (float)g_npcDepopLength : 0.0f;
+        // Governor fallback: hold the rows at the loader's own values - the
+        // engine's behaviour exactly, far NPCs step out, nothing within the
+        // engine's own range is touched. Written explicitly (not "stop
+        // writing"), because our last value would otherwise stand until the
+        // next field load.
+        int vanilla = g_npcSpawnFix && g_npcGovVanillaDist;
+        float wantPop   = vanilla ? g_npcEnginePop   : (g_npcSpawnFix && g_npcPopLength   > 0) ? (float)g_npcPopLength   : 0.0f;
+        float wantDepop = vanilla ? g_npcEngineDepop : (g_npcSpawnFix && g_npcDepopLength > 0) ? (float)g_npcDepopLength : 0.0f;
         if (wantPop > 0.0f && wantDepop <= 0.0f && *depop < wantPop + 20.0f) wantDepop = wantPop + 20.0f;
         if (wantPop > 0.0f && *pop != wantPop) {
             *pop = wantPop; *(LONG *)((unsigned char *)pop + 4) = (LONG)wantPop;
@@ -89,7 +106,8 @@ static void ApplyNpcPopDistances(void)
         // ones gated at 150 - the "diluted" look. Follow the pop distance.
         {
             float *nearMob = FgLiveSlot(FG_IDX_NEARLEN_MOB, "POPWNearLenMob");
-            float wantMob = !g_npcSpawnFix ? 0.0f : g_npcMobWindow > 0 ? (float)g_npcMobWindow
+            float wantMob = !g_npcSpawnFix ? 0.0f : vanilla ? g_npcEngineMob
+                          : g_npcMobWindow > 0 ? (float)g_npcMobWindow
                           : (wantPop > 0.0f && wantPop + 50.0f > 150.0f) ? wantPop + 50.0f : 0.0f;
             if (nearMob && wantMob > 0.0f && *nearMob != wantMob) {
                 *nearMob = wantMob; *(LONG *)((unsigned char *)nearMob + 4) = (LONG)wantMob;
@@ -144,17 +162,31 @@ static void InstallNpcPoolPatch(unsigned char *base)
     LogLine("[npc] pool immediates located (A=0x80 pair, B=0x30 pair, C=0x14)");
 }
 
+// Two writers share these sites since the governor: the monitor thread
+// (ApplyNpcPools, 500 ms) and the main thread (NpcActorGovernorTick, per
+// frame). Both toggle the SAME page's protection, so without a lock one
+// thread's restore can land between the other's unprotect and its store -
+// an access violation inside our own DLL. Short spin, the section is a
+// few hundred instructions. tag NULL = silent (the governor's per-frame
+// path; its own line reports the cuts).
+static volatile LONG g_npcPoolWriteLock = 0;
+
 static void NpcPoolWrite(unsigned char *site, int immOff, DWORD want, DWORD engine, const char *tag)
 {
-    DWORD cur = *(DWORD *)(site + immOff);
     DWORD v = want ? want : engine;
-    DWORD oldProtect;
-    if (cur == v) return;
-    if (!VirtualProtect(site + immOff, 4, CODE_PAGE_WRITABLE, &oldProtect)) return;
-    *(DWORD *)(site + immOff) = v;
-    VirtualProtect(site + immOff, 4, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), site, 8);
-    {
+    DWORD cur, oldProtect;
+    if (*(DWORD *)(site + immOff) == v) return;
+    while (InterlockedCompareExchange(&g_npcPoolWriteLock, 1, 0) != 0) YieldProcessor();
+    cur = *(DWORD *)(site + immOff);
+    if (cur != v && VirtualProtect(site + immOff, 4, CODE_PAGE_WRITABLE, &oldProtect)) {
+        *(DWORD *)(site + immOff) = v;
+        VirtualProtect(site + immOff, 4, oldProtect, &oldProtect);
+        FlushInstructionCache(GetCurrentProcess(), site, 8);
+    } else {
+        cur = v;
+    }
+    InterlockedExchange(&g_npcPoolWriteLock, 0);
+    if (cur != v && tag) {
         char l[96];
         sprintf(l, "[npc] pool %s: %lu -> %lu", tag, cur, v);
         LogLine(l);
@@ -169,13 +201,155 @@ static void NpcPoolWrite(unsigned char *site, int immOff, DWORD want, DWORD engi
 // 0x14 = 20, C) is the mob NPCs; A (128) placed NPCs, B (48) probably
 // enemies.
 // Monitor cadence, after ApplyNpcPopDistances.
+// The mob cap written is the EFFECTIVE one (g_npcPoolCEff), which the
+// governor below may hold under the configured value; 0 there means
+// "follow the setting". Off = engine values, governor idle.
 static void ApplyNpcPools(void)
 {
     if (!g_npcPoolPatched) return;
     __try {
         int on = g_npcSpawnFix != 0;
+        LONG c = g_npcPoolCEff ? g_npcPoolCEff : g_npcPoolC;
         NpcPoolWrite(g_npcPoolSiteA, 1, on ? (DWORD)g_npcPoolA : 0, 0x80, "A");
         NpcPoolWrite(g_npcPoolSiteB, 1, on ? (DWORD)g_npcPoolB : 0, 0x30, "B");
-        NpcPoolWrite(g_npcPoolSiteC, 3, on ? (DWORD)g_npcPoolC : 0, 0x14, "C");
+        NpcPoolWrite(g_npcPoolSiteC, 3, on ? (DWORD)c : 0, 0x14, "C");
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+// ---- SceneActor budget governor ------------------------------------------
+// The hard limit the caps above were believed not to have (POST_BETA_PLAN
+// "no array is sized by a cap") exists one layer down: the scene object
+// manager reserves 144 SceneActors (Scene.cpp, table DAT_0208ff74 = {8,
+// 144, 48, 4, 1, 48} per object type, type 1 = actor) out of a 256-entry
+// handle table shared by every type, so it cannot simply be raised. The
+// actors live in a GfMemBlockBuffer at DAT_024d1768: +4 capacity, +8
+// element size (0xa50), +0xc/+0x10 range, +0x14 free-list head, +0x18 FREE
+// COUNT. SceneObjectManager::Create (FUN_006664b0) returns handle -1 when
+// the pool is empty (a dev-build warning, silent in retail) and nothing on
+// the field side checks: the chara is activated anyway, its actor handle
+// resolves to the manager's placeholder SceneObject, AsActor() on that is
+// NULL, and the AI activate (AIcomG_AreaRdm, FUN_005efb90) reads the name
+// at NULL+0x348. That is the Yusnaan crash of 2026-09-18 (CRASHES.md),
+// reached with the shipped Extended preset (mob cap 80 + pop 200) in the
+// Reveler's Quarter crowd once two Flanitors turned hostile.
+//
+// Engine defaults (128 placed + 20 mob + 48 enemies) already exceed 144 on
+// paper; the levels were authored so it never happens at pop 80. Extended
+// breaks that assumption, so this keeps it by feedback instead, with
+// VANILLA AS THE FLOOR at every stage - the governor can only take back
+// what Extended added, never less than the engine's own behaviour, so an
+// NPC vanilla would show is never held back:
+//
+//   stage 1  the mob cap is cut by the deficit, down to the engine's 20.
+//            The manager deactivates the lowest-priority actives beyond a
+//            cap on its next update (FUN_005a02f0's grant loop counts the
+//            cap down over kept + new). Mob = category 1, the random
+//            walkers (AIcomG_AreaRdm); placed NPCs are category 0 and are
+//            NOT capped by this - their order within their own category is
+//            the engine's, unverified, so their cap is left alone.
+//   stage 2  still short with the mob cap at 20: the pop / depop / mob
+//            window rows go back to the loader's own values (80/100/150),
+//            so the far NPCs that only exist because of Extended step out.
+//            Anything within the engine's own range is untouched.
+//
+// Above reserve + 8, stage 2 lifts first (the placed NPCs are the authored
+// ones), then the mob cap is raised by the SURPLUS (free - reserve - 8)
+// once per 15 frames: every walker admitted takes one actor, so the raise
+// cannot push free under the reserve by itself, and a jump straight to the
+// setting would (the manager admits everything the cap allows on its next
+// update, then the cut fires - visible pop-in/pop-out). The 15-frame
+// spacing covers activations whose model is still streaming and take
+// their actor a few frames late. A zone load transient (run 4, 2026-09-18:
+// old and new area actors alive together, free 11, cap driven to 20)
+// recovers in about a second instead of the 15 s a one-per-step ramp
+// took. Cuts are
+// rate-limited to one per 20 frames because a deactivation frees its actor
+// a little later, not the same frame - except under half the reserve,
+// where the next frame cuts again: the 2026-09-18 run 2 saw an aggro burst
+// take ~20 actors inside 500 ms and the timer alone let free fall to 8 of
+// a 16 reserve. Self-validating: element size and
+// capacity are checked before the pool is trusted, and a mismatch leaves
+// everything alone.
+#define SCENE_ACTOR_POOL_RVA  (0x024d1768 - 0x00400000)
+#define SCENE_ACTOR_ELEM_SIZE 0xa50
+#define NPC_GOV_FLOOR_C       20      // engine mob cap
+#define NPC_GOV_HYSTERESIS    8
+#define NPC_GOV_CUT_FRAMES    20
+#define NPC_GOV_RAMP_FRAMES   15
+
+static int NpcActorPoolRead(LONG *freeOut, LONG *countOut)
+{
+    if (g_mainModBase == 0) return 0;
+    __try {
+        unsigned char *pool = *(unsigned char **)((unsigned char *)g_mainModBase + SCENE_ACTOR_POOL_RVA);
+        if (!pool) return 0;
+        {
+            LONG count = *(LONG *)(pool + 0x4);
+            LONG freeN = *(LONG *)(pool + 0x18);
+            DWORD elem = *(DWORD *)(pool + 0x8) & 0x7fffffff;
+            if (elem != SCENE_ACTOR_ELEM_SIZE || count <= 0 || count > 4096 || freeN < 0 || freeN > count)
+                return 0;
+            *freeOut = freeN;
+            *countOut = count;
+            return 1;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+static void NpcActorGovernorTick(void)
+{
+    static LONG sinceCut = 0, sinceRamp = 0;
+    LONG freeN, count;
+    LONG reserve = g_npcActorReserve;
+    LONG wantC = g_npcPoolC ? g_npcPoolC : NPC_GOV_FLOOR_C;
+    LONG floorC = wantC < NPC_GOV_FLOOR_C ? wantC : NPC_GOV_FLOOR_C;
+    LONG effC, vanilla, wasVanilla;
+    if (!NpcActorPoolRead(&freeN, &count)) { g_npcActorsFree = -1; return; }
+    g_npcActorsFree = freeN;
+    g_npcActorsCount = count;
+    if (g_npcActorsMinFree < 0 || freeN < g_npcActorsMinFree) g_npcActorsMinFree = freeN;
+    if (!g_npcPoolPatched || !g_npcSpawnFix || reserve <= 0) {
+        g_npcPoolCEff = 0;
+        if (g_npcGovVanillaDist) { g_npcGovVanillaDist = 0; ApplyNpcPopDistances(); }
+        return;
+    }
+    effC = g_npcPoolCEff ? g_npcPoolCEff : wantC;
+    if (effC > wantC) effC = wantC;      // setting lowered under us
+    vanilla = wasVanilla = g_npcGovVanillaDist;
+    sinceCut++; sinceRamp++;
+    if (freeN < reserve) {
+        if (sinceCut >= NPC_GOV_CUT_FRAMES || freeN < reserve / 2) {
+            LONG deficit = reserve - freeN;
+            LONG cutC = effC - floorC; if (cutC > deficit) cutC = deficit; if (cutC < 0) cutC = 0;
+            effC -= cutC;
+            if (cutC == 0 && effC <= floorC) vanilla = 1;   // stage 2
+            if (cutC || vanilla != wasVanilla) {
+                char l[160];
+                InterlockedIncrement(&g_npcGovCuts);
+                sprintf(l, "[npc] actors free=%ld/%ld under reserve %ld - mob cap %ld%s",
+                        freeN, count, reserve, effC, vanilla ? ", distances at engine values" : "");
+                LogLine(l);
+            }
+            sinceCut = 0;
+        }
+    } else if (freeN > reserve + NPC_GOV_HYSTERESIS && sinceRamp >= NPC_GOV_RAMP_FRAMES) {
+        // Distances first (the placed NPCs are the authored ones), mobs after.
+        LONG surplus = freeN - reserve - NPC_GOV_HYSTERESIS;
+        if (vanilla) vanilla = 0;
+        else if (effC < wantC) { effC += surplus; if (effC > wantC) effC = wantC; }
+        sinceRamp = 0;
+    }
+    g_npcPoolCEff = (effC == wantC) ? 0 : effC;
+    g_npcGovVanillaDist = vanilla;
+    // Apply here too: the monitor's 500 ms cadence is 30 frames of new
+    // activations at 60 fps, long enough to empty the reserve.
+    __try {
+        NpcPoolWrite(g_npcPoolSiteC, 3, (DWORD)effC, 0x14, NULL);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (vanilla != wasVanilla) {
+        ApplyNpcPopDistances();
+        if (!vanilla) LogLine("[npc] actors recovered - extended distances resumed");
+    }
 }
